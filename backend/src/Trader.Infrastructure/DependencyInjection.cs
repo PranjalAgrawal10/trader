@@ -56,8 +56,16 @@ public static class DependencyInjection
                 ?? configuration.GetConnectionString("DefaultConnection");
 
             if (string.IsNullOrWhiteSpace(conn))
+            {
+                var hasProcCs = Environment.GetEnvironmentVariable("ConnectionStrings__MySQL") is { Length: > 0 };
                 throw new InvalidOperationException(
-                    "ConnectionStrings:MySQL (or DefaultConnection) is required when Database:Provider is MySQL.");
+                    "MySQL connection string is missing. " +
+                    "`appsettings.json` sets `Database:Provider` to **MySQL** but `ConnectionStrings:MySQL` is empty after configuration loads. " +
+                    $"Process env **ConnectionStrings__MySQL** present={(hasProcCs ? "yes" : "no")}. " +
+                    "On DigitalOcean App Platform, add **ConnectionStrings__MySQL** to the **same Web Service** as the API, scope **RUN_TIME**, **Encrypt** the value. " +
+                    "Use a Pomelo-style string (e.g. `Server=...;Port=25060;Database=...;User Id=...;Password=...;SslMode=Required;` for managed MySQL). " +
+                    "Name must use double underscores: `ConnectionStrings__MySQL`, not `DATABASE_URL`, unless you map it yourself.");
+            }
 
             var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
             services.AddDbContext<TraderDbContext>(options =>

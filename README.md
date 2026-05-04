@@ -224,7 +224,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 
 **Troubleshooting — `JWT is not configured` / readiness `connection refused` on 8080:** The API process crashes **before** Kestrel listens, so probes fail. Add **`Jwt__Issuer`**, **`Jwt__Audience`**, and **`Jwt__Key`** (≥ 32 characters) to the **Web Service** component with scope **RUN_TIME** (not only BUILD_TIME, and not only on the static site). Add **`Cors__Origins__0`** the same way or the next startup error will be about CORS. Names must use **`__`** (e.g. **`Jwt__Key`**), not colons.
 
-## Testing
+**Troubleshooting — `ConnectionStrings:MySQL is required`:** The default **`Database:Provider`** is **MySQL** in `appsettings.json`. Set **`ConnectionStrings__MySQL`** on the **Web Service** (**RUN_TIME**, encrypt) to your full connection string, or the app never reaches DI completion. Same rules: attach vars to the **API** component, not only the static site.
 
 ```bash
 cd backend
