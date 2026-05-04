@@ -119,7 +119,7 @@ Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MyS
 
 **404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
 
-1. **API calls return 404** — the browser requests `https://<your-app>/api/v1/...`. If ingress sends `/api` traffic to the static site, or **strips** the `/api` prefix before the .NET service, Kestrel sees the wrong path (for example `/v1/...` instead of `/api/v1/...`) and returns 404. Fix in the app **ingress** (Settings → your app → **Ingress** or edit the app spec): add a rule with path prefix **`/api`** pointing at your **Web Service** (API) component and set **`preserve_path_prefix: true`**. List the **`/api` rule before** the catch‑all **`/`** rule that serves the **Static Site**. Then set **`apps/web/.env.production`** `VITE_API_BASE_URL` to the **same public origin** as the SPA (no path); the client already uses `/api/v1` on that origin.
+1. **API calls return 404** — the browser requests `https://<your-app>/api/v1/...`. If ingress sends `/api` traffic to the static site, or **strips** the `/api` prefix before the .NET service, Kestrel sees the wrong path (for example `/v1/...` instead of `/api/v1/...`) and returns 404. Fix in the app **ingress** (Settings → your app → **Ingress** or edit the app spec): add a rule with path prefix **`/api`** pointing at your **Web Service** (API) component and set **`preserve_path_prefix: true`**. List the **`/api` rule before** the catch‑all **`/`** rule that serves the **Static Site**. Then set **`apps/web/.env.production`** — or the static site’s **BUILD_TIME** env **`VITE_API_BASE_URL`** — to the **same public origin** as the SPA when both are one hostname (optional if you rely on same-origin fallback in `src/api/client.ts`). No path segment; the client appends `/api/v1`.
 2. **Refreshing a deep link (e.g. `/brokers`) returns 404** — the static host has no file at that path. In the **Static Site** component, under **Custom Pages**, set **Catchall** to **`index.html`** (see [Manage static sites — Custom Pages](https://docs.digitalocean.com/products/app-platform/how-to/manage-static-sites/)). The web build also emits **`404.html`** (copy of `index.html`) for hosts that use a custom error page.
 
 #### Zerodha Kite Connect
@@ -138,11 +138,13 @@ The API exchanges the `request_token` at Kite’s token endpoint and stores **en
 | File | Purpose |
 |------|---------|
 | `.env.development` | `VITE_API_BASE_URL`, optional `VITE_DEV_SERVER_PORT`, `VITE_API_PROXY_TARGET` |
-| `.env.production` | Production API URL for builds |
+| `.env.production` | Optional: production API origin. If unset in the production **build**, the client uses **`window.location.origin`** when the SPA and API share the same host and ingress serves `/api` on that host. |
+
+See `apps/web/.env.example`. Only variables prefixed with `VITE_` are exposed to the browser.
 
 The SPA uses **React Bootstrap** (components) and **Bootstrap 5** (CSS); `index.html` sets `data-bs-theme="dark"`.
 
-See `apps/web/.env.example`. Only variables prefixed with `VITE_` are exposed to the browser.
+Example **DigitalOcean App Platform** layout: `.do/app.yaml` (ingress **`/api` →** API, **`/` →** static site; static build may set **`VITE_API_BASE_URL`** at **BUILD_TIME** when the API lives on a different origin).
 
 ## Testing
 
