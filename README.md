@@ -1,26 +1,31 @@
 # Trader
 
-Monorepo for a trading console: a **.NET 8** REST API with **JWT** auth, **EF Core** + **MySQL**, and a **React (Vite + TypeScript)** web UI for strategies, bots, trades, and broker onboarding.
+This repository contains **two deployable projects**: **`backend/`** (.NET 8 API) and **`frontend/`** (Vite + React). They can stay in one Git repo or be pushed to **separate remotes** (copy each folder into its own repository root if you split).
+
+Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React (TypeScript)** UI for strategies, bots, trades, and broker onboarding.
 
 ## Prerequisites
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 - [**dotnet-ef** global tool](https://learn.microsoft.com/ef/core/cli/dotnet) if you rely on **post-build migrations** from `Trader.Api` (or run `dotnet ef` manually): `dotnet tool install --global dotnet-ef`
-- [Node.js](https://nodejs.org/) 18+ (for `apps/web`)
+- [Node.js](https://nodejs.org/) 18+ (for `frontend/`)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (optional; recommended for MySQL via Compose)
 
 ## Repository layout
 
 | Path | Purpose |
 |------|---------|
-| `src/Trader.Api` | ASP.NET Core host, controllers (`/api/v1/...`), Swagger, CORS |
-| `src/Trader.Application` | Use cases, DTOs, abstractions (`Abstractions/Persistence`, `Abstractions/Security`) |
-| `src/Trader.Domain` | Entities and enums |
-| `src/Trader.Infrastructure` | EF Core (`TraderDbContext`), MySQL (Pomelo), repositories, migrations |
-| `apps/web` | Vite + React SPA |
-| `tests/Trader.Tests` | Integration tests (`WebApplicationFactory`) |
-| `docker/` | API Dockerfile |
-| `docker-compose.yml` | MySQL, Redis (service only), API |
+| `backend/Trader.sln` | .NET solution |
+| `backend/src/Trader.Api` | ASP.NET Core host, controllers (`/api/v1/...`), Swagger, CORS |
+| `backend/src/Trader.Application` | Use cases, DTOs, abstractions (`Abstractions/Persistence`, `Abstractions/Security`) |
+| `backend/src/Trader.Domain` | Entities and enums |
+| `backend/src/Trader.Infrastructure` | EF Core (`TraderDbContext`), MySQL (Pomelo), repositories, migrations |
+| `frontend/` | Vite + React SPA |
+| `backend/tests/Trader.Tests` | Integration tests (`WebApplicationFactory`) |
+| `backend/docker/` | API Dockerfile |
+| `docker-compose.yml` | MySQL, Redis (service only), API (repo root; build context `backend/`) |
+
+To use **two separate Git repositories**, copy **`backend/`** contents to the backend repo root (so `Trader.sln` is at that root) and **`frontend/`** contents to the frontend repo root (so `package.json` is at that root). Point **DigitalOcean** `source_dir` to **`/`** for each app and keep the same ingress pattern, or deploy from this monorepo as configured in **`.do/app.yaml`**.
 
 ## Quick start (local)
 
@@ -32,23 +37,25 @@ Start MySQL locally or via Docker. Example using Compose (MySQL only):
 docker compose up mysql -d
 ```
 
-Database host defaults to **localhost:3306**; user, password, and database name are set in `src/Trader.Api/.env.development` (`ConnectionStrings__MySQL`). Adjust to match your MySQL install (Docker Compose still uses the `trader` MySQL user unless you change Compose too).
+Database host defaults to **localhost:3306**; user, password, and database name are set in `backend/src/Trader.Api/.env.development` (`ConnectionStrings__MySQL`). Adjust to match your MySQL install (Docker Compose still uses the `trader` MySQL user unless you change Compose too).
 
 With **`ASPNETCORE_ENVIRONMENT=Development`** and **`Database:Provider=MySQL`**, the API **creates the database if it does not exist** and runs **`Migrate()`** on startup so tables stay up to date. You can still apply migrations manually (below) if you prefer.
 
 ### 2. Apply EF Core migrations (optional in Development)
 
-From the repository root:
+From the `backend/` directory:
 
 ```bash
+cd backend
 dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
 ```
 
-Use this for **Production** or whenever you want to migrate without building/running the API. Migrations live under `src/Trader.Infrastructure/Migrations/`.
+Use this for **Production** or whenever you want to migrate without building/running the API. Migrations live under `backend/src/Trader.Infrastructure/Migrations/`.
 
 Optionally, you can run **`dotnet ef database update`** automatically after every **`dotnet build`** of **`Trader.Api`** by opting in (requires the **`dotnet-ef`** global tool and a reachable DB per your env):
 
 ```bash
+cd backend
 dotnet build -p:RunEfMigrationsOnBuild=true
 ```
 
@@ -57,6 +64,7 @@ dotnet build -p:RunEfMigrationsOnBuild=true
 ### 3. Run the API
 
 ```bash
+cd backend
 dotnet run --project src/Trader.Api
 ```
 
@@ -65,12 +73,12 @@ dotnet run --project src/Trader.Api
 - Health: `GET /health`.
 - API routes are versioned (e.g. `GET /api/v1/...`).
 
-Configuration merges `appsettings*.json` with optional **`.env`** / **`.env.<environment>`** files under `src/Trader.Api` (see [Configuration](#configuration)). **Integration tests** use `appsettings.IntegrationTesting.json` + an in-memory database and do not load `.env`.
+Configuration merges `appsettings*.json` with optional **`.env`** / **`.env.<environment>`** files under `backend/src/Trader.Api` (see [Configuration](#configuration)). **Integration tests** use `appsettings.IntegrationTesting.json` + an in-memory database and do not load `.env`.
 
 ### 4. Run the web app
 
 ```bash
-cd apps/web
+cd frontend
 npm install
 npm run dev
 ```
@@ -81,6 +89,7 @@ npm run dev
 Production build:
 
 ```bash
+cd frontend
 npm run build
 ```
 
@@ -100,7 +109,7 @@ The `api` service sets connection string host `mysql`, JWT, CORS, etc. The UI st
 
 ## Configuration
 
-### API (`src/Trader.Api`)
+### API (`backend/src/Trader.Api`)
 
 | Mechanism | Notes |
 |-----------|--------|
@@ -109,7 +118,7 @@ The `api` service sets connection string host `mysql`, JWT, CORS, etc. The UI st
 | `.env` / `.env.development` / `.env.production` | Optional; merged into configuration. Use `__` in keys (e.g. `ConnectionStrings__MySQL`); the API maps these to nested keys (`ConnectionStrings:MySQL`), matching OS environment-variable conventions. |
 | Environment variables | Override files (e.g. in Docker/Kubernetes) |
 
-See `src/Trader.Api/.env.example`. Local overrides can go in `.env.local` (gitignored). Values loaded from `.env` / `.env.*` are merged after default configuration; **blank values in those files are ignored** so they do not wipe out real environment variables on hosts like App Platform.
+See `backend/src/Trader.Api/.env.example`. Local overrides can go in `.env.local` (gitignored). Values loaded from `.env` / `.env.*` are merged after default configuration; **blank values in those files are ignored** so they do not wipe out real environment variables on hosts like App Platform.
 
 Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MySQL`**, **JWT** (`Issuer`, `Audience`, `Key` ≥ 32 chars), and **CORS** origins (`Cors:Origins` or `Cors__Origins__0`, etc.).
 
@@ -119,7 +128,7 @@ Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MyS
 
 **404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
 
-1. **API calls return 404** — the browser requests `https://<your-app>/api/v1/...`. If ingress sends `/api` traffic to the static site, or **strips** the `/api` prefix before the .NET service, Kestrel sees the wrong path (for example `/v1/...` instead of `/api/v1/...`) and returns 404. Fix in the app **ingress** (Settings → your app → **Ingress** or edit the app spec): add a rule with path prefix **`/api`** pointing at your **Web Service** (API) component and set **`preserve_path_prefix: true`**. List the **`/api` rule before** the catch‑all **`/`** rule that serves the **Static Site**. Then set **`apps/web/.env.production`** — or the static site’s **BUILD_TIME** env **`VITE_API_BASE_URL`** — to the **same public origin** as the SPA when both are one hostname (optional if you rely on same-origin fallback in `src/api/client.ts`). No path segment; the client appends `/api/v1`.
+1. **API calls return 404** — the browser requests `https://<your-app>/api/v1/...`. If ingress sends `/api` traffic to the static site, or **strips** the `/api` prefix before the .NET service, Kestrel sees the wrong path (for example `/v1/...` instead of `/api/v1/...`) and returns 404. Fix in the app **ingress** (Settings → your app → **Ingress** or edit the app spec): add a rule with path prefix **`/api`** pointing at your **Web Service** (API) component and set **`preserve_path_prefix: true`**. List the **`/api` rule before** the catch‑all **`/`** rule that serves the **Static Site**. Then set **`frontend/.env.production`** — or the static site’s **BUILD_TIME** env **`VITE_API_BASE_URL`** — to the **same public origin** as the SPA when both are one hostname (optional if you rely on same-origin fallback in `frontend/src/api/client.ts`). No path segment; the client appends `/api/v1`.
 2. **Refreshing a deep link (e.g. `/brokers`) returns 404** — the static host has no file at that path. In the **Static Site** component, under **Custom Pages**, set **Catchall** to **`index.html`** (see [Manage static sites — Custom Pages](https://docs.digitalocean.com/products/app-platform/how-to/manage-static-sites/)). The web build also emits **`404.html`** (copy of `index.html`) for hosts that use a custom error page.
 
 #### Zerodha Kite Connect
@@ -133,22 +142,23 @@ The API exchanges the `request_token` at Kite’s token endpoint and stores **en
 
 - **Instruments (F&O + MCX)**: with a valid Zerodha-linked session, `GET /api/v1/broker/kite/instruments/fno-commodities` returns the full NFO, BFO, and MCX instrument rows from Kite’s daily CSV dumps (large payload; requires `Authorization: Bearer …`).
 
-### Web (`apps/web`)
+### Web (`frontend/`)
 
 | File | Purpose |
 |------|---------|
 | `.env.development` | `VITE_API_BASE_URL`, optional `VITE_DEV_SERVER_PORT`, `VITE_API_PROXY_TARGET` |
 | `.env.production` | Optional: production API origin. If unset in the production **build**, the client uses **`window.location.origin`** when the SPA and API share the same host and ingress serves `/api` on that host. |
 
-See `apps/web/.env.example`. Only variables prefixed with `VITE_` are exposed to the browser.
+See `frontend/.env.example`. Only variables prefixed with `VITE_` are exposed to the browser.
 
 The SPA uses **React Bootstrap** (components) and **Bootstrap 5** (CSS); `index.html` sets `data-bs-theme="dark"`.
 
-Example **DigitalOcean App Platform** layout: `.do/app.yaml` (ingress **`/api` →** API, **`/` →** static site; static build may set **`VITE_API_BASE_URL`** at **BUILD_TIME** when the API lives on a different origin).
+Example **DigitalOcean App Platform** layout: **`.do/app.yaml`** (**`source_dir`**: **`backend`** for the API, **`frontend`** for the static site; ingress **`/api` →** API, **`/` →** static site). Set **`VITE_API_BASE_URL`** at **BUILD_TIME** when the API lives on a different origin.
 
 ## Testing
 
 ```bash
+cd backend
 dotnet test
 ```
 

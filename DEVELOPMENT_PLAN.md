@@ -1,20 +1,20 @@
 # Trader platform — development plan
 
-This repository hosts the **API gateway** (ASP.NET Core), **web dashboard** (React + TypeScript), and infrastructure stubs for PostgreSQL and Redis. The Python trader bot is planned as a separate service (see phases below).
+This repository hosts the **API gateway** (ASP.NET Core under **`backend/`**), **web dashboard** (React + TypeScript under **`frontend/`**), and infrastructure stubs for PostgreSQL and Redis. The Python trader bot is planned as a separate service (see phases below).
 
 ## Repository layout
 
 | Path | Role |
 |------|------|
-| `Trader.sln` | .NET solution |
-| `src/Trader.Domain` | Entities and enums |
-| `src/Trader.Application` | Use cases, DTOs, repository/service interfaces |
-| `src/Trader.Infrastructure` | EF Core (`TraderDbContext`), PostgreSQL + InMemory provider switch, JWT + password hashing |
-| `src/Trader.Api` | HTTP API: versioning (`api/v1/...`), JWT auth, Swagger, controllers |
-| `tests/Trader.Tests` | xUnit + `WebApplicationFactory` smoke test (`IntegrationTesting` + InMemory DB) |
-| `apps/web` | Vite 5 + React 18 + Tailwind 3 + Zustand + Axios + Recharts |
-| `docker-compose.yml` | PostgreSQL + Redis (+ optional API image) |
-| `docker/Dockerfile.api` | Multi-stage build for `Trader.Api` |
+| `backend/Trader.sln` | .NET solution |
+| `backend/src/Trader.Domain` | Entities and enums |
+| `backend/src/Trader.Application` | Use cases, DTOs, repository/service interfaces |
+| `backend/src/Trader.Infrastructure` | EF Core (`TraderDbContext`), PostgreSQL + InMemory provider switch, JWT + password hashing |
+| `backend/src/Trader.Api` | HTTP API: versioning (`api/v1/...`), JWT auth, Swagger, controllers |
+| `backend/tests/Trader.Tests` | xUnit + `WebApplicationFactory` smoke test (`IntegrationTesting` + InMemory DB) |
+| `frontend/` | Vite 5 + React 18 + Zustand + Axios + Recharts |
+| `docker-compose.yml` | PostgreSQL + Redis (+ optional API image); API build context `backend/` |
+| `backend/docker/Dockerfile.api` | Multi-stage build for `Trader.Api` |
 
 ## Prerequisites
 
@@ -34,14 +34,16 @@ This repository hosts the **API gateway** (ASP.NET Core), **web dashboard** (Rea
 2. Apply EF migrations:
 
    ```bash
+   cd backend
    dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
    ```
 
-3. Override secrets in `src/Trader.Api/appsettings.Development.json` or user secrets: **`Jwt:Key`** must be at least 32 characters for HMAC-SHA256.
+3. Override secrets in `backend/src/Trader.Api/appsettings.Development.json` or user secrets: **`Jwt:Key`** must be at least 32 characters for HMAC-SHA256.
 
 ## Local development — API
 
 ```bash
+cd backend
 dotnet run --project src/Trader.Api
 ```
 
@@ -51,13 +53,13 @@ dotnet run --project src/Trader.Api
 ## Local development — web UI
 
 ```bash
-cd apps/web
+cd frontend
 npm install
 npm run dev
 ```
 
 - Dev server: `http://localhost:5173`
-- API base URL: `apps/web/.env.development` → `VITE_API_BASE_URL=http://localhost:5232`
+- API base URL: `frontend/.env.development` → `VITE_API_BASE_URL=http://localhost:5232`
 
 ## Configuration switches
 
@@ -73,7 +75,7 @@ npm run dev
 
 - **Backend:** Auth (register/login + JWT), strategies CRUD, bots lifecycle (create / assign strategy / start / stop), trades read API; clean layering; API versioning; Swagger + bearer auth.
 - **Frontend:** Login/register, dashboard metrics, strategies editor (JSON params), bots control panel, trades table, basic price sparkline (Recharts).
-- **Ops:** Docker Compose for Postgres/Redis; EF migrations checked in under `src/Trader.Infrastructure/Persistence/Migrations`.
+- **Ops:** Docker Compose for Postgres/Redis; EF migrations checked in under `backend/src/Trader.Infrastructure/Migrations`.
 - **Tests:** Integration smoke test for `/health` with InMemory DB.
 
 ### Phase 2 — Integration & paper trading
@@ -93,9 +95,11 @@ npm run dev
 ## Verification commands
 
 ```bash
+cd backend
 dotnet build Trader.sln
 dotnet test Trader.sln
-cd apps/web && npm run build
+cd ../frontend
+npm run build
 ```
 
 ## Next service (not in this scaffold)

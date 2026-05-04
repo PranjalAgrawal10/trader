@@ -70,6 +70,10 @@ public static class DotEnvBootstrap
                 if (File.Exists(nested))
                     return Path.GetDirectoryName(nested)!;
 
+                nested = Path.Combine(dir.FullName, "backend", "src", "Trader.Api", "Trader.Api.csproj");
+                if (File.Exists(nested))
+                    return Path.GetDirectoryName(nested)!;
+
                 var flat = Path.Combine(dir.FullName, "Trader.Api.csproj");
                 if (File.Exists(flat))
                     return dir.FullName;

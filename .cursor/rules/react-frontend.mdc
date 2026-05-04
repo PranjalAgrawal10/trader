@@ -1,10 +1,10 @@
 ---
-description: React + TypeScript conventions for apps/web
-globs: apps/web/src/**/*
+description: React + TypeScript conventions for frontend
+globs: frontend/src/**/*
 alwaysApply: false
 ---
 
-# Web app (`apps/web`)
+# Web app (`frontend`)
 
 - **Stack**: Vite, React, TypeScript; API calls via shared client (e.g. `api` from `src/api/client`). Respect `VITE_*` env vars for base URLs.
 - **UI**: **React Bootstrap** + Bootstrap 5 CSS only for layout and components (see **`react-bootstrap`** rule). No Tailwind or parallel utility CSS frameworks.

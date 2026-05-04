@@ -1,4 +1,5 @@
 # DigitalOcean App Platform — example spec (edit names, region, repo, sizes).
+# Monorepo layout: API from backend/, static site from frontend/.
 # Apply: doctl apps update <app-id> --spec .do/app.yaml
 # Ingress: /api → .NET service with full path preserved; / → Vite static app.
 
@@ -29,7 +30,7 @@ services:
       repo: YOUR_GITHUB_USER/Trader
       branch: main
       deploy_on_push: true
-    source_dir: /
+    source_dir: backend
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-0.5gb
     http_port: 8080
@@ -45,7 +46,7 @@ static_sites:
       repo: YOUR_GITHUB_USER/Trader
       branch: main
       deploy_on_push: true
-    source_dir: apps/web
+    source_dir: frontend
     build_command: npm install && npm run build
     output_dir: dist
     index_document: index.html

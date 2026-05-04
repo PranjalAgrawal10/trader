@@ -24,7 +24,7 @@ services:
 
   api:
     build:
-      context: .
+      context: ./backend
       dockerfile: docker/Dockerfile.api
     ports:
       - "5232:8080"

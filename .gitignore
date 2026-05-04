@@ -39,9 +39,9 @@ Thumbs.db
 /.env.local
 
 # Web
-apps/web/.env.local
-apps/web/.env.*.local
+frontend/.env.local
+frontend/.env.*.local
 
 # API — keep committed .env.development / .env.production templates; ignore machine-specific overrides
-src/Trader.Api/.env.local
-src/Trader.Api/.env.*.local
+backend/src/Trader.Api/.env.local
+backend/src/Trader.Api/.env.*.local

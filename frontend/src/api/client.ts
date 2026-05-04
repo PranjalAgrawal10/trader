@@ -12,7 +12,7 @@ function resolveApiBaseUrl(): string {
     return window.location.origin.replace(/\/$/, '')
 
   throw new Error(
-    'VITE_API_BASE_URL is missing. Add it to apps/web/.env.development (local) or .env.production / App Platform BUILD_TIME env.',
+    'VITE_API_BASE_URL is missing. Add it to frontend/.env.development (local) or .env.production / App Platform BUILD_TIME env.',
   )
 }
 
