@@ -12,21 +12,60 @@ public static class MySqlConnectionStringResolver
 {
     public static string? Resolve(IConfiguration configuration)
     {
-        var candidate = FirstNonEmpty(
+        var rawSources = new[]
+        {
             configuration.GetConnectionString("MySQL"),
             configuration.GetConnectionString("DefaultConnection"),
-            configuration["DATABASE_URL"]);
+            configuration["DATABASE_URL"],
+        };
 
-        candidate = NormalizeQuotedOrWrapped(candidate);
-        if (!string.IsNullOrWhiteSpace(candidate))
+        InvalidOperationException? lastResolvableError = null;
+
+        foreach (var raw in rawSources)
         {
-            if (LooksLikeMySqlUri(candidate))
-                return ConvertMySqlUriToAdoNet(candidate);
+            var candidate = NormalizeQuotedOrWrapped(raw);
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
 
-            TryValidateAdoNetOrThrow(candidate);
-            return candidate;
+            candidate = TryExpandWholeStringEnvReference(candidate);
+            candidate = NormalizeQuotedOrWrapped(candidate) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            if (LooksLikeUnresolvedEnvSubstitution(candidate))
+                continue;
+
+            try
+            {
+                if (LooksLikeMySqlUri(candidate))
+                    return ConvertMySqlUriToAdoNet(candidate);
+
+                if (TryValidateAdoNet(candidate, out var parseError))
+                    return candidate;
+
+                lastResolvableError = BuildHelpfulFormatException(
+                    candidate,
+                    detail: null,
+                    inner: parseError);
+            }
+            catch (InvalidOperationException ex)
+            {
+                lastResolvableError = ex;
+            }
         }
 
+        var discrete = TryBuildFromDiscreteDatabaseSection(configuration);
+        if (discrete != null)
+            return discrete;
+
+        if (lastResolvableError != null)
+            throw lastResolvableError;
+
+        return null;
+    }
+
+    private static string? TryBuildFromDiscreteDatabaseSection(IConfiguration configuration)
+    {
         var db = configuration.GetSection("Database");
         var host = db["Host"];
         var name = db["Name"];
@@ -59,15 +98,87 @@ public static class MySqlConnectionStringResolver
         return builder.ConnectionString;
     }
 
-    private static string? FirstNonEmpty(params string?[] values)
+    /// <summary>
+    /// Some hosts store a literal like <c>${DATABASE_URL}</c> or <c>$DATABASE_URL</c> when substitution fails.
+    /// Expand from the process environment when the whole value is a single reference.
+    /// </summary>
+    private static string TryExpandWholeStringEnvReference(string s)
     {
-        foreach (var v in values)
+        var t = s.Trim();
+        if (t.Length >= 4 && t.StartsWith("${", StringComparison.Ordinal) && t.EndsWith('}'))
         {
-            if (!string.IsNullOrWhiteSpace(v))
-                return v;
+            var name = t[2..^1].Trim();
+            if (name.Length == 0)
+                return s;
+
+            foreach (var key in EnvKeyVariants(name))
+            {
+                var v = Environment.GetEnvironmentVariable(key);
+                if (!string.IsNullOrEmpty(v))
+                    return v;
+            }
+
+            return s;
         }
 
-        return null;
+        if (t.Length >= 2
+            && t[0] == '$'
+            && !t.Contains(';')
+            && !t.Contains('=')
+            && IsSimpleDollarEnvName(t.AsSpan(1)))
+        {
+            var name = t[1..].Trim();
+            foreach (var key in EnvKeyVariants(name))
+            {
+                var v = Environment.GetEnvironmentVariable(key);
+                if (!string.IsNullOrEmpty(v))
+                    return v;
+            }
+        }
+
+        return s;
+    }
+
+    private static IEnumerable<string> EnvKeyVariants(string name)
+    {
+        yield return name;
+        if (name.Contains('.'))
+            yield return name.Replace(".", "__", StringComparison.Ordinal);
+    }
+
+    private static bool IsSimpleDollarEnvName(ReadOnlySpan<char> name)
+    {
+        if (name.IsEmpty)
+            return false;
+        for (var i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+            if (char.IsLetterOrDigit(c) || c == '_')
+                continue;
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True when the value still looks like an unexpanded app-platform / shell reference (e.g. <c>${db.URL}</c>).
+    /// Skip and try <see cref="Configuration"/> fallbacks like a separate <c>DATABASE_URL</c> entry.
+    /// </summary>
+    private static bool LooksLikeUnresolvedEnvSubstitution(string s)
+    {
+        var t = s.Trim();
+        if (t.StartsWith("${", StringComparison.Ordinal))
+            return true;
+
+        if (t.Length >= 2
+            && t[0] == '$'
+            && !t.Contains(';')
+            && !t.Contains('=')
+            && IsSimpleDollarEnvName(t.AsSpan(1)))
+            return true;
+
+        return false;
     }
 
     /// <summary>
@@ -197,15 +308,18 @@ public static class MySqlConnectionStringResolver
         }
     }
 
-    private static void TryValidateAdoNetOrThrow(string connectionString)
+    private static bool TryValidateAdoNet(string connectionString, out ArgumentException? error)
     {
         try
         {
             _ = new MySqlConnectionStringBuilder(connectionString);
+            error = null;
+            return true;
         }
         catch (ArgumentException ex)
         {
-            throw BuildHelpfulFormatException(connectionString, inner: ex);
+            error = ex;
+            return false;
         }
     }
 
@@ -222,6 +336,8 @@ public static class MySqlConnectionStringResolver
             "MySQL configuration is not a valid ADO.NET connection string. " +
             "Use **Server=…;Database=…;User Id=…;Password=…;Port=…;SslMode=Required;** (Pomelo style), " +
             "or **DATABASE_URL** / **ConnectionStrings__MySQL** as **mysql://user:pass@host:port/database?ssl-mode=REQUIRED**. " +
+            "Do **not** set **ConnectionStrings__MySQL** to a template like **${…}** or **$VAR** unless that variable is expanded by the platform. " +
+            "Prefer pasting the real URL or ADO.NET string, **or** bind the managed DB so **DATABASE_URL** is set at **RUN_TIME**. " +
             "Do **not** wrap the value in extra JSON or quotes in the platform UI. " +
             $"Problem value starts with `{prefix}`.";
         if (!string.IsNullOrEmpty(detail))
