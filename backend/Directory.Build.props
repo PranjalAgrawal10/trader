@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- App Platform / Heroku dotnet buildpack: dotnet publish with shared artifacts path can race
+         writing the same intermediate outputs (MSB4018 GenerateDepsFile). -->
+    <BuildInParallel>false</BuildInParallel>
+  </PropertyGroup>
+</Project>

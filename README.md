@@ -227,6 +227,8 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 
 **Troubleshooting — MySQL connection / configuration missing:** The default **`Database:Provider`** is **MySQL**. Set **`ConnectionStrings__MySQL`**, **or** **`Database__Host`**, **`Database__Name`**, **`Database__UserId`**, and **`Database__Password`** on the **Web Service** (**RUN_TIME**, encrypt secrets). Attach vars to the **API** component, not only the static site.
 
+**Troubleshooting — App Platform / Heroku build: `MSB4018` / `GenerateDepsFile` / `deps.json` in use:** The buildpack runs **`dotnet publish`** with a shared **`--artifacts-path`**, which can deadlock or race when MSBuild compiles shared projects on multiple nodes. This repo sets **`BuildInParallel=false`** in **`backend/Directory.Build.props`** so publish is single-threaded (slightly slower, stable on App Platform).
+
 **Troubleshooting — 404 on the app URL:** The main **HTTPS URL** usually serves the **SPA** at **`/`**. Real API routes are under **`/api/v1/...`**. **`/swagger`** is disabled in Production unless you set **`Swagger__Enabled=true`** (see `appsettings.Production.json`). Hitting **`GET /`** on the API (when the platform routes it) returns a small JSON index; **`GET /api/health`** should return **`{"status":"ok"}`** when ingress sends **`/api`** to the API with **`preserve_path_prefix`**.
 
 ## Testing
