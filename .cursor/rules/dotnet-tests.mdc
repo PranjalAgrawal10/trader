@@ -1,0 +1,11 @@
+---
+description: Conventions for Trader.Tests and integration-style tests
+globs: tests/**/*.cs
+alwaysApply: false
+---
+
+# Tests
+
+- Prefer descriptive test names (`MethodName_Scenario_Expected`).
+- Use the same layering rules as production code: tests target public API surfaces (controllers, handlers) or isolated units without reaching across layers incorrectly.
+- Avoid flaky timing; use `CancellationToken`/`WaitAsync` patterns consistent with the codebase.

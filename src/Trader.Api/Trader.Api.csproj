@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Applies EF migrations after Build on this project. Requires dotnet-ef and a reachable DB (see README). CI/example: dotnet build -p:RunEfMigrationsOnBuild=false -->
+    <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == ''">true</RunEfMigrationsOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Asp.Versioning.Mvc" Version="8.1.0" />
+    <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.0" />
+    <PackageReference Include="DotNetEnv" Version="3.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.22" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.11" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Trader.Application\Trader.Application.csproj" />
+    <ProjectReference Include="..\Trader.Infrastructure\Trader.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <Target Name="ApplyEfMigrationsAfterBuild" AfterTargets="Build" Condition="'$(RunEfMigrationsOnBuild)' == 'true' AND '$(DesignTimeBuild)' != 'true'">
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\.."
+          Command='dotnet ef database update --project "src/Trader.Infrastructure/Trader.Infrastructure.csproj" --startup-project "src/Trader.Api/Trader.Api.csproj" --configuration "$(Configuration)" --no-build' />
+  </Target>
+
+</Project>

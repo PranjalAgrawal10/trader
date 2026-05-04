@@ -1,0 +1,14 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/.vs/
+**/.idea/
+*.user
+*.suo
+apps/web/.env.local
+apps/web/.env.*.local
+
+# API — keep committed .env.development / .env.production templates; ignore machine-specific overrides
+src/Trader.Api/.env.local
+src/Trader.Api/.env.*.local

@@ -1,0 +1,4 @@
+/* App-level tweaks only; layout/components use React Bootstrap + Bootstrap CSS. */
+body {
+  margin: 0;
+}

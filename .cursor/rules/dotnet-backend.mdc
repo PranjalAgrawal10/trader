@@ -1,0 +1,12 @@
+---
+description: C# / ASP.NET Core conventions for Trader.Api and libraries
+globs: src/**/*.cs
+alwaysApply: false
+---
+
+# .NET backend
+
+- **Layers**: `Trader.Domain` has no references to Application/Infrastructure. Application defines abstractions under `Abstractions/` and feature services; Infrastructure registers EF repositories and gateway implementations in `DependencyInjection`.
+- **Errors**: Use typed exceptions where appropriate (`ConflictException`, domain rules). Prefer consistent HTTP mapping (e.g. `ApplicationExceptionFilter` + ProblemDetails) instead of duplicate try/catch in every controller.
+- **Async**: Use `CancellationToken` on public service/repository APIs; avoid blocking `.Result` / `.Wait()`.
+- **EF**: Keep `DbContext` and migrations in Infrastructure; repositories stay thin—query/persist, no business rules scattered across duplicate saves.

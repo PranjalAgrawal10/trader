@@ -1,0 +1,13 @@
+---
+description: Universal coding standards for the Trader monorepo
+alwaysApply: true
+---
+
+# Core principles
+
+- **Scope**: Change only what the task requires. No drive-by refactors or unrelated files.
+- **SOLID**: Prefer narrow interfaces (ports) in `Trader.Application.Abstractions`; infrastructure implements them. Keep API controllers thin; use filters/handlers for cross-cutting HTTP concerns.
+- **Structure**: Domain entities hold behavior where it fits; application layer orchestrates use cases; persistence stays in `Trader.Infrastructure`.
+- **Quality**: Match existing naming, imports, and patterns in the touched area. Prefer clear names over abbreviations.
+- **Docs**: Do not add or edit markdown docs unless the user asks—**except** root **`README.md`**, which must stay aligned with the project when setup, configuration, or documented behavior changes (see **`readme-maintenance`** rule).
+- **Secrets**: Never commit API keys, connection strings with passwords, or `.env` secrets; use placeholders and env-based config.

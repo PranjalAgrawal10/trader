@@ -1,0 +1,46 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: trader
+      MYSQL_USER: trader
+      MYSQL_PASSWORD: trader
+      MYSQL_ROOT_PASSWORD: rootdevchange_me
+    ports:
+      - "3306:3306"
+    volumes:
+      - trader_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-prootdevchange_me"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "5232:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__MySQL: Server=mysql;Port=3306;Database=trader;User Id=trader;Password=trader;
+      Database__Provider: MySQL
+      Jwt__Issuer: Trader
+      Jwt__Audience: TraderClients
+      Jwt__Key: CHANGE_ME_DOCKER_MIN_32_CHARS_LONG_SECRET!!
+      Jwt__ExpiresHours: "12"
+      Cors__Origins__0: http://localhost:5173
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  trader_mysql:

@@ -1,0 +1,13 @@
+---
+description: React + TypeScript conventions for apps/web
+globs: apps/web/src/**/*
+alwaysApply: false
+---
+
+# Web app (`apps/web`)
+
+- **Stack**: Vite, React, TypeScript; API calls via shared client (e.g. `api` from `src/api/client`). Respect `VITE_*` env vars for base URLs.
+- **UI**: **React Bootstrap** + Bootstrap 5 CSS only for layout and components (see **`react-bootstrap`** rule). No Tailwind or parallel utility CSS frameworks.
+- **Components**: Functional components; colocate page-specific state in pages, shared state in stores/hooks as already structured.
+- **UX**: Use Bootstrap spacing utilities sparingly; keep forms accessible (labels, `autoComplete`, loading/disabled states).
+- **Errors**: When surfacing server errors, prefer ProblemDetails `detail` (and fallbacks) rather than assuming `{ message }` only.
