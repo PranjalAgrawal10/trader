@@ -46,13 +46,13 @@ dotnet ef database update --project src/Trader.Infrastructure --startup-project 
 
 Use this for **Production** or whenever you want to migrate without building/running the API. Migrations live under `src/Trader.Infrastructure/Migrations/`.
 
-Building **`Trader.Api`** (`dotnet build` on the solution or that project) runs **`dotnet ef database update`** afterward by default (`RunEfMigrationsOnBuild`, requires the **`dotnet-ef`** global tool and a reachable DB per `.env.development`). Skip with:
+Optionally, you can run **`dotnet ef database update`** automatically after every **`dotnet build`** of **`Trader.Api`** by opting in (requires the **`dotnet-ef`** global tool and a reachable DB per your env):
 
 ```bash
-dotnet build -p:RunEfMigrationsOnBuild=false
+dotnet build -p:RunEfMigrationsOnBuild=true
 ```
 
-Use the same property for **`dotnet test`** in CI when no database is available (the test project rebuilds `Trader.Api`).
+**Default is off** so **`dotnet publish`**, CI, and hosts like DigitalOcean App Platform (no `dotnet-ef` on PATH) succeed without extra configuration.
 
 ### 3. Run the API
 

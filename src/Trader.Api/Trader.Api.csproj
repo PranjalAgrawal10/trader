@@ -4,8 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Applies EF migrations after Build on this project. Requires dotnet-ef and a reachable DB (see README). CI/example: dotnet build -p:RunEfMigrationsOnBuild=false -->
-    <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == ''">true</RunEfMigrationsOnBuild>
+    <!-- Opt-in: after Build, runs dotnet ef (needs global dotnet-ef + DB). Default false so dotnet publish/CI/App Platform without the tool still succeeds. -->
+    <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == ''">false</RunEfMigrationsOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
