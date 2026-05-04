@@ -163,6 +163,9 @@ public sealed class Program
             && string.Equals(app.Configuration["Database:Provider"], "MySQL", StringComparison.OrdinalIgnoreCase))
         {
             var mysqlCs = MySqlConnectionStringResolver.Resolve(app.Configuration);
+            if (string.IsNullOrWhiteSpace(mysqlCs))
+                throw new InvalidOperationException(
+                    "MySQL is configured but no connection string was resolved. Check ConnectionStrings__MySQL, DATABASE_URL, or Database__* variables.");
 
             if (app.Environment.IsDevelopment())
             {
