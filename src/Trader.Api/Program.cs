@@ -1,6 +1,8 @@
 using System.Text;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.IdentityModel.Tokens.Jwt;
@@ -66,6 +68,39 @@ public sealed class Program
         var jwtSection = builder.Configuration.GetSection(JwtOptions.SectionName);
         var jwt = jwtSection.Get<JwtOptions>() ?? new JwtOptions();
 
+        if (!builder.Environment.IsDevelopment()
+            && !builder.Environment.IsEnvironment("IntegrationTesting"))
+        {
+            var keyLength = string.IsNullOrEmpty(jwt.Key) ? 0 : Encoding.UTF8.GetBytes(jwt.Key).Length;
+            if (string.IsNullOrWhiteSpace(jwt.Issuer)
+                || string.IsNullOrWhiteSpace(jwt.Audience)
+                || keyLength < 32)
+            {
+                throw new InvalidOperationException(
+                    "JWT is not configured for this environment. Set Jwt__Issuer, Jwt__Audience, and Jwt__Key " +
+                    "(UTF-8 secret at least 32 bytes — e.g. a random string of 32+ characters) via environment variables or secrets.");
+            }
+        }
+
+        if (!builder.Environment.IsEnvironment("IntegrationTesting"))
+        {
+            builder.Services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
+            });
+        }
+
+        var dataProtectionKeysPath = builder.Configuration["DataProtection:KeyRingPath"];
+        if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+        {
+            Directory.CreateDirectory(dataProtectionKeysPath);
+            builder.Services.AddDataProtection()
+                .SetApplicationName("Trader")
+                .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+        }
+
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
@@ -120,7 +155,11 @@ public sealed class Program
         }
 
         if (!app.Environment.IsEnvironment("IntegrationTesting"))
+        {
+            app.UseForwardedHeaders();
             app.UseHttpsRedirection();
+        }
+
         app.UseCors();
         app.UseAuthentication();
         app.UseAuthorization();

@@ -115,6 +115,8 @@ Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MyS
 
 **DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Use a .NET-style connection string with **`SslMode=Required`** (not the `mysql://…?ssl-mode=REQUIRED` URL). Example: `Server=…;Port=25060;Database=defaultdb;User Id=doadmin;Password=…;SslMode=Required;` — set the password via env on the host, not in committed files.
 
+**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`ConnectionStrings__MySQL`**, **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**. The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. Data Protection keys are ephemeral unless you set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. mounted volume); without it, users may need to re-authenticate broker tokens after redeploys.
+
 #### Zerodha Kite Connect
 
 1. Create a Kite Connect app at [developers.kite.trade](https://developers.kite.trade/).
