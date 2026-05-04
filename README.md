@@ -40,9 +40,11 @@ docker compose up mysql -d
 
 Database host defaults to **localhost:3306** when you run the API on the host against a local MySQL; match **`ConnectionStrings__MySQL`** in `backend/src/Trader.Api/.env.development` (user, password, port). **Docker Compose** maps container MySQL to **`localhost:3307`** on the host (see `docker-compose.yml`) so it does not fight for **3306** with another MySQL install; set `Port=3307` in your connection string when using that Compose database from **`dotnet run`**. Services inside Compose (`api` → `mysql`) still use port **3306** internally.
 
-With **`ASPNETCORE_ENVIRONMENT=Development`** and **`Database:Provider=MySQL`**, the API **creates the database if it does not exist** and runs **`Migrate()`** on startup so tables stay up to date. You can still apply migrations manually (below) if you prefer.
+With **`Database:Provider=MySQL`** (and not **IntegrationTesting**), the API runs **`Migrate()`** on startup when **`Database:ApplyMigrationsOnStartup`** is **true** (default in `appsettings.json`). In **Development** it also **creates the database** if missing. **Production** and **Docker** typically use an existing catalog (e.g. managed MySQL) and only apply pending migrations. Set **`Database__ApplyMigrationsOnStartup=false`** to disable automatic startup migrations. You can still apply migrations manually (`dotnet ef`, below).
 
-### 2. Apply EF Core migrations (optional in Development)
+After each **`dotnet build`** of **`Trader.Api`**, **`dotnet ef database update`** runs by default (requires the **`dotnet-ef`** global tool and a reachable DB matching your config). **Disable for a build** with **`-p:RunEfMigrationsOnBuild=false`**. **Release publish** and **Docker** image builds pass **`/p:RunEfMigrationsOnBuild=false`** so the image builds without **`dotnet-ef`** or a database. **Integration tests** build **`Trader.Api`** with **`RunEfMigrationsOnBuild=false`**.
+
+### 2. Apply EF Core migrations (optional)
 
 From the `backend/` directory:
 
@@ -51,16 +53,14 @@ cd backend
 dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
 ```
 
-Use this for **Production** or whenever you want to migrate without building/running the API. Migrations live under `backend/src/Trader.Infrastructure/Migrations/`.
+Use this when you prefer a one-off migrate without building, or when startup/build migrations are disabled. Migrations live under `backend/src/Trader.Infrastructure/Migrations/`.
 
-Optionally, you can run **`dotnet ef database update`** automatically after every **`dotnet build`** of **`Trader.Api`** by opting in (requires the **`dotnet-ef`** global tool and a reachable DB per your env):
+**To skip the post-build step** when the DB is down:
 
 ```bash
 cd backend
-dotnet build -p:RunEfMigrationsOnBuild=true
+dotnet build -p:RunEfMigrationsOnBuild=false
 ```
-
-**Default is off** so **`dotnet publish`**, CI, and hosts like DigitalOcean App Platform (no `dotnet-ef` on PATH) succeed without extra configuration.
 
 ### 3. Run the API
 
@@ -214,7 +214,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
   dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
   ```
 
-  Use the same **`ConnectionStrings__MySQL`** (via env or a local copy) so migrations hit the managed DB. The App Platform build does **not** run **`dotnet-ef`** by default.
+  Use the same **`ConnectionStrings__MySQL`** (via env or a local copy) so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
 
 ### 7. Smoke test
 

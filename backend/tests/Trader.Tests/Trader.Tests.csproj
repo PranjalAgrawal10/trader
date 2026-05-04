@@ -30,7 +30,9 @@
     <ProjectReference Include="..\..\src\Trader.Application\Trader.Application.csproj" />
     <ProjectReference Include="..\..\src\Trader.Infrastructure\Trader.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Trader.Domain\Trader.Domain.csproj" />
-    <ProjectReference Include="..\..\src\Trader.Api\Trader.Api.csproj" />
+    <ProjectReference Include="..\..\src\Trader.Api\Trader.Api.csproj">
+      <AdditionalProperties>RunEfMigrationsOnBuild=false</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
 
 </Project>

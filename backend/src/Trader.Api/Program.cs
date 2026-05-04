@@ -159,16 +159,22 @@ public sealed class Program
 
         var app = builder.Build();
 
-        if (app.Environment.IsDevelopment()
-            && !app.Environment.IsEnvironment("IntegrationTesting")
+        if (!app.Environment.IsEnvironment("IntegrationTesting")
             && string.Equals(app.Configuration["Database:Provider"], "MySQL", StringComparison.OrdinalIgnoreCase))
         {
             var mysqlCs = app.Configuration.GetConnectionString("MySQL");
-            await MySqlBootstrap.EnsureDatabaseExistsAsync(mysqlCs, CancellationToken.None);
 
-            await using var scope = app.Services.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<TraderDbContext>();
-            await db.Database.MigrateAsync();
+            if (app.Environment.IsDevelopment())
+            {
+                await MySqlBootstrap.EnsureDatabaseExistsAsync(mysqlCs, CancellationToken.None);
+            }
+
+            if (app.Configuration.GetValue("Database:ApplyMigrationsOnStartup", true))
+            {
+                await using var scope = app.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<TraderDbContext>();
+                await db.Database.MigrateAsync();
+            }
         }
 
         if (app.Environment.IsDevelopment())

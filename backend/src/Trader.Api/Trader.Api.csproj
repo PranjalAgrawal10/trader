@@ -4,8 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Opt-in: after Build, runs dotnet ef (needs global dotnet-ef + DB). Default false so dotnet publish/CI/App Platform without the tool still succeeds. -->
-    <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == ''">false</RunEfMigrationsOnBuild>
+    <!-- After Build, runs `dotnet ef database update` (global dotnet-ef + reachable DB + valid config). Tests reference this project with RunEfMigrationsOnBuild=false. Release publish passes RunEfMigrationsOnBuild=false in Dockerfile. -->
+    <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == ''">true</RunEfMigrationsOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
