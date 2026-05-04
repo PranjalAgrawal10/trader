@@ -1,11 +1,44 @@
+# Build outputs
 **/bin/
 **/obj/
 **/node_modules/
 **/dist/
+**/dist-ssr/
+
+# Visual Studio / MSBuild
 **/.vs/
-**/.idea/
 *.user
+*.userosscache
+*.rsuser
 *.suo
+*.pubxml.user
+
+# JetBrains Rider / ReSharper
+**/.idea/
+*.DotSettings.user
+
+# Tests & coverage
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+coverage*.json
+coverage*.xml
+*.coverage
+*.coveragexml
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Repo-root local env (e.g. docker-compose overrides); keep compose files committed
+/.env
+/.env.local
+
+# Web
 apps/web/.env.local
 apps/web/.env.*.local
 
