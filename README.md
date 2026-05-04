@@ -109,7 +109,7 @@ The `api` service sets connection string host `mysql`, JWT, CORS, etc. The UI st
 | `.env` / `.env.development` / `.env.production` | Optional; merged into configuration. Use `__` in keys (e.g. `ConnectionStrings__MySQL`); the API maps these to nested keys (`ConnectionStrings:MySQL`), matching OS environment-variable conventions. |
 | Environment variables | Override files (e.g. in Docker/Kubernetes) |
 
-See `src/Trader.Api/.env.example`. Local overrides can go in `.env.local` (gitignored).
+See `src/Trader.Api/.env.example`. Local overrides can go in `.env.local` (gitignored). Values loaded from `.env` / `.env.*` are merged after default configuration; **blank values in those files are ignored** so they do not wipe out real environment variables on hosts like App Platform.
 
 Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MySQL`**, **JWT** (`Issuer`, `Audience`, `Key` ≥ 32 chars), and **CORS** origins (`Cors:Origins` or `Cors__Origins__0`, etc.).
 

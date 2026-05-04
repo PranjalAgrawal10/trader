@@ -49,11 +49,14 @@ public static class DotEnvBootstrap
         }
 
         // .env keys use "__" like environment variables; MemoryConfigurationProvider expects ":" hierarchy (see EnvironmentVariablesConfigurationProvider).
+        // Skip empty values so placeholder lines (e.g. Jwt__Key=) in committed .env.production do not override real host env vars (Docker, App Platform).
         configuration.AddInMemoryCollection(
-            merged.Select(static kv =>
-                new KeyValuePair<string, string?>(
-                    kv.Key.Replace("__", ConfigurationPath.KeyDelimiter, StringComparison.Ordinal),
-                    kv.Value)));
+            merged
+                .Where(static kv => !string.IsNullOrWhiteSpace(kv.Value))
+                .Select(static kv =>
+                    new KeyValuePair<string, string?>(
+                        kv.Key.Replace("__", ConfigurationPath.KeyDelimiter, StringComparison.Ordinal),
+                        kv.Value)));
     }
 
     private static string? FindApiProjectDirectory()
