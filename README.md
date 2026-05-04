@@ -218,13 +218,17 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 
 ### 7. Smoke test
 
-- **`GET /health`** on the public API URL.
+- **`GET /api/health`** (or **`GET /health`** if you call the API service directly). On a **single hostname** with ingress, **`/health`** alone often hits the **static site**, so prefer **`/api/health`** for checks through the edge.
 - Open the static URL, sign in, confirm **`/api/v1`** calls succeed (browser devtools **Network** tab).
 - If **`/api`** routes return **404**, fix ingress (**`preserve_path_prefix`**) and rule order. If deep links **404**, set the static site **Catchall** to **`index.html`**.
 
 **Troubleshooting — `JWT is not configured` / readiness `connection refused` on 8080:** The API process crashes **before** Kestrel listens, so probes fail. Add **`Jwt__Issuer`**, **`Jwt__Audience`**, and **`Jwt__Key`** (≥ 32 characters) to the **Web Service** component with scope **RUN_TIME** (not only BUILD_TIME, and not only on the static site). Add **`Cors__Origins__0`** the same way or the next startup error will be about CORS. Names must use **`__`** (e.g. **`Jwt__Key`**), not colons.
 
 **Troubleshooting — `ConnectionStrings:MySQL is required`:** The default **`Database:Provider`** is **MySQL** in `appsettings.json`. Set **`ConnectionStrings__MySQL`** on the **Web Service** (**RUN_TIME**, encrypt) to your full connection string, or the app never reaches DI completion. Same rules: attach vars to the **API** component, not only the static site.
+
+**Troubleshooting — 404 on the app URL:** The main **HTTPS URL** usually serves the **SPA** at **`/`**. Real API routes are under **`/api/v1/...`**. **`/swagger`** is disabled in Production unless you set **`Swagger__Enabled=true`** (see `appsettings.Production.json`). Hitting **`GET /`** on the API (when the platform routes it) returns a small JSON index; **`GET /api/health`** should return **`{"status":"ok"}`** when ingress sends **`/api`** to the API with **`preserve_path_prefix`**.
+
+## Testing
 
 ```bash
 cd backend

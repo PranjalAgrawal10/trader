@@ -176,6 +176,11 @@ public sealed class Program
             app.UseSwagger();
             app.UseSwaggerUI(o => o.SwaggerEndpoint("/swagger/v1/swagger.json", "Trader v1"));
         }
+        else if (app.Configuration.GetValue("Swagger:Enabled", false))
+        {
+            app.UseSwagger();
+            app.UseSwaggerUI(o => o.SwaggerEndpoint("/swagger/v1/swagger.json", "Trader v1"));
+        }
 
         if (!app.Environment.IsEnvironment("IntegrationTesting"))
         {
@@ -188,6 +193,21 @@ public sealed class Program
         app.UseAuthorization();
 
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
+            .AllowAnonymous();
+
+        // Same payload; use this path when App Platform ingress only forwards `/api/*` to the API (root `/health` would hit the static site).
+        app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
+            .AllowAnonymous();
+
+        app.MapGet("/", () => Results.Json(new
+            {
+                service = "Trader.Api",
+                health = "/health",
+                api = "/api/v1",
+                swagger = app.Configuration.GetValue("Swagger:Enabled", false) || app.Environment.IsDevelopment()
+                    ? "/swagger"
+                    : (string?)null,
+            }))
             .AllowAnonymous();
 
         app.MapControllers();
