@@ -125,17 +125,17 @@ To use a different API port or hostname, rebuild **`web`** with another build-ar
 |-----------|--------|
 | `appsettings.json` | Structure and non-secret defaults (many values empty by design) |
 | `appsettings.Development.json` | Development logging |
-| `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Use `__` in keys (e.g. `ConnectionStrings__MySQL`). **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
+| `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Use `__` in keys (e.g. `ConnectionStrings__MySQL` or `Database__Name` / `Database__Password`). **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
 | `.env.production` (committed) | **Template / documentation only** for humans; the API does **not** load it at runtime in Production. |
 | Environment variables | Override files (e.g. in Docker/Kubernetes) |
 
 See `backend/src/Trader.Api/.env.example`. Local overrides: **`.env.local`** / **`.env.development.local`** (gitignored). **Production** uses only **environment variables** and appsettings — **`.env` / `.env.production` are never loaded** by the host when `ASPNETCORE_ENVIRONMENT` is not `Development`. Blank values in merged `.env` lines are ignored.
 
-Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MySQL`**, **JWT** (`Issuer`, `Audience`, `Key` ≥ 32 chars), and **CORS** origins (`Cors:Origins` or `Cors__Origins__0`, etc.).
+Required for a real MySQL run: **`Database:Provider`**, then either **`ConnectionStrings:MySQL`** (full string) **or** all of **`Database:Host`**, **`Database:Name`**, **`Database:UserId`**, **`Database:Password`** (optional **`Database:Port`**, **`Database:SslMode`**), plus **JWT** and **CORS** as before.
 
-**DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Use a .NET-style connection string with **`SslMode=Required`** (not the `mysql://…?ssl-mode=REQUIRED` URL). Example: `Server=…;Port=25060;Database=defaultdb;User Id=doadmin;Password=…;SslMode=Required;` — set the password via env on the host, not in committed files.
+**DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Use a full connection string with **`SslMode=Required`**, **or** set **`Database__SslMode=Required`**, **`Database__Port=25060`**, and the other **`Database__*`** fields (see `.env.example`).
 
-**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`ConnectionStrings__MySQL`**, **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**. The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (used for broker token encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **Do not commit** key directories.
+**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**, and **`ConnectionStrings__MySQL`** **or** **`Database__Host`**, **`Database__Name`**, **`Database__UserId`**, **`Database__Password`** (optional **`Database__Port`**, **`Database__SslMode`**; use **`Required`** for managed MySQL). The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (used for broker token encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **Do not commit** key directories.
 
 **404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
 
@@ -192,7 +192,8 @@ Add under the service (encrypt secrets in the control panel):
 |-----|--------|
 | **`ASPNETCORE_ENVIRONMENT`** | `Production` |
 | **`Database__Provider`** | `MySQL` |
-| **`ConnectionStrings__MySQL`** | Full Pomelo-style string; **secret**. |
+| **`ConnectionStrings__MySQL`** | **Option A:** full Pomelo-style string (**secret**). Leave unset if using discrete DB vars. |
+| **`Database__Host`**, **`Database__Name`**, **`Database__UserId`**, **`Database__Password`** | **Option B** when the full connection string is not set. **Encrypt** password (and any sensitive values). Optional: **`Database__Port`** (e.g. `25060`), **`Database__SslMode`** (e.g. `Required` for managed MySQL). |
 | **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** | **`Jwt__Key`** ≥ 32 chars; **secret**. |
 | **`Cors__Origins__0`** | Your live site origin, e.g. **`https://your-app.ondigitalocean.app`** (no trailing slash). |
 | **`ZerodhaKite__*`** | If you use Kite: **secrets**; **`RedirectUrl`** must be the public **`https://…/api/v1/broker/kite/callback`**. |
@@ -214,7 +215,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
   dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
   ```
 
-  Use the same **`ConnectionStrings__MySQL`** (via env or a local copy) so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
+  Use the same database configuration as production (**`ConnectionStrings__MySQL`** or **`Database__*`** fields) so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
 
 ### 7. Smoke test
 
@@ -224,7 +225,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 
 **Troubleshooting — `JWT is not configured` / readiness `connection refused` on 8080:** The API process crashes **before** Kestrel listens, so probes fail. Add **`Jwt__Issuer`**, **`Jwt__Audience`**, and **`Jwt__Key`** (≥ 32 characters) to the **Web Service** component with scope **RUN_TIME** (not only BUILD_TIME, and not only on the static site). Add **`Cors__Origins__0`** the same way or the next startup error will be about CORS. Names must use **`__`** (e.g. **`Jwt__Key`**), not colons.
 
-**Troubleshooting — `ConnectionStrings:MySQL is required`:** The default **`Database:Provider`** is **MySQL** in `appsettings.json`. Set **`ConnectionStrings__MySQL`** on the **Web Service** (**RUN_TIME**, encrypt) to your full connection string, or the app never reaches DI completion. Same rules: attach vars to the **API** component, not only the static site.
+**Troubleshooting — MySQL connection / configuration missing:** The default **`Database:Provider`** is **MySQL**. Set **`ConnectionStrings__MySQL`**, **or** **`Database__Host`**, **`Database__Name`**, **`Database__UserId`**, and **`Database__Password`** on the **Web Service** (**RUN_TIME**, encrypt secrets). Attach vars to the **API** component, not only the static site.
 
 **Troubleshooting — 404 on the app URL:** The main **HTTPS URL** usually serves the **SPA** at **`/`**. Real API routes are under **`/api/v1/...`**. **`/swagger`** is disabled in Production unless you set **`Swagger__Enabled=true`** (see `appsettings.Production.json`). Hitting **`GET /`** on the API (when the platform routes it) returns a small JSON index; **`GET /api/health`** should return **`{"status":"ok"}`** when ingress sends **`/api`** to the API with **`preserve_path_prefix`**.
 

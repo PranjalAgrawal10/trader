@@ -162,7 +162,7 @@ public sealed class Program
         if (!app.Environment.IsEnvironment("IntegrationTesting")
             && string.Equals(app.Configuration["Database:Provider"], "MySQL", StringComparison.OrdinalIgnoreCase))
         {
-            var mysqlCs = app.Configuration.GetConnectionString("MySQL");
+            var mysqlCs = MySqlConnectionStringResolver.Resolve(app.Configuration);
 
             if (app.Environment.IsDevelopment())
             {

@@ -35,7 +35,8 @@ services:
     instance_size_slug: apps-s-1vcpu-0.5gb
     http_port: 8080
     # Required RUN_TIME env vars (add in this file or in the DO UI; encrypt secrets):
-    # Jwt__Issuer, Jwt__Audience, Jwt__Key (≥32 chars), Cors__Origins__0, Database__Provider, ConnectionStrings__MySQL
+    # Jwt__Issuer, Jwt__Audience, Jwt__Key (≥32 chars), Cors__Origins__0, Database__Provider,
+    # ConnectionStrings__MySQL OR Database__Host + Database__Name + Database__UserId + Database__Password (+ optional Port, SslMode)
     envs:
       - key: ASPNETCORE_ENVIRONMENT
         scope: RUN_TIME

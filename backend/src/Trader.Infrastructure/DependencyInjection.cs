@@ -51,20 +51,19 @@ public static class DependencyInjection
         }
         else
         {
-            var conn =
-                configuration.GetConnectionString("MySQL")
-                ?? configuration.GetConnectionString("DefaultConnection");
+            var conn = MySqlConnectionStringResolver.Resolve(configuration);
 
             if (string.IsNullOrWhiteSpace(conn))
             {
                 var hasProcCs = Environment.GetEnvironmentVariable("ConnectionStrings__MySQL") is { Length: > 0 };
+                var hasName = Environment.GetEnvironmentVariable("Database__Name") is { Length: > 0 };
+                var hasPassword = Environment.GetEnvironmentVariable("Database__Password") is { Length: > 0 };
                 throw new InvalidOperationException(
                     "MySQL connection string is missing. " +
-                    "`appsettings.json` sets `Database:Provider` to **MySQL** but `ConnectionStrings:MySQL` is empty after configuration loads. " +
-                    $"Process env **ConnectionStrings__MySQL** present={(hasProcCs ? "yes" : "no")}. " +
-                    "On DigitalOcean App Platform, add **ConnectionStrings__MySQL** to the **same Web Service** as the API, scope **RUN_TIME**, **Encrypt** the value. " +
-                    "Use a Pomelo-style string (e.g. `Server=...;Port=25060;Database=...;User Id=...;Password=...;SslMode=Required;` for managed MySQL). " +
-                    "Name must use double underscores: `ConnectionStrings__MySQL`, not `DATABASE_URL`, unless you map it yourself.");
+                    "Set **ConnectionStrings__MySQL** (full Pomelo-style string), **or** set **Database__Host**, **Database__Name**, **Database__UserId**, and **Database__Password** (optional: **Database__Port**, **Database__SslMode**). " +
+                    "`appsettings.json` sets `Database:Provider` to **MySQL** but neither approach produced a connection string. " +
+                    $"Process env: **ConnectionStrings__MySQL**={(hasProcCs ? "present" : "absent")}, **Database__Name**={(hasName ? "present" : "absent")}, **Database__Password**={(hasPassword ? "present" : "absent")}. " +
+                    "On DigitalOcean App Platform, use **RUN_TIME** scope and **Encrypt** for secrets.");
             }
 
             var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
