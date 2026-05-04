@@ -77,8 +77,11 @@ public sealed class Program
                 || keyLength < 32)
             {
                 throw new InvalidOperationException(
-                    "JWT is not configured for this environment. Set Jwt__Issuer, Jwt__Audience, and Jwt__Key " +
-                    "(UTF-8 secret at least 32 bytes — e.g. a random string of 32+ characters) via environment variables or secrets.");
+                    "JWT is not configured for this environment. On DigitalOcean App Platform, open your **Web Service** (API) component → **Settings → Environment variables** " +
+                    "(or **Edit** in the app spec) and add at **run time** (use **Encrypt** for secrets): " +
+                    "**Jwt__Issuer**, **Jwt__Audience**, **Jwt__Key** (random string, UTF-8 length ≥ 32 bytes), and **Cors__Origins__0** (your SPA origin, e.g. https://your-app.ondigitalocean.app). " +
+                    "Use double underscores in names; scope must include **RUN_TIME**. If these are set only on the static site or as **BUILD_TIME** only, the API will not see them. " +
+                    "Until the process starts successfully, health checks may report **connection refused** on port 8080.");
             }
         }
 

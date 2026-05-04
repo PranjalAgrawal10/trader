@@ -221,6 +221,8 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 - Open the static URL, sign in, confirm **`/api/v1`** calls succeed (browser devtools **Network** tab).
 - If **`/api`** routes return **404**, fix ingress (**`preserve_path_prefix`**) and rule order. If deep links **404**, set the static site **Catchall** to **`index.html`**.
 
+**Troubleshooting — `JWT is not configured` / readiness `connection refused` on 8080:** The API process crashes **before** Kestrel listens, so probes fail. Add **`Jwt__Issuer`**, **`Jwt__Audience`**, and **`Jwt__Key`** (≥ 32 characters) to the **Web Service** component with scope **RUN_TIME** (not only BUILD_TIME, and not only on the static site). Add **`Cors__Origins__0`** the same way or the next startup error will be about CORS. Names must use **`__`** (e.g. **`Jwt__Key`**), not colons.
+
 ## Testing
 
 ```bash
