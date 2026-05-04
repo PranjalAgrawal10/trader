@@ -42,7 +42,7 @@ Database host defaults to **localhost:3306** when you run the API on the host ag
 
 With **`Database:Provider=MySQL`** (and not **IntegrationTesting**), the API runs **`Migrate()`** on startup when **`Database:ApplyMigrationsOnStartup`** is **true** (default in `appsettings.json`). In **Development** it also **creates the database** if missing. **Production** and **Docker** typically use an existing catalog (e.g. managed MySQL) and only apply pending migrations. Set **`Database__ApplyMigrationsOnStartup=false`** to disable automatic startup migrations. You can still apply migrations manually (`dotnet ef`, below).
 
-After each **`dotnet build`** of **`Trader.Api`**, **`dotnet ef database update`** runs by default (requires the **`dotnet-ef`** global tool and a reachable DB matching your config). **Disable for a build** with **`-p:RunEfMigrationsOnBuild=false`**. **Release publish** and **Docker** image builds pass **`/p:RunEfMigrationsOnBuild=false`** so the image builds without **`dotnet-ef`** or a database. **Integration tests** build **`Trader.Api`** with **`RunEfMigrationsOnBuild=false`**.
+When you **`dotnet build src/Trader.Api/Trader.Api.csproj`** (entry project — not **`dotnet build Trader.sln`**), **`dotnet ef database update`** runs by default (**`RunEfMigrationsOnBuild`** is **true** unless you pass **`-p:RunEfMigrationsOnBuild=false`**). That requires the **`dotnet-ef`** global tool and a reachable database. **Solution** and **`dotnet test`** builds skip this step. **Docker** **`dotnet publish`** uses **`/p:RunEfMigrationsOnBuild=false`**.
 
 ### 2. Apply EF Core migrations (optional)
 
@@ -55,11 +55,11 @@ dotnet ef database update --project src/Trader.Infrastructure --startup-project 
 
 Use this when you prefer a one-off migrate without building, or when startup/build migrations are disabled. Migrations live under `backend/src/Trader.Infrastructure/Migrations/`.
 
-**To skip the post-build step** when the DB is down:
+**To skip the post-build step** when building the API project only:
 
 ```bash
 cd backend
-dotnet build -p:RunEfMigrationsOnBuild=false
+dotnet build src/Trader.Api/Trader.Api.csproj -p:RunEfMigrationsOnBuild=false
 ```
 
 ### 3. Run the API
@@ -147,7 +147,7 @@ Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MyS
 1. Create a Kite Connect app at [developers.kite.trade](https://developers.kite.trade/).
 2. Set the **Redirect URL** in the developer console to exactly the same value as **`ZerodhaKite:RedirectUrl`** (e.g. dev API: `http://localhost:5232/api/v1/broker/kite/callback`). Mismatches cause OAuth failures.
 3. In `.env.development` (or environment variables), set **`ZerodhaKite__ApiKey`**, **`ZerodhaKite__ApiSecret`**, and **`ZerodhaKite__RedirectUrl`**. Optionally override **`ZerodhaKite__PostLoginRedirectUrl`** if your SPA runs on a different origin than `http://localhost:5173/brokers`.
-4. Apply EF migrations so `Users` includes Kite token columns (startup **`Migrate()`** in Development, or `dotnet ef database update`).
+4. Apply EF migrations so `Users` includes Kite token columns (**`Migrate()`** on API startup for MySQL, post-build when you **`dotnet build`** the API project directly, or `dotnet ef database update`).
 
 The API exchanges the `request_token` at Kite’s token endpoint and stores **encrypted** access (and refresh when present) tokens using ASP.NET Core Data Protection. **Do not commit API secrets**; keep them in local env files or a secrets manager.
 
