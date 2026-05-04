@@ -117,6 +117,11 @@ Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MyS
 
 **DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`ConnectionStrings__MySQL`**, **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**. The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. Data Protection keys are ephemeral unless you set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. mounted volume); without it, users may need to re-authenticate broker tokens after redeploys.
 
+**404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
+
+1. **API calls return 404** — the browser requests `https://<your-app>/api/v1/...`. If ingress sends `/api` traffic to the static site, or **strips** the `/api` prefix before the .NET service, Kestrel sees the wrong path (for example `/v1/...` instead of `/api/v1/...`) and returns 404. Fix in the app **ingress** (Settings → your app → **Ingress** or edit the app spec): add a rule with path prefix **`/api`** pointing at your **Web Service** (API) component and set **`preserve_path_prefix: true`**. List the **`/api` rule before** the catch‑all **`/`** rule that serves the **Static Site**. Then set **`apps/web/.env.production`** `VITE_API_BASE_URL` to the **same public origin** as the SPA (no path); the client already uses `/api/v1` on that origin.
+2. **Refreshing a deep link (e.g. `/brokers`) returns 404** — the static host has no file at that path. In the **Static Site** component, under **Custom Pages**, set **Catchall** to **`index.html`** (see [Manage static sites — Custom Pages](https://docs.digitalocean.com/products/app-platform/how-to/manage-static-sites/)). The web build also emits **`404.html`** (copy of `index.html`) for hosts that use a custom error page.
+
 #### Zerodha Kite Connect
 
 1. Create a Kite Connect app at [developers.kite.trade](https://developers.kite.trade/).
