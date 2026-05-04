@@ -113,6 +113,8 @@ See `src/Trader.Api/.env.example`. Local overrides can go in `.env.local` (gitig
 
 Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MySQL`**, **JWT** (`Issuer`, `Audience`, `Key` ≥ 32 chars), and **CORS** origins (`Cors:Origins` or `Cors__Origins__0`, etc.).
 
+**DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Use a .NET-style connection string with **`SslMode=Required`** (not the `mysql://…?ssl-mode=REQUIRED` URL). Example: `Server=…;Port=25060;Database=defaultdb;User Id=doadmin;Password=…;SslMode=Required;` — set the password via env on the host, not in committed files.
+
 #### Zerodha Kite Connect
 
 1. Create a Kite Connect app at [developers.kite.trade](https://developers.kite.trade/).
