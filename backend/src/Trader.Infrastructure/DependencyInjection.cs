@@ -60,7 +60,7 @@ public static class DependencyInjection
                 var hasPassword = Environment.GetEnvironmentVariable("Database__Password") is { Length: > 0 };
                 throw new InvalidOperationException(
                     "MySQL connection string is missing. " +
-                    "Set **ConnectionStrings__MySQL** (ADO.NET or **mysql://** URL), **DATABASE_URL** (**mysql://**), **or** **Database__Host**, **Database__Name**, **Database__UserId**, and **Database__Password** (optional: **Database__Port**, **Database__SslMode**). " +
+                    "Set **Database__Host**, **Database__Name**, **Database__Username** (or **Database__UserId**), and **Database__Password** (optional: **Database__Port**, **Database__SslMode**), **or** **ConnectionStrings__MySQL** / **DATABASE_URL** (**mysql://**). " +
                     "`appsettings.json` sets `Database:Provider` to **MySQL** but neither approach produced a connection string. " +
                     $"Process env: **ConnectionStrings__MySQL**={(hasProcCs ? "present" : "absent")}, **Database__Name**={(hasName ? "present" : "absent")}, **Database__Password**={(hasPassword ? "present" : "absent")}. " +
                     "On DigitalOcean App Platform, use **RUN_TIME** scope and **Encrypt** for secrets.");

@@ -4,14 +4,19 @@ using MySqlConnector;
 namespace Trader.Infrastructure.Persistence;
 
 /// <summary>
-/// Resolves the MySQL connection string from <c>ConnectionStrings:MySQL</c>, <c>DATABASE_URL</c> (<c>mysql://</c>),
-/// or discrete <c>Database:*</c> fields. DigitalOcean and other hosts often supply <c>mysql://user:pass@host:port/db?ssl-mode=REQUIRED</c>,
-/// which is not valid for <see cref="MySqlConnectionStringBuilder"/> until converted.
+/// Resolves MySQL: discrete <c>Database:*</c> (<c>Username</c>, <c>Host</c>, <c>Name</c>, <c>Password</c>, …) is applied **first**,
+/// then <c>ConnectionStrings:MySQL</c>, <c>DATABASE_URL</c> (<c>mysql://</c>, converted for MySqlConnector).
 /// </summary>
 public static class MySqlConnectionStringResolver
 {
     public static string? Resolve(IConfiguration configuration)
     {
+        // Prefer discrete Database:* (Host, Name, Username, Password, …) so platform defaults like
+        // ConnectionStrings:MySQL=${…} do not win over explicit Database__* env vars.
+        var discrete = TryBuildFromDiscreteDatabaseSection(configuration);
+        if (discrete != null)
+            return discrete;
+
         var rawSources = new[]
         {
             configuration.GetConnectionString("MySQL"),
@@ -54,10 +59,6 @@ public static class MySqlConnectionStringResolver
             }
         }
 
-        var discrete = TryBuildFromDiscreteDatabaseSection(configuration);
-        if (discrete != null)
-            return discrete;
-
         if (lastResolvableError != null)
             throw lastResolvableError;
 
@@ -69,7 +70,7 @@ public static class MySqlConnectionStringResolver
         var db = configuration.GetSection("Database");
         var host = db["Host"];
         var name = db["Name"];
-        var userId = db["UserId"] ?? db["User"];
+        var userId = db["Username"] ?? db["UserId"] ?? db["User"];
         var password = db["Password"];
 
         if (string.IsNullOrWhiteSpace(host)
