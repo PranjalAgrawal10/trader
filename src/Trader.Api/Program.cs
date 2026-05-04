@@ -92,13 +92,24 @@ public sealed class Program
             });
         }
 
-        var dataProtectionKeysPath = builder.Configuration["DataProtection:KeyRingPath"];
-        if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+        if (!builder.Environment.IsEnvironment("IntegrationTesting"))
         {
-            Directory.CreateDirectory(dataProtectionKeysPath);
-            builder.Services.AddDataProtection()
-                .SetApplicationName("Trader")
-                .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+            var dataProtectionKeysPath = builder.Configuration["DataProtection:KeyRingPath"];
+            if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+            {
+                Directory.CreateDirectory(dataProtectionKeysPath);
+                builder.Services.AddDataProtection()
+                    .SetApplicationName("Trader")
+                    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+            }
+            else if (builder.Environment.IsProduction())
+            {
+                // Stateless hosts (e.g. App Platform without a mounted key path): avoid filesystem key ring warnings;
+                // keys still reset on restart — use DataProtection:KeyRingPath + persistent storage to keep payloads stable.
+                builder.Services.AddDataProtection()
+                    .SetApplicationName("Trader")
+                    .UseEphemeralDataProtectionProvider();
+            }
         }
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
