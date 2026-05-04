@@ -165,7 +165,7 @@ public sealed class Program
             var mysqlCs = MySqlConnectionStringResolver.Resolve(app.Configuration);
             if (string.IsNullOrWhiteSpace(mysqlCs))
                 throw new InvalidOperationException(
-                    "MySQL is configured but no connection string was resolved. Check ConnectionStrings__MySQL, DATABASE_URL, or Database__* variables.");
+                    "MySQL is configured but the connection could not be built. Set **Database__Host**, **Database__Name**, **Database__Username**, **Database__Password** (and optional **Port** / **SslMode**), or see **`backend/src/Trader.Api/.env.example`**.");
 
             if (app.Environment.IsDevelopment())
             {

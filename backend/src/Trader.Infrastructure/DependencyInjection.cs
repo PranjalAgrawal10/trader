@@ -65,16 +65,14 @@ public static class DependencyInjection
 
             if (string.IsNullOrWhiteSpace(conn))
             {
-                var hasProcCs = Environment.GetEnvironmentVariable("ConnectionStrings__MySQL") is { Length: > 0 };
                 var gaps = MySqlConnectionStringResolver.DescribeDiscreteGaps(configuration);
                 throw new InvalidOperationException(
-                    "MySQL connection string is missing. " +
-                    "Set all four: **Database__Host**, **Database__Name**, **Database__Username** (or **UserId**), **Database__Password** " +
-                    "(optional **Database__Port**, **Database__SslMode**), **or** use **MYSQL_*** / **DB_*** aliases documented in the README, **or** a real **ConnectionStrings__MySQL** / **DATABASE_URL** (**mysql://**, not a **${…}** placeholder). " +
-                    "`appsettings.json` sets `Database:Provider` to **MySQL** but no valid connection could be built. " +
+                    "MySQL configuration is incomplete. " +
+                    "Set **Database__Host**, **Database__Name**, **Database__Username** (or **UserId**), **Database__Password** " +
+                    "(optional **Database__Port**, **Database__SslMode**), **or** equivalent **MYSQL_*** / **DB_*** env aliases. " +
+                    "Canonical names: see **`backend/src/Trader.Api/.env.example`**. " +
                     gaps +
-                    $"Process env snapshot: **ConnectionStrings__MySQL**={(hasProcCs ? "set (may be unexpanded `${{…}}` — ignored)" : "absent")}. " +
-                    "On DigitalOcean App Platform, attach vars to the **API** component with **RUN_TIME** and **Encrypt** secrets.");
+                    "`Database:Provider` is **MySQL** but no connection could be built from discrete settings.");
             }
 
             var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));

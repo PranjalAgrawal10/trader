@@ -33,8 +33,12 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__MySQL: Server=mysql;Port=3306;Database=trader;User Id=trader;Password=trader;
       Database__Provider: MySQL
+      Database__Host: mysql
+      Database__Port: "3306"
+      Database__Name: trader
+      Database__Username: trader
+      Database__Password: trader
       Jwt__Issuer: Trader
       Jwt__Audience: TraderClients
       Jwt__Key: CHANGE_ME_DOCKER_MIN_32_CHARS_LONG_SECRET!!

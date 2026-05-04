@@ -38,7 +38,7 @@ Start MySQL locally or via Docker. Example using Compose (MySQL only):
 docker compose up mysql -d
 ```
 
-Database host defaults to **localhost:3306** when you run the API on the host against a local MySQL; match **`ConnectionStrings__MySQL`** in `backend/src/Trader.Api/.env.development` (user, password, port). **Docker Compose** maps container MySQL to **`localhost:3307`** on the host (see `docker-compose.yml`) so it does not fight for **3306** with another MySQL install; set `Port=3307` in your connection string when using that Compose database from **`dotnet run`**. Services inside Compose (`api` → `mysql`) still use port **3306** internally.
+Database host defaults to **localhost:3306** when you run the API on the host against a local MySQL; set **`Database__Host`**, **`Database__Port`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** in `backend/src/Trader.Api/.env.development` (same shape as **`.env.example`**). **Docker Compose** maps container MySQL to **`localhost:3307`** on the host (see `docker-compose.yml`) so it does not fight for **3306** with another MySQL install; use **`Database__Port=3307`** when using that Compose database from **`dotnet run`** on the host. Services inside Compose (`api` → `mysql`) still use port **3306** internally (`Database__Host=mysql`, **`Database__Port=3306`**).
 
 With **`Database:Provider=MySQL`** (and not **IntegrationTesting**), the API runs **`Migrate()`** on startup when **`Database:ApplyMigrationsOnStartup`** is **true** (default in `appsettings.json`). In **Development** it also **creates the database** if missing. **Production** and **Docker** typically use an existing catalog (e.g. managed MySQL) and only apply pending migrations. Set **`Database__ApplyMigrationsOnStartup=false`** to disable automatic startup migrations. You can still apply migrations manually (`dotnet ef`, below).
 
@@ -127,17 +127,17 @@ To use a different API port or hostname, rebuild **`web`** with another build-ar
 |-----------|--------|
 | `appsettings.json` | Structure and non-secret defaults (many values empty by design) |
 | `appsettings.Development.json` | Development logging |
-| `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Use discrete **`Database__Host`**, **`Database__Username`**, **`Database__Name`**, **`Database__Password`** (see `.env.example`) or **`ConnectionStrings__MySQL`**. **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
+| `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Use **`Database__Host`**, **`Database__Port`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** as in **`.env.example`**. **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
 | `.env.production` (committed) | **Template / documentation only** for humans; the API does **not** load it at runtime in Production. |
-| Environment variables | Override files. **`DATABASE_URL`** (**`mysql://`**) is converted. Discrete **`Database__*`** or **`MYSQL_*`** / **`DB_*`** aliases (see resolver) are merged the same way. |
+| Environment variables | Override files. Discrete **`Database__*`** or **`MYSQL_*`** / **`DB_*`** aliases (see `MySqlConnectionStringResolver`) build the MySQL connection. |
 
 See `backend/src/Trader.Api/.env.example`. Local overrides: **`.env.local`** / **`.env.development.local`** (gitignored). **Production** uses only **environment variables** and appsettings — **`.env` / `.env.production` are never loaded** by the host when `ASPNETCORE_ENVIRONMENT` is not `Development`. Blank values in merged `.env` lines are ignored.
 
-Required for a real MySQL run: **`Database:Provider`**, then preferably all of **`Database:Host`**, **`Database:Name`**, **`Database:Username`** (or **`UserId`**), **`Database:Password`** (optional **`Port`**, **`SslMode`**). Equivalent env aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (and **`DB_*`** / **`DATABASE_*`** variants — see `MySqlConnectionStringResolver`). Discrete values load **before** **`ConnectionStrings:MySQL`** / **`DATABASE_URL`**, so they override broken placeholders when all four required pieces are present. Alternatively use **ADO.NET** or **`mysql://`** **`DATABASE_URL`**, plus **JWT** and **CORS**.
+Required for a real MySQL run: **`Database:Provider`**, then all of **`Database:Host`**, **`Database:Name`**, **`Database:Username`** (or **`UserId`**), **`Database:Password`** (optional **`Port`**, **`SslMode`**). Equivalent env aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (and **`DB_*`** / **`DATABASE_*`** variants — see `MySqlConnectionStringResolver`). There is **no** `ConnectionStrings:MySQL` or **`DATABASE_URL`** path — only discrete fields. You still need **JWT** and **CORS**.
 
-**DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Use a full connection string with **`SslMode=Required`**, **or** set **`Database__SslMode=Required`**, **`Database__Port=25060`**, and the other **`Database__*`** fields (see `.env.example`).
+**DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Set **`Database__SslMode=Required`**, **`Database__Port=25060`**, and the other **`Database__*`** fields (see `.env.example`).
 
-**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**, and **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** (optional **`Database__Port`**, **`Database__SslMode=Required`** for managed MySQL). You may use **`ConnectionStrings__MySQL`** / **`DATABASE_URL`** instead if discrete fields are unset. The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (broker token and **TOTP secret** encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **Do not commit** key directories.
+**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**, and **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** (optional **`Database__Port`**, **`Database__SslMode=Required`** for managed MySQL). The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (broker token and **TOTP secret** encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **Do not commit** key directories.
 
 **404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
 
@@ -175,7 +175,7 @@ High-level path: **Managed MySQL** + **one App** from this monorepo with a **Web
 ### 1. Database
 
 - Create a **Managed MySQL** cluster (same region as the app helps latency).
-- Note **host**, **port** (often **25060**), **database**, **user**, **password**; use TLS (**`SslMode=Required`** in the connection string — see [Configuration](#configuration)).
+- Note **host**, **port** (often **25060**), **database**, **user**, **password**; use TLS (**`Database__SslMode=Required`** — see [Configuration](#configuration)).
 
 ### 2. Source control
 
@@ -194,9 +194,7 @@ Add under the service (encrypt secrets in the control panel):
 |-----|--------|
 | **`ASPNETCORE_ENVIRONMENT`** | `Production` |
 | **`Database__Provider`** | `MySQL` |
-| **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** | **Preferred.** **Encrypt** password. Optional: **`Database__Port`**, **`Database__SslMode`**. Aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (also **`DB_*`** / **`DATABASE_*`** — see resolver). **`Database__UserId`** works instead of **`Username`**. |
-| **`ConnectionStrings__MySQL`** | **If discrete fields are unset:** ADO.NET string **or** **`mysql://…`**. Ignored when discrete **Host/Name/Username/Password** are all set. |
-| **`DATABASE_URL`** | Same as above when **`mysql://…`** and discrete fields are incomplete. |
+| **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** | **Required.** **Encrypt** password. Optional: **`Database__Port`**, **`Database__SslMode`**. Aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (also **`DB_*`** / **`DATABASE_*`** — see resolver). **`Database__UserId`** works instead of **`Username`**. |
 | **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** | **`Jwt__Key`** ≥ 32 chars; **secret**. |
 | **`Cors__Origins__0`** | Your live site origin, e.g. **`https://your-app.ondigitalocean.app`** (no trailing slash). |
 | **`ZerodhaKite__*`** | If you use Kite: **secrets**; **`RedirectUrl`** must be the public **`https://…/api/v1/broker/kite/callback`**. |
@@ -218,7 +216,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
   dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
   ```
 
-  Use the same database configuration as production (**`ConnectionStrings__MySQL`** or **`Database__*`** fields) so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
+  Use the same **`Database__*`** (or alias) variables as production so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
 
 ### 7. Smoke test
 
@@ -228,7 +226,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 
 **Troubleshooting — `JWT is not configured` / readiness `connection refused` on 8080:** The API process crashes **before** Kestrel listens, so probes fail. Add **`Jwt__Issuer`**, **`Jwt__Audience`**, and **`Jwt__Key`** (≥ 32 characters) to the **Web Service** component with scope **RUN_TIME** (not only BUILD_TIME, and not only on the static site). Add **`Cors__Origins__0`** the same way or the next startup error will be about CORS. Names must use **`__`** (e.g. **`Jwt__Key`**), not colons.
 
-**Troubleshooting — MySQL connection / configuration missing:** Set **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** on the **Web Service** (**RUN_TIME**, encrypt secrets), or **`ConnectionStrings__MySQL`** / **`DATABASE_URL`**. Discrete **`Database__*`** values are applied **first** and override a bad **`ConnectionStrings__MySQL`** such as **`${…}`**. If you see **Format of the initialization string…** or **`$`**, fix or remove the placeholder **or** fill in discrete fields.
+**Troubleshooting — MySQL connection / configuration missing:** On the **Web Service**, set **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** (**RUN_TIME**, encrypt the password), plus optional **`Database__Port`** / **`Database__SslMode`**. See **`backend/src/Trader.Api/.env.example`** for the canonical names.
 
 **Troubleshooting — App Platform / Heroku build: `MSB4018` / `GenerateDepsFile` / `deps.json` in use:** The buildpack runs **`dotnet publish`** with a shared **`--artifacts-path`**, which can deadlock or race when MSBuild compiles shared projects on multiple nodes. This repo sets **`BuildInParallel=false`** in **`backend/Directory.Build.props`** so publish is single-threaded (slightly slower, stable on App Platform).
 
