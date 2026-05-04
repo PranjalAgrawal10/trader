@@ -56,14 +56,15 @@ public static class DependencyInjection
             if (string.IsNullOrWhiteSpace(conn))
             {
                 var hasProcCs = Environment.GetEnvironmentVariable("ConnectionStrings__MySQL") is { Length: > 0 };
-                var hasName = Environment.GetEnvironmentVariable("Database__Name") is { Length: > 0 };
-                var hasPassword = Environment.GetEnvironmentVariable("Database__Password") is { Length: > 0 };
+                var gaps = MySqlConnectionStringResolver.DescribeDiscreteGaps(configuration);
                 throw new InvalidOperationException(
                     "MySQL connection string is missing. " +
-                    "Set **Database__Host**, **Database__Name**, **Database__Username** (or **Database__UserId**), and **Database__Password** (optional: **Database__Port**, **Database__SslMode**), **or** **ConnectionStrings__MySQL** / **DATABASE_URL** (**mysql://**). " +
-                    "`appsettings.json` sets `Database:Provider` to **MySQL** but neither approach produced a connection string. " +
-                    $"Process env: **ConnectionStrings__MySQL**={(hasProcCs ? "present" : "absent")}, **Database__Name**={(hasName ? "present" : "absent")}, **Database__Password**={(hasPassword ? "present" : "absent")}. " +
-                    "On DigitalOcean App Platform, use **RUN_TIME** scope and **Encrypt** for secrets.");
+                    "Set all four: **Database__Host**, **Database__Name**, **Database__Username** (or **UserId**), **Database__Password** " +
+                    "(optional **Database__Port**, **Database__SslMode**), **or** use **MYSQL_*** / **DB_*** aliases documented in the README, **or** a real **ConnectionStrings__MySQL** / **DATABASE_URL** (**mysql://**, not a **${…}** placeholder). " +
+                    "`appsettings.json` sets `Database:Provider` to **MySQL** but no valid connection could be built. " +
+                    gaps +
+                    $"Process env snapshot: **ConnectionStrings__MySQL**={(hasProcCs ? "set (may be unexpanded `${{…}}` — ignored)" : "absent")}. " +
+                    "On DigitalOcean App Platform, attach vars to the **API** component with **RUN_TIME** and **Encrypt** secrets.");
             }
 
             var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));

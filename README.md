@@ -127,11 +127,11 @@ To use a different API port or hostname, rebuild **`web`** with another build-ar
 | `appsettings.Development.json` | Development logging |
 | `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Use discrete **`Database__Host`**, **`Database__Username`**, **`Database__Name`**, **`Database__Password`** (see `.env.example`) or **`ConnectionStrings__MySQL`**. **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
 | `.env.production` (committed) | **Template / documentation only** for humans; the API does **not** load it at runtime in Production. |
-| Environment variables | Override files (e.g. in Docker/Kubernetes). **DATABASE_URL** with **mysql://** is converted automatically (see `MySqlConnectionStringResolver`). |
+| Environment variables | Override files. **`DATABASE_URL`** (**`mysql://`**) is converted. Discrete **`Database__*`** or **`MYSQL_*`** / **`DB_*`** aliases (see resolver) are merged the same way. |
 
 See `backend/src/Trader.Api/.env.example`. Local overrides: **`.env.local`** / **`.env.development.local`** (gitignored). **Production** uses only **environment variables** and appsettings — **`.env` / `.env.production` are never loaded** by the host when `ASPNETCORE_ENVIRONMENT` is not `Development`. Blank values in merged `.env` lines are ignored.
 
-Required for a real MySQL run: **`Database:Provider`**, then preferably all of **`Database:Host`**, **`Database:Name`**, **`Database:Username`** (or **`UserId`**), **`Database:Password`** (optional **`Port`**, **`SslMode`**). Discrete values load **before** **`ConnectionStrings:MySQL`** / **`DATABASE_URL`**, so they override broken platform placeholders. Alternatively use **ADO.NET** **`ConnectionStrings:MySQL`** or **`mysql://`** **`DATABASE_URL`**, plus **JWT** and **CORS**.
+Required for a real MySQL run: **`Database:Provider`**, then preferably all of **`Database:Host`**, **`Database:Name`**, **`Database:Username`** (or **`UserId`**), **`Database:Password`** (optional **`Port`**, **`SslMode`**). Equivalent env aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (and **`DB_*`** / **`DATABASE_*`** variants — see `MySqlConnectionStringResolver`). Discrete values load **before** **`ConnectionStrings:MySQL`** / **`DATABASE_URL`**, so they override broken placeholders when all four required pieces are present. Alternatively use **ADO.NET** or **`mysql://`** **`DATABASE_URL`**, plus **JWT** and **CORS**.
 
 **DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Use a full connection string with **`SslMode=Required`**, **or** set **`Database__SslMode=Required`**, **`Database__Port=25060`**, and the other **`Database__*`** fields (see `.env.example`).
 
@@ -192,7 +192,7 @@ Add under the service (encrypt secrets in the control panel):
 |-----|--------|
 | **`ASPNETCORE_ENVIRONMENT`** | `Production` |
 | **`Database__Provider`** | `MySQL` |
-| **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** | **Preferred.** **Encrypt** password. Optional: **`Database__Port`**, **`Database__SslMode`**. Alias: **`Database__UserId`**. |
+| **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** | **Preferred.** **Encrypt** password. Optional: **`Database__Port`**, **`Database__SslMode`**. Aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (also **`DB_*`** / **`DATABASE_*`** — see resolver). **`Database__UserId`** works instead of **`Username`**. |
 | **`ConnectionStrings__MySQL`** | **If discrete fields are unset:** ADO.NET string **or** **`mysql://…`**. Ignored when discrete **Host/Name/Username/Password** are all set. |
 | **`DATABASE_URL`** | Same as above when **`mysql://…`** and discrete fields are incomplete. |
 | **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** | **`Jwt__Key`** ≥ 32 chars; **secret**. |
