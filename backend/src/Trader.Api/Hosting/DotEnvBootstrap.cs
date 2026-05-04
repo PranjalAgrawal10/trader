@@ -4,7 +4,9 @@ using Microsoft.Extensions.Configuration;
 namespace Trader.Api.Hosting;
 
 /// <summary>
-/// Merges optional <c>.env</c> then <c>.env.&lt;environment&gt;</c> into configuration (does not mutate process env).
+/// Merges optional <c>.env</c> files into configuration in <b>Development</b> only.
+/// Production/staging rely on real environment variables (App Platform, Kubernetes, etc.); committed
+/// <c>.env.production</c> templates are not loaded in those environments.
 /// Skipped for <c>IntegrationTesting</c> so test hosts stay deterministic.
 /// </summary>
 public static class DotEnvBootstrap
@@ -14,6 +16,10 @@ public static class DotEnvBootstrap
         if (env.IsEnvironment("IntegrationTesting"))
             return;
 
+        if (!env.IsDevelopment())
+            return;
+
+        // Only Development loads .env files. Production/Staging/etc. must use real process environment variables and appsettings*.
         var slug = env.EnvironmentName.ToLowerInvariant().Replace(" ", string.Empty);
         var roots = new List<string> { env.ContentRootPath, Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
         var apiRoot = FindApiProjectDirectory();
@@ -48,8 +54,8 @@ public static class DotEnvBootstrap
                 merged[kv.Key] = kv.Value;
         }
 
-        // .env keys use "__" like environment variables; MemoryConfigurationProvider expects ":" hierarchy (see EnvironmentVariablesConfigurationProvider).
-        // Skip empty values so placeholder lines (e.g. Jwt__Key=) in committed .env.production do not override real host env vars (Docker, App Platform).
+        // .env keys use "__" like environment variables; map to configuration hierarchy (see EnvironmentVariablesConfigurationProvider).
+        // Skip empty values in merged files.
         configuration.AddInMemoryCollection(
             merged
                 .Where(static kv => !string.IsNullOrWhiteSpace(kv.Value))

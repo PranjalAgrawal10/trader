@@ -74,7 +74,7 @@ dotnet run --project src/Trader.Api
 - Health: `GET /health`.
 - API routes are versioned (e.g. `GET /api/v1/...`).
 
-Configuration merges `appsettings*.json` with optional **`.env`** / **`.env.<environment>`** files under `backend/src/Trader.Api` (see [Configuration](#configuration)). **Integration tests** use `appsettings.IntegrationTesting.json` + an in-memory database and do not load `.env`.
+Configuration merges `appsettings*.json` with **process environment variables**. Optional **`.env`** files are merged **only** when `ASPNETCORE_ENVIRONMENT=Development` (`DotEnvBootstrap`); **Production never reads `.env`**. **Integration tests** use `appsettings.IntegrationTesting.json` + an in-memory database and skip `.env`.
 
 ### 4. Run the web app
 
@@ -125,10 +125,11 @@ To use a different API port or hostname, rebuild **`web`** with another build-ar
 |-----------|--------|
 | `appsettings.json` | Structure and non-secret defaults (many values empty by design) |
 | `appsettings.Development.json` | Development logging |
-| `.env` / `.env.development` / `.env.production` | Optional; merged into configuration. Use `__` in keys (e.g. `ConnectionStrings__MySQL`); the API maps these to nested keys (`ConnectionStrings:MySQL`), matching OS environment-variable conventions. |
+| `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Use `__` in keys (e.g. `ConnectionStrings__MySQL`). **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
+| `.env.production` (committed) | **Template / documentation only** for humans; the API does **not** load it at runtime in Production. |
 | Environment variables | Override files (e.g. in Docker/Kubernetes) |
 
-See `backend/src/Trader.Api/.env.example`. Local overrides can go in `.env.local` (gitignored). Values loaded from `.env` / `.env.*` are merged after default configuration; **blank values in those files are ignored** so they do not wipe out real environment variables on hosts like App Platform.
+See `backend/src/Trader.Api/.env.example`. Local overrides: **`.env.local`** / **`.env.development.local`** (gitignored). **Production** uses only **environment variables** and appsettings — **`.env` / `.env.production` are never loaded** by the host when `ASPNETCORE_ENVIRONMENT` is not `Development`. Blank values in merged `.env` lines are ignored.
 
 Required for a real MySQL run: **`Database:Provider`**, **`ConnectionStrings:MySQL`**, **JWT** (`Issuer`, `Audience`, `Key` ≥ 32 chars), and **CORS** origins (`Cors:Origins` or `Cors__Origins__0`, etc.).
 

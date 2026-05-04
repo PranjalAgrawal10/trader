@@ -76,12 +76,21 @@ public sealed class Program
                 || string.IsNullOrWhiteSpace(jwt.Audience)
                 || keyLength < 32)
             {
+                var hasProcKey = Environment.GetEnvironmentVariable("Jwt__Key") is { Length: > 0 };
+                var cfgIssuer = string.IsNullOrWhiteSpace(builder.Configuration["Jwt:Issuer"]) ? "missing" : "set";
+                var cfgAudience = string.IsNullOrWhiteSpace(builder.Configuration["Jwt:Audience"]) ? "missing" : "set";
+                var cfgKeyLen = string.IsNullOrEmpty(builder.Configuration["Jwt:Key"])
+                    ? 0
+                    : Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!).Length;
+
                 throw new InvalidOperationException(
-                    "JWT is not configured for this environment. On DigitalOcean App Platform, open your **Web Service** (API) component → **Settings → Environment variables** " +
-                    "(or **Edit** in the app spec) and add at **run time** (use **Encrypt** for secrets): " +
-                    "**Jwt__Issuer**, **Jwt__Audience**, **Jwt__Key** (random string, UTF-8 length ≥ 32 bytes), and **Cors__Origins__0** (your SPA origin, e.g. https://your-app.ondigitalocean.app). " +
-                    "Use double underscores in names; scope must include **RUN_TIME**. If these are set only on the static site or as **BUILD_TIME** only, the API will not see them. " +
-                    "Until the process starts successfully, health checks may report **connection refused** on port 8080.");
+                    $"JWT is not configured for this environment (ASPNETCORE_ENVIRONMENT={builder.Environment.EnvironmentName}). " +
+                    $"Config: Jwt:Issuer={cfgIssuer}, Jwt:Audience={cfgAudience}, Jwt:Key UTF8 length={cfgKeyLen}. " +
+                    $"Process env Jwt__Key present={(hasProcKey ? "yes" : "no")}. " +
+                    "On DigitalOcean App Platform, add to the **Web Service** (API) component with **RUN_TIME** scope (Encrypt secrets): " +
+                    "**Jwt__Issuer**, **Jwt__Audience**, **Jwt__Key** (≥ 32 UTF-8 bytes), **Cors__Origins__0**. " +
+                    "Names use double underscores (__). App-level env vars must be attached to this component. " +
+                    "If Jwt__Key is set in the UI but this still says Jwt__Key present=no, the variable name or scope is wrong.");
             }
         }
 
@@ -139,7 +148,7 @@ public sealed class Program
         if (corsOrigins.Length == 0)
         {
             throw new InvalidOperationException(
-                "Configure CORS via Cors:Origins (e.g. Cors__Origins__0 in .env) or appsettings for this environment.");
+                "Configure CORS via Cors:Origins or environment variables (e.g. Cors__Origins__0) for this environment.");
         }
 
         builder.Services.AddCors(options =>
