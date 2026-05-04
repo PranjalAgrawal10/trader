@@ -2,7 +2,7 @@
 
 This repository contains **two deployable projects**: **`backend/`** (.NET 8 API) and **`frontend/`** (Vite + React). They can stay in one Git repo or be pushed to **separate remotes** (copy each folder into its own repository root if you split).
 
-Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React (TypeScript)** UI for strategies, bots, trades, and broker onboarding.
+Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React (TypeScript)** UI for strategies, bots, trades, broker onboarding, and **authenticator-app 2FA** (TOTP).
 
 ## Prerequisites
 
@@ -74,6 +74,8 @@ dotnet run --project src/Trader.Api
 - Health: `GET /health`.
 - API routes are versioned (e.g. `GET /api/v1/...`).
 
+**Authentication:** `POST /api/v1/auth/register` and `POST /api/v1/auth/login` return a JWT when credentials succeed. If the account has **two-factor authentication** enabled, `POST .../auth/login` returns **200** with `{ "requiresTwoFactor": true, "twoFactorToken": "…" }` (short-lived opaque ticket); complete sign-in with **`POST /api/v1/auth/login/2fa`** and `{ "twoFactorToken", "code" }`. **Enrollment** (Bearer required): `GET .../auth/2fa/status`, `POST .../auth/2fa/enrollment/begin`, `POST .../auth/2fa/enrollment/confirm`, `POST .../auth/2fa/enrollment/cancel`, `POST .../auth/2fa/disable`. The SPA **Security** page at **`/security`** runs setup. **2FA is mandatory:** after sign-in, accounts without TOTP enabled are sent to **`/security?required=1`** and cannot open dashboard, broker, strategies, bots, or trades until setup is complete (`RequiresTwoFactor` gate). TOTP secrets are stored **encrypted** via Data Protection (same key ring as broker tokens); use a **persistent** `DataProtection:KeyRingPath` in production so keys and secrets survive redeploys.
+
 Configuration merges `appsettings*.json` with **process environment variables**. Optional **`.env`** files are merged **only** when `ASPNETCORE_ENVIRONMENT=Development` (`DotEnvBootstrap`); **Production never reads `.env`**. **Integration tests** use `appsettings.IntegrationTesting.json` + an in-memory database and skip `.env`.
 
 ### 4. Run the web app
@@ -135,7 +137,7 @@ Required for a real MySQL run: **`Database:Provider`**, then preferably all of *
 
 **DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Use a full connection string with **`SslMode=Required`**, **or** set **`Database__SslMode=Required`**, **`Database__Port=25060`**, and the other **`Database__*`** fields (see `.env.example`).
 
-**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**, and **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** (optional **`Database__Port`**, **`Database__SslMode=Required`** for managed MySQL). You may use **`ConnectionStrings__MySQL`** / **`DATABASE_URL`** instead if discrete fields are unset. The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (used for broker token encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **Do not commit** key directories.
+**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**, and **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** (optional **`Database__Port`**, **`Database__SslMode=Required`** for managed MySQL). You may use **`ConnectionStrings__MySQL`** / **`DATABASE_URL`** instead if discrete fields are unset. The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (broker token and **TOTP secret** encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **Do not commit** key directories.
 
 **404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
 

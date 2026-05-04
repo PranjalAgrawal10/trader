@@ -1,12 +1,14 @@
 import type { ReactElement } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { RequiresBroker } from './components/RequiresBroker'
+import { RequiresTwoFactor } from './components/RequiresTwoFactor'
 import { useAuthStore } from './store/useAuthStore'
 import { BotsPage } from './pages/BotsPage'
 import { BrokersPage } from './pages/BrokersPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { StrategiesPage } from './pages/StrategiesPage'
+import { SecurityPage } from './pages/SecurityPage'
 import { TradesPage } from './pages/TradesPage'
 
 function Protected({ children }: { children: ReactElement }) {
@@ -23,7 +25,17 @@ export default function App() {
         path="/brokers"
         element={
           <Protected>
-            <BrokersPage />
+            <RequiresTwoFactor>
+              <BrokersPage />
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
+        path="/security"
+        element={
+          <Protected>
+            <SecurityPage />
           </Protected>
         }
       />
@@ -31,9 +43,11 @@ export default function App() {
         path="/"
         element={
           <Protected>
-            <RequiresBroker>
-              <DashboardPage />
-            </RequiresBroker>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <DashboardPage />
+              </RequiresBroker>
+            </RequiresTwoFactor>
           </Protected>
         }
       />
@@ -41,9 +55,11 @@ export default function App() {
         path="/strategies"
         element={
           <Protected>
-            <RequiresBroker>
-              <StrategiesPage />
-            </RequiresBroker>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <StrategiesPage />
+              </RequiresBroker>
+            </RequiresTwoFactor>
           </Protected>
         }
       />
@@ -51,9 +67,11 @@ export default function App() {
         path="/bots"
         element={
           <Protected>
-            <RequiresBroker>
-              <BotsPage />
-            </RequiresBroker>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <BotsPage />
+              </RequiresBroker>
+            </RequiresTwoFactor>
           </Protected>
         }
       />
@@ -61,9 +79,11 @@ export default function App() {
         path="/trades"
         element={
           <Protected>
-            <RequiresBroker>
-              <TradesPage />
-            </RequiresBroker>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <TradesPage />
+              </RequiresBroker>
+            </RequiresTwoFactor>
           </Protected>
         }
       />

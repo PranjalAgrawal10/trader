@@ -28,6 +28,16 @@ public static class DependencyInjection
             var provider = sp.GetRequiredService<IDataProtectionProvider>();
             return new KiteOAuthStateCodec(provider.CreateProtector("Trader.Broker.Kite.State"));
         });
+        services.AddSingleton<ITwoFactorTotpHelper>(sp =>
+        {
+            var provider = sp.GetRequiredService<IDataProtectionProvider>();
+            return new TwoFactorTotpHelper(provider.CreateProtector("Trader.Security.TotpSecret"));
+        });
+        services.AddSingleton<ITwoFactorLoginTicketService>(sp =>
+        {
+            var provider = sp.GetRequiredService<IDataProtectionProvider>();
+            return new TwoFactorLoginTicketService(provider.CreateProtector("Trader.Auth.TwoFactorLogin"));
+        });
         services.AddHttpClient<IKiteSessionExchange, KiteSessionExchange>(client =>
         {
             client.BaseAddress = new Uri("https://api.kite.trade/");

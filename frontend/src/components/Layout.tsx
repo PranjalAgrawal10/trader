@@ -37,6 +37,9 @@ export function Layout({ children }: { children: ReactNode }) {
               <Nav.Link as={NavLink} to="/trades">
                 Trades
               </Nav.Link>
+              <Nav.Link as={NavLink} to="/security">
+                Security
+              </Nav.Link>
             </Nav>
             <Navbar.Text className="me-3 d-none d-sm-inline text-secondary">{email}</Navbar.Text>
             <Button variant="outline-light" size="sm" onClick={handleLogout}>

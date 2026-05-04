@@ -23,6 +23,15 @@ public class User
     /// <summary>Zerodha user id from Kite session.</summary>
     public string? KiteUserId { get; set; }
 
+    /// <summary>Authenticator (TOTP) enabled for this account.</summary>
+    public bool TwoFactorEnabled { get; set; }
+
+    /// <summary>Data-protection encrypted TOTP secret (Base64 payload) when <see cref="TwoFactorEnabled"/>.</summary>
+    public string? TotpSecretProtected { get; set; }
+
+    /// <summary>Pending enrollment: encrypted secret until the user confirms the first code.</summary>
+    public string? TotpPendingSecretProtected { get; set; }
+
     public void MarkBrokerConnected(DateTimeOffset connectedAt) =>
         BrokerConnectedAt = connectedAt;
 

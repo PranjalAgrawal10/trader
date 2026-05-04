@@ -2,7 +2,27 @@ import { type FormEvent, useState } from 'react'
 import { Button, ButtonGroup, Card, Col, Container, Form, Row } from 'react-bootstrap'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+import { navigateToAppAfterTwoFactor } from '../navigation/afterTwoFactor'
 import { useAuthStore } from '../store/useAuthStore'
+
+type AuthPayload = {
+  token: string
+  userId: string
+  email: string
+  role: string
+}
+
+function isTwoFactorChallenge(x: unknown): x is { requiresTwoFactor: true; twoFactorToken: string } {
+  if (typeof x !== 'object' || x === null) return false
+  const o = x as Record<string, unknown>
+  return o.requiresTwoFactor === true && typeof o.twoFactorToken === 'string'
+}
+
+function isAuthPayload(x: unknown): x is AuthPayload {
+  if (typeof x !== 'object' || x === null) return false
+  const o = x as Record<string, unknown>
+  return typeof o.token === 'string' && typeof o.email === 'string'
+}
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -10,26 +30,61 @@ export function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [twoFactorToken, setTwoFactorToken] = useState<string | null>(null)
+  const [totpCode, setTotpCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const submit = async (e: FormEvent) => {
+  const continueAfterAuth = async (token: string, accountEmail: string) => {
+    setAuth(token, accountEmail)
+    try {
+      const { data } = await api.get<{ twoFactorEnabled: boolean }>('/auth/2fa/status')
+      if (!data.twoFactorEnabled) {
+        navigate('/security?required=1', { replace: true })
+        return
+      }
+    } catch {
+      navigate('/security?required=1', { replace: true })
+      return
+    }
+    await navigateToAppAfterTwoFactor(navigate)
+  }
+
+  const submitPassword = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
     setBusy(true)
     try {
-      const path = mode === 'login' ? '/auth/login' : '/auth/register'
-      const { data } = await api.post<{ token: string; email: string }>(path, {
+      if (mode === 'register') {
+        const { data } = await api.post<unknown>('/auth/register', {
+          email,
+          password,
+        })
+        if (!isAuthPayload(data)) {
+          setError('Unexpected response from server.')
+          return
+        }
+        await continueAfterAuth(data.token, data.email)
+        return
+      }
+
+      const { data } = await api.post<unknown>('/auth/login', {
         email,
         password,
       })
-      setAuth(data.token, data.email)
-      try {
-        const status = await api.get<{ connected: boolean }>('/broker/status')
-        navigate(status.data.connected ? '/' : '/brokers?setup=1', { replace: true })
-      } catch {
-        navigate('/brokers?setup=1', { replace: true })
+
+      if (isTwoFactorChallenge(data)) {
+        setTwoFactorToken(data.twoFactorToken)
+        setTotpCode('')
+        return
       }
+
+      if (!isAuthPayload(data)) {
+        setError('Invalid credentials.')
+        return
+      }
+
+      await continueAfterAuth(data.token, data.email)
     } catch {
       const msg =
         mode === 'login'
@@ -39,6 +94,36 @@ export function LoginPage() {
     } finally {
       setBusy(false)
     }
+  }
+
+  const submitTotp = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!twoFactorToken) return
+    setError(null)
+    setBusy(true)
+    try {
+      const { data } = await api.post<unknown>('/auth/login/2fa', {
+        twoFactorToken,
+        code: totpCode.trim(),
+      })
+      if (!isAuthPayload(data)) {
+        setError('Invalid or expired code. Try signing in again.')
+        return
+      }
+      setTwoFactorToken(null)
+      setTotpCode('')
+      await continueAfterAuth(data.token, data.email)
+    } catch {
+      setError('Invalid or expired code. Try signing in again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const backToPassword = () => {
+    setTwoFactorToken(null)
+    setTotpCode('')
+    setError(null)
   }
 
   return (
@@ -52,50 +137,87 @@ export function LoginPage() {
                 Sign in to manage strategies and bots.
               </Card.Text>
 
-              <ButtonGroup className="w-100 mb-4">
-                <Button
-                  variant={mode === 'login' ? 'success' : 'outline-secondary'}
-                  onClick={() => setMode('login')}
-                >
-                  Login
-                </Button>
-                <Button
-                  variant={mode === 'register' ? 'success' : 'outline-secondary'}
-                  onClick={() => setMode('register')}
-                >
-                  Register
-                </Button>
-              </ButtonGroup>
+              {twoFactorToken ? (
+                <Form onSubmit={submitTotp}>
+                  <p className="small text-secondary mb-3">
+                    Enter the 6-digit code from your authenticator app for <strong>{email}</strong>.
+                  </p>
+                  <Form.Group className="mb-3" controlId="login-totp">
+                    <Form.Label className="small text-secondary text-uppercase">Authenticator code</Form.Label>
+                    <Form.Control
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      value={totpCode}
+                      onChange={(ev) => setTotpCode(ev.target.value)}
+                      placeholder="123456"
+                      required
+                      autoFocus
+                    />
+                  </Form.Group>
+                  {error ? (
+                    <Form.Text className="text-danger d-block mb-3">{error}</Form.Text>
+                  ) : null}
+                  <Button variant="success" type="submit" className="w-100 mb-2" disabled={busy}>
+                    {busy ? 'Please wait…' : 'Verify and sign in'}
+                  </Button>
+                  <Button variant="outline-secondary" type="button" className="w-100" disabled={busy} onClick={backToPassword}>
+                    Back
+                  </Button>
+                </Form>
+              ) : (
+                <>
+                  <ButtonGroup className="w-100 mb-4">
+                    <Button
+                      variant={mode === 'login' ? 'success' : 'outline-secondary'}
+                      onClick={() => {
+                        setMode('login')
+                        setError(null)
+                      }}
+                    >
+                      Login
+                    </Button>
+                    <Button
+                      variant={mode === 'register' ? 'success' : 'outline-secondary'}
+                      onClick={() => {
+                        setMode('register')
+                        setError(null)
+                      }}
+                    >
+                      Register
+                    </Button>
+                  </ButtonGroup>
 
-              <Form onSubmit={submit}>
-                <Form.Group className="mb-3" controlId="login-email">
-                  <Form.Label className="small text-secondary text-uppercase">Email</Form.Label>
-                  <Form.Control
-                    type="email"
-                    autoComplete="email"
-                    value={email}
-                    onChange={(ev) => setEmail(ev.target.value)}
-                    required
-                  />
-                </Form.Group>
-                <Form.Group className="mb-3" controlId="login-password">
-                  <Form.Label className="small text-secondary text-uppercase">Password</Form.Label>
-                  <Form.Control
-                    type="password"
-                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                    value={password}
-                    onChange={(ev) => setPassword(ev.target.value)}
-                    required
-                    minLength={6}
-                  />
-                </Form.Group>
-                {error ? (
-                  <Form.Text className="text-danger d-block mb-3">{error}</Form.Text>
-                ) : null}
-                <Button variant="success" type="submit" className="w-100" disabled={busy}>
-                  {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
-                </Button>
-              </Form>
+                  <Form onSubmit={submitPassword}>
+                    <Form.Group className="mb-3" controlId="login-email">
+                      <Form.Label className="small text-secondary text-uppercase">Email</Form.Label>
+                      <Form.Control
+                        type="email"
+                        autoComplete="email"
+                        value={email}
+                        onChange={(ev) => setEmail(ev.target.value)}
+                        required
+                      />
+                    </Form.Group>
+                    <Form.Group className="mb-3" controlId="login-password">
+                      <Form.Label className="small text-secondary text-uppercase">Password</Form.Label>
+                      <Form.Control
+                        type="password"
+                        autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                        value={password}
+                        onChange={(ev) => setPassword(ev.target.value)}
+                        required
+                        minLength={6}
+                      />
+                    </Form.Group>
+                    {error ? (
+                      <Form.Text className="text-danger d-block mb-3">{error}</Form.Text>
+                    ) : null}
+                    <Button variant="success" type="submit" className="w-100" disabled={busy}>
+                      {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
+                    </Button>
+                  </Form>
+                </>
+              )}
             </Card.Body>
           </Card>
         </Col>

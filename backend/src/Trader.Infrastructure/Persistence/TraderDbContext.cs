@@ -29,6 +29,8 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.KiteUserId).HasMaxLength(64);
             e.Property(x => x.KiteAccessTokenProtected);
             e.Property(x => x.KiteRefreshTokenProtected);
+            e.Property(x => x.TotpSecretProtected);
+            e.Property(x => x.TotpPendingSecretProtected);
         });
 
         modelBuilder.Entity<Strategy>(e =>
