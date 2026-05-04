@@ -6,8 +6,10 @@ services:
       MYSQL_USER: trader
       MYSQL_PASSWORD: trader
       MYSQL_ROOT_PASSWORD: rootdevchange_me
+    # Host port 3307 avoids conflict when another MySQL (or old container) already uses 3306 on Windows.
+    # Inside the Compose network the API still uses mysql:3306.
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - trader_mysql:/var/lib/mysql
     healthcheck:
@@ -37,10 +39,24 @@ services:
       Jwt__Audience: TraderClients
       Jwt__Key: CHANGE_ME_DOCKER_MIN_32_CHARS_LONG_SECRET!!
       Jwt__ExpiresHours: "12"
-      Cors__Origins__0: http://localhost:5173
+      # SPA in Docker (web) + optional local Vite dev
+      Cors__Origins__0: http://localhost:8080
+      Cors__Origins__1: http://localhost:5173
     depends_on:
       mysql:
         condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Browser calls the API on the host-mapped port (not a Docker service hostname).
+        VITE_API_BASE_URL: http://localhost:5232
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
 
 volumes:
   trader_mysql:

@@ -21,6 +21,7 @@ Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React
 | `backend/src/Trader.Domain` | Entities and enums |
 | `backend/src/Trader.Infrastructure` | EF Core (`TraderDbContext`), MySQL (Pomelo), repositories, migrations |
 | `frontend/` | Vite + React SPA |
+| `frontend/Dockerfile` | Multi-stage Node build + nginx static server (Compose `web` service) |
 | `backend/tests/Trader.Tests` | Integration tests (`WebApplicationFactory`) |
 | `backend/docker/` | API Dockerfile |
 | `docker-compose.yml` | MySQL, Redis (service only), API (repo root; build context `backend/`) |
@@ -37,7 +38,7 @@ Start MySQL locally or via Docker. Example using Compose (MySQL only):
 docker compose up mysql -d
 ```
 
-Database host defaults to **localhost:3306**; user, password, and database name are set in `backend/src/Trader.Api/.env.development` (`ConnectionStrings__MySQL`). Adjust to match your MySQL install (Docker Compose still uses the `trader` MySQL user unless you change Compose too).
+Database host defaults to **localhost:3306** when you run the API on the host against a local MySQL; match **`ConnectionStrings__MySQL`** in `backend/src/Trader.Api/.env.development` (user, password, port). **Docker Compose** maps container MySQL to **`localhost:3307`** on the host (see `docker-compose.yml`) so it does not fight for **3306** with another MySQL install; set `Port=3307` in your connection string when using that Compose database from **`dotnet run`**. Services inside Compose (`api` → `mysql`) still use port **3306** internally.
 
 With **`ASPNETCORE_ENVIRONMENT=Development`** and **`Database:Provider=MySQL`**, the API **creates the database if it does not exist** and runs **`Migrate()`** on startup so tables stay up to date. You can still apply migrations manually (below) if you prefer.
 
@@ -95,15 +96,24 @@ npm run build
 
 Uses `.env.production` for `VITE_API_BASE_URL`.
 
-## Docker Compose (API + MySQL)
+## Docker Compose (full stack)
 
-Full stack (API container listens on **8080**, mapped to host **5232**):
+From the **repository root**:
 
 ```bash
 docker compose up --build
 ```
 
-The `api` service sets connection string host `mysql`, JWT, CORS, etc. The UI still runs locally with `npm run dev` unless you containerize it separately.
+| Service | Host URL / port | Notes |
+|---------|-----------------|--------|
+| **web** (SPA) | **http://localhost:8080** | nginx serves `frontend` production build; client calls API at **`http://localhost:5232`** (see `web.build.args.VITE_API_BASE_URL`). |
+| **api** | **http://localhost:5232** | Swagger: `/swagger`, health: `/health`. |
+| **mysql** | **localhost:3307** → container `3306` | Change if **3307** is taken. API inside Compose still uses `mysql:3306`. |
+| **redis** | **localhost:6379** | Reserved for future use. |
+
+CORS in Compose allows **`http://localhost:8080`** (Docker UI) and **`http://localhost:5173`** (optional local `npm run dev`).
+
+To use a different API port or hostname, rebuild **`web`** with another build-arg, e.g. in `docker-compose.yml`: `VITE_API_BASE_URL: http://localhost:YOUR_PORT`.
 
 `redis` is included for future use; the current API code does not require it.
 
@@ -153,7 +163,63 @@ See `frontend/.env.example`. Only variables prefixed with `VITE_` are exposed to
 
 The SPA uses **React Bootstrap** (components) and **Bootstrap 5** (CSS); `index.html` sets `data-bs-theme="dark"`.
 
-Example **DigitalOcean App Platform** layout: **`.do/app.yaml`** (**`source_dir`**: **`backend`** for the API, **`frontend`** for the static site; ingress **`/api` →** API, **`/` →** static site). Set **`VITE_API_BASE_URL`** at **BUILD_TIME** when the API lives on a different origin.
+Example layout for production: see **[Deploy to DigitalOcean App Platform](#deploy-to-digitalocean-app-platform)** and **`.do/app.yaml`**.
+
+## Deploy to DigitalOcean App Platform
+
+High-level path: **Managed MySQL** + **one App** from this monorepo with a **Web Service** (API) and a **Static Site** (frontend), plus **ingress** so **`/api` → API** and **`/` → static**. TLS is at the edge; the .NET container listens on HTTP **8080** internally (match **`http_port`** in the spec).
+
+### 1. Database
+
+- Create a **Managed MySQL** cluster (same region as the app helps latency).
+- Note **host**, **port** (often **25060**), **database**, **user**, **password**; use TLS (**`SslMode=Required`** in the connection string — see [Configuration](#configuration)).
+
+### 2. Source control
+
+- Push this repo to **GitHub** (or GitLab). Edit **`.do/app.yaml`**: set **`github.repo`**, **`branch`**, **`region`**, and instance sizes as needed.
+
+### 3. Create / update the app
+
+- **Apps → Create** → GitHub → pick repo. Paste or import the spec from **`.do/app.yaml`**, or after the first wizard pass use **Settings → App Spec** / **`doctl apps update --spec .do/app.yaml`**.
+- Ensure **ingress** matches the file: **`/api` first** with **`preserve_path_prefix: true`** on the **Web Service** named **`trader`** (or rename consistently), then **`/`** to static **`trader-web`**.
+
+### 4. API environment variables (Web Service `trader`)
+
+Add under the service (encrypt secrets in the control panel):
+
+| Key | Notes |
+|-----|--------|
+| **`ASPNETCORE_ENVIRONMENT`** | `Production` |
+| **`Database__Provider`** | `MySQL` |
+| **`ConnectionStrings__MySQL`** | Full Pomelo-style string; **secret**. |
+| **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** | **`Jwt__Key`** ≥ 32 chars; **secret**. |
+| **`Cors__Origins__0`** | Your live site origin, e.g. **`https://your-app.ondigitalocean.app`** (no trailing slash). |
+| **`ZerodhaKite__*`** | If you use Kite: **secrets**; **`RedirectUrl`** must be the public **`https://…/api/v1/broker/kite/callback`**. |
+
+Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage** so broker encryption keys survive redeploys.
+
+### 5. Frontend (Static Site `trader-web`)
+
+- **Build command:** `npm install && npm run build` · **Output directory:** **`dist`** · **Source directory:** **`frontend`** (monorepo).
+- **Custom pages:** **Catchall** = **`index.html`** (required for client-side routes).
+- **`VITE_API_BASE_URL` (BUILD_TIME):** Set to your **public HTTPS origin** (e.g. `https://your-app.ondigitalocean.app`) if the SPA and API share one hostname—**or** omit and rely on the client’s same-origin fallback. If the API is **only** on another URL, set that origin here.
+
+### 6. Database schema
+
+- Run once from your machine (or a CI job) against production:
+
+  ```bash
+  cd backend
+  dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
+  ```
+
+  Use the same **`ConnectionStrings__MySQL`** (via env or a local copy) so migrations hit the managed DB. The App Platform build does **not** run **`dotnet-ef`** by default.
+
+### 7. Smoke test
+
+- **`GET /health`** on the public API URL.
+- Open the static URL, sign in, confirm **`/api/v1`** calls succeed (browser devtools **Network** tab).
+- If **`/api`** routes return **404**, fix ingress (**`preserve_path_prefix`**) and rule order. If deep links **404**, set the static site **Catchall** to **`index.html`**.
 
 ## Testing
 
