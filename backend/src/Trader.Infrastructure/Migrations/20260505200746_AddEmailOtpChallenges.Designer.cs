@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Trader.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Trader.Infrastructure.Persistence;
 namespace Trader.Infrastructure.Migrations
 {
     [DbContext(typeof(TraderDbContext))]
-    partial class TraderDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260505200746_AddEmailOtpChallenges")]
+    partial class AddEmailOtpChallenges
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -202,16 +205,6 @@ namespace Trader.Infrastructure.Migrations
                         .HasMaxLength(320)
                         .HasColumnType("varchar(320)");
 
-                    b.Property<DateTimeOffset?>("EmailVerificationExpiresAtUtc")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("EmailVerificationTokenHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<DateTimeOffset?>("EmailVerifiedAtUtc")
-                        .HasColumnType("datetime(6)");
-
                     b.Property<string>("KiteAccessTokenProtected")
                         .HasColumnType("longtext");
 
@@ -227,20 +220,10 @@ namespace Trader.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("varchar(200)");
 
-                    b.Property<DateTimeOffset?>("PasswordResetExpiresAtUtc")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("PasswordResetTokenHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
                     b.Property<string>("Role")
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
-
-                    b.Property<byte>("SecondFactorMethod")
-                        .HasColumnType("tinyint unsigned");
 
                     b.Property<string>("TotpPendingSecretProtected")
                         .HasColumnType("longtext");
@@ -257,12 +240,6 @@ namespace Trader.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
-                        .IsUnique();
-
-                    b.HasIndex("EmailVerificationTokenHash")
-                        .IsUnique();
-
-                    b.HasIndex("PasswordResetTokenHash")
                         .IsUnique();
 
                     b.ToTable("Users");

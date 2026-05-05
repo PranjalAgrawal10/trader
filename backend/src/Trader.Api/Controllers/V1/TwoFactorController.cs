@@ -41,6 +41,15 @@ public sealed class TwoFactorController : ControllerBase
     }
 
     [Authorize]
+    [HttpPost("enable-email-sign-in")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> EnableEmailSignIn(CancellationToken ct)
+    {
+        await _auth.EnableEmailSignInSecondFactorAsync(User.GetUserId(), ct);
+        return NoContent();
+    }
+
+    [Authorize]
     [HttpGet("status")]
     public async Task<ActionResult<TwoFactorStatusResponse>> Status(CancellationToken ct) =>
         Ok(await _auth.GetTwoFactorStatusAsync(User.GetUserId(), ct));

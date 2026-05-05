@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { type FormEvent, useState } from 'react'
-import { Button, ButtonGroup, Card, Col, Container, Form, Row } from 'react-bootstrap'
-import { useNavigate } from 'react-router-dom'
+import { Button, ButtonGroup, Card, Col, Container, Form, Row, Alert } from 'react-bootstrap'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { navigateToAppAfterTwoFactor } from '../navigation/afterTwoFactor'
 import { useAuthStore } from '../store/useAuthStore'
@@ -17,15 +17,36 @@ function problemDetail(err: unknown): string | null {
 
 type AuthPayload = {
   token: string
-  userId: string
+  userId?: string
   email: string
-  role: string
+  role?: string
 }
 
-function isTwoFactorChallenge(x: unknown): x is { requires_2fa: true; temp_token: string } {
+type TwoFactorChallenge = {
+  requires_2fa: true
+  temp_token: string
+  second_factor: 'authenticator' | 'email_otp'
+}
+
+function isTwoFactorChallenge(x: unknown): x is TwoFactorChallenge {
   if (typeof x !== 'object' || x === null) return false
   const o = x as Record<string, unknown>
-  return o.requires_2fa === true && typeof o.temp_token === 'string'
+  const sf = o.second_factor
+  return (
+    o.requires_2fa === true &&
+    typeof o.temp_token === 'string' &&
+    (sf === 'authenticator' || sf === 'email_otp')
+  )
+}
+
+function isRegisterAck(x: unknown): boolean {
+  if (typeof x !== 'object' || x === null) return false
+  return (x as Record<string, unknown>).email_verification_required === true
+}
+
+function isEmailVerificationGate(x: unknown): boolean {
+  if (typeof x !== 'object' || x === null) return false
+  return (x as Record<string, unknown>).requires_email_verification === true
 }
 
 function isAuthPayload(x: unknown): x is AuthPayload {
@@ -40,7 +61,8 @@ export function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [twoFactorToken, setTwoFactorToken] = useState<string | null>(null)
+  const [twoFactor, setTwoFactor] = useState<TwoFactorChallenge | null>(null)
+  const [registerSent, setRegisterSent] = useState(false)
   const [totpCode, setTotpCode] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -70,11 +92,13 @@ export function LoginPage() {
           email,
           password,
         })
-        if (!isAuthPayload(data)) {
+        if (!isRegisterAck(data)) {
           setError('Unexpected response from server.')
           return
         }
-        await continueAfterAuth(data.token, data.email)
+
+        setRegisterSent(true)
+        setPassword('')
         return
       }
 
@@ -84,8 +108,13 @@ export function LoginPage() {
       })
 
       if (isTwoFactorChallenge(data)) {
-        setTwoFactorToken(data.temp_token)
+        setTwoFactor(data)
         setTotpCode('')
+        return
+      }
+
+      if (isEmailVerificationGate(data)) {
+        setError('Verify your email before signing in. Check your inbox for the link.')
         return
       }
 
@@ -108,19 +137,19 @@ export function LoginPage() {
 
   const submitTotp = async (e: FormEvent) => {
     e.preventDefault()
-    if (!twoFactorToken) return
+    if (!twoFactor) return
     setError(null)
     setBusy(true)
     try {
       const { data } = await api.post<unknown>('/2fa/verify-login', {
-        temp_token: twoFactorToken,
+        temp_token: twoFactor.temp_token,
         otp: totpCode.trim(),
       })
       if (!isAuthPayload(data)) {
         setError('Unexpected response from server.')
         return
       }
-      setTwoFactorToken(null)
+      setTwoFactor(null)
       setTotpCode('')
       await continueAfterAuth(data.token, data.email)
     } catch (err) {
@@ -130,8 +159,21 @@ export function LoginPage() {
     }
   }
 
+  const resendLoginOtp = async () => {
+    if (!twoFactor || twoFactor.second_factor !== 'email_otp') return
+    setError(null)
+    setBusy(true)
+    try {
+      await api.post('/auth/resend-login-otp', { temp_token: twoFactor.temp_token })
+    } catch (err) {
+      setError(problemDetail(err) ?? 'Could not resend the code.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const backToPassword = () => {
-    setTwoFactorToken(null)
+    setTwoFactor(null)
     setTotpCode('')
     setError(null)
   }
@@ -147,15 +189,26 @@ export function LoginPage() {
                 Sign in to manage strategies and bots.
               </Card.Text>
 
-              {twoFactorToken ? (
+              {twoFactor ? (
                 <Form onSubmit={submitTotp}>
                   <p className="small text-secondary mb-3">
-                    Enter your 6-digit authenticator code, or an unused recovery code, for <strong>{email}</strong>. If you
-                    waited a long time after entering your password, this step may time out — use <strong>Back</strong> and
-                    sign in again.
+                    {twoFactor.second_factor === 'email_otp' ? (
+                      <>
+                        We sent a <strong>6-digit code</strong> to <strong>{email}</strong>. Enter it below. This step can
+                        time out — use <strong>Back</strong> and sign in again if needed.
+                      </>
+                    ) : (
+                      <>
+                        Enter your 6-digit authenticator code, or an unused recovery code, for <strong>{email}</strong>. If
+                        you waited a long time after entering your password, this step may time out — use <strong>Back</strong>{' '}
+                        and sign in again.
+                      </>
+                    )}
                   </p>
                   <Form.Group className="mb-3" controlId="login-totp">
-                    <Form.Label className="small text-secondary text-uppercase">Authenticator or recovery code</Form.Label>
+                    <Form.Label className="small text-secondary text-uppercase">
+                      {twoFactor.second_factor === 'email_otp' ? 'Code from email' : 'Authenticator or recovery code'}
+                    </Form.Label>
                     <Form.Control
                       inputMode="text"
                       autoComplete="one-time-code"
@@ -172,10 +225,31 @@ export function LoginPage() {
                   <Button variant="success" type="submit" className="w-100 mb-2" disabled={busy}>
                     {busy ? 'Please wait…' : 'Verify and sign in'}
                   </Button>
+                  {twoFactor.second_factor === 'email_otp' ? (
+                    <Button
+                      variant="outline-secondary"
+                      type="button"
+                      className="w-100 mb-2"
+                      disabled={busy}
+                      onClick={() => void resendLoginOtp()}
+                    >
+                      Resend code
+                    </Button>
+                  ) : null}
                   <Button variant="outline-secondary" type="button" className="w-100" disabled={busy} onClick={backToPassword}>
                     Back
                   </Button>
                 </Form>
+              ) : registerSent && mode === 'register' ? (
+                <div>
+                  <Alert variant="success">
+                    Check your email for a verification link. After you confirm your address, switch to <strong>Login</strong>{' '}
+                    to continue.
+                  </Alert>
+                  <Button variant="outline-secondary" className="w-100" onClick={() => setRegisterSent(false)}>
+                    Back to registration form
+                  </Button>
+                </div>
               ) : (
                 <>
                   <ButtonGroup className="w-100 mb-4">
@@ -184,6 +258,7 @@ export function LoginPage() {
                       onClick={() => {
                         setMode('login')
                         setError(null)
+                        setRegisterSent(false)
                       }}
                     >
                       Login
@@ -193,6 +268,7 @@ export function LoginPage() {
                       onClick={() => {
                         setMode('register')
                         setError(null)
+                        setRegisterSent(false)
                       }}
                     >
                       Register
@@ -221,6 +297,13 @@ export function LoginPage() {
                         minLength={6}
                       />
                     </Form.Group>
+                    {mode === 'login' ? (
+                      <div className="text-end mb-3">
+                        <Link to="/forgot-password" className="small">
+                          Forgot password?
+                        </Link>
+                      </div>
+                    ) : null}
                     {error ? (
                       <Form.Text className="text-danger d-block mb-3">{error}</Form.Text>
                     ) : null}

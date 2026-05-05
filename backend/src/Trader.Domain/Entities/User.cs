@@ -1,3 +1,5 @@
+using Trader.Domain.Enums;
+
 namespace Trader.Domain.Entities;
 
 public class User
@@ -7,6 +9,19 @@ public class User
     public string PasswordHash { get; set; } = string.Empty;
     public string Role { get; set; } = Trader.Domain.Enums.UserRole.Trader;
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>When non-null, the user verified their email (registration flow).</summary>
+    public DateTimeOffset? EmailVerifiedAtUtc { get; set; }
+
+    /// <summary>SHA-256 (64 hex, upper) over the raw verification token; nullable when not pending.</summary>
+    public string? EmailVerificationTokenHash { get; set; }
+
+    public DateTimeOffset? EmailVerificationExpiresAtUtc { get; set; }
+
+    /// <summary>SHA-256 hex over raw password-reset token; nullable when not pending.</summary>
+    public string? PasswordResetTokenHash { get; set; }
+
+    public DateTimeOffset? PasswordResetExpiresAtUtc { get; set; }
 
     /// <summary>When set, the user completed broker onboarding.</summary>
     public DateTimeOffset? BrokerConnectedAt { get; set; }
@@ -26,7 +41,10 @@ public class User
     /// <summary>Authenticator (TOTP) enabled for this account.</summary>
     public bool TwoFactorEnabled { get; set; }
 
-    /// <summary>Data-protection encrypted TOTP secret (Base64 payload) when <see cref="TwoFactorEnabled"/>.</summary>
+    /// <summary>Authenticator or email sign-in OTP when <see cref="TwoFactorEnabled"/>.</summary>
+    public SecondFactorMethod SecondFactorMethod { get; set; }
+
+    /// <summary>Data-protection encrypted TOTP secret (Base64 payload) when <see cref="TwoFactorEnabled"/> and method is authenticator.</summary>
     public string? TotpSecretProtected { get; set; }
 
     /// <summary>Pending enrollment: encrypted secret until the user confirms the first code.</summary>

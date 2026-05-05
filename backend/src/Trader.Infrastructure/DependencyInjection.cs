@@ -7,9 +7,11 @@ using Microsoft.Extensions.Options;
 using Pomelo.EntityFrameworkCore.MySql;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
+using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
 using Trader.Infrastructure.Broker;
+using Trader.Infrastructure.Email;
 using Trader.Infrastructure.Persistence;
 using Trader.Infrastructure.Persistence.Repositories;
 using Trader.Infrastructure.Security;
@@ -22,6 +24,9 @@ public static class DependencyInjection
     {
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
         services.Configure<AuthOptions>(configuration.GetSection(AuthOptions.SectionName));
+        services.Configure<PublicWebOptions>(configuration.GetSection(PublicWebOptions.SectionName));
+        services.Configure<EmailOtpOptions>(configuration.GetSection(EmailOtpOptions.SectionName));
+        services.Configure<SmtpOptions>(configuration.GetSection(SmtpOptions.SectionName));
         // Kite ApiKey/ApiSecret/RedirectUrl: environment variables (ZerodhaKite__*) and Development .env — not committed appsettings.
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
 
@@ -86,6 +91,8 @@ public static class DependencyInjection
         services.AddScoped<IBotRepository, BotRepository>();
         services.AddScoped<ITradeRepository, TradeRepository>();
         services.AddScoped<IBrokerSetupGateway, BrokerSetupGateway>();
+        services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
+        services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
 
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();

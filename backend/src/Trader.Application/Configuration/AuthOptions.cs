@@ -13,4 +13,10 @@ public sealed class AuthOptions
 
     /// <summary>Duration of lockout after too many OTP failures at a scope (minutes, clamped 1–1440).</summary>
     public int TotpAttemptLockoutMinutes { get; set; } = 15;
+
+    /// <summary>Registration email verification link TTL (hours, clamped 1–168).</summary>
+    public int EmailVerificationExpiryHours { get; set; } = 48;
+
+    /// <summary>Forgotten-password reset link TTL (hours, clamped 1–168).</summary>
+    public int PasswordResetExpiryHours { get; set; } = 48;
 }

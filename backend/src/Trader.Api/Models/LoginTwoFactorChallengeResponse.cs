@@ -10,4 +10,8 @@ public sealed class LoginTwoFactorChallengeResponse
 
     [JsonPropertyName("temp_token")]
     public required string TempToken { get; init; }
+
+    /// <summary><c>authenticator</c> (TOTP + recovery codes) or <c>email_otp</c> (inbox).</summary>
+    [JsonPropertyName("second_factor")]
+    public required string SecondFactor { get; init; }
 }

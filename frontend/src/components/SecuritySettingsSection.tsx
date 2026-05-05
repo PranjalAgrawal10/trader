@@ -8,6 +8,7 @@ import { navigateToAppAfterTwoFactor } from '../navigation/afterTwoFactor'
 type TwoFactorStatus = {
   two_factor_enabled: boolean
   enrollment_pending: boolean
+  second_factor_method: 'none' | 'authenticator' | 'email_otp'
 }
 
 type EnrollmentBegin = {
@@ -18,9 +19,11 @@ type EnrollmentBegin = {
 type Props = {
   /** From <code>?required=1</code> when 2FA gate sends the user here. */
   setupRequired: boolean
+  /** Fired after 2FA status is loaded or refreshed (e.g. so broker linking can re-check prerequisites). */
+  onStatusUpdated?: () => void
 }
 
-export function SecuritySettingsSection({ setupRequired }: Props) {
+export function SecuritySettingsSection({ setupRequired, onStatusUpdated }: Props) {
   const navigate = useNavigate()
 
   const [status, setStatus] = useState<TwoFactorStatus | null>(null)
@@ -40,14 +43,34 @@ export function SecuritySettingsSection({ setupRequired }: Props) {
     try {
       const { data } = await api.get<TwoFactorStatus>('/2fa/status')
       setStatus(data)
+      onStatusUpdated?.()
     } catch {
       setLoadError('Could not load security settings.')
     }
-  }, [])
+  }, [onStatusUpdated])
 
   useEffect(() => {
     void refreshStatus()
   }, [refreshStatus])
+
+  const enableEmailSignIn = async () => {
+    setMessage(null)
+    setFormError(null)
+    setBusy(true)
+    try {
+      await api.post('/2fa/enable-email-sign-in')
+      setMessage(
+        'Email sign-in verification is enabled. After your password each sign-in will email you a short code.',
+      )
+      await refreshStatus()
+    } catch {
+      setFormError(
+        'Could not enable email verification. Confirm your email is verified, disable an authenticator if it is enabled, then try again.',
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const beginEnrollment = async () => {
     setMessage(null)
@@ -144,8 +167,8 @@ export function SecuritySettingsSection({ setupRequired }: Props) {
     <section id="security-2fa" aria-label="Two-factor authentication">
       {setupRequired && !status.two_factor_enabled ? (
         <Alert variant="warning">
-          <strong>Authenticator setup required.</strong> Add your account to an authenticator app and confirm a code before
-          you can use the rest of the console.
+          <strong>Second-factor sign-in required.</strong> Choose <strong>email codes</strong> or an <strong>authenticator app</strong>{' '}
+          below before you use the rest of the console.
         </Alert>
       ) : null}
       {message ? <Alert variant="success">{message}</Alert> : null}
@@ -187,15 +210,54 @@ export function SecuritySettingsSection({ setupRequired }: Props) {
 
       <Card className="border-secondary shadow-sm mb-4">
         <Card.Body>
+          <Card.Title className="h6">Email sign-in code</Card.Title>
+          <Card.Text className="text-secondary small">
+            After entering your password, we send a short 6-digit code to your email. No authenticator app required.
+          </Card.Text>
+
+          {!status.two_factor_enabled ? (
+            <Button variant="success" disabled={busy} onClick={() => void enableEmailSignIn()}>
+              Enable email codes at sign-in
+            </Button>
+          ) : status.second_factor_method === 'email_otp' ? (
+            <div>
+              <p className="text-success small mb-3">Email sign-in verification is on.</p>
+              <Form onSubmit={disable2fa}>
+                <Form.Group className="mb-3" controlId="disable-email-password">
+                  <Form.Label className="small text-secondary text-uppercase">Current password</Form.Label>
+                  <Form.Control
+                    type="password"
+                    autoComplete="current-password"
+                    value={disablePassword}
+                    onChange={(ev) => setDisablePassword(ev.target.value)}
+                    placeholder="Required to turn off"
+                    required
+                  />
+                </Form.Group>
+                <Button variant="outline-danger" type="submit" disabled={busy}>
+                  Turn off email verification
+                </Button>
+              </Form>
+            </div>
+          ) : (
+            <p className="small text-secondary mb-0">
+              Turn off authenticator-based 2FA below first if you prefer email codes instead.
+            </p>
+          )}
+        </Card.Body>
+      </Card>
+
+      <Card className="border-secondary shadow-sm mb-4">
+        <Card.Body>
           <Card.Title className="h6">Authenticator app (TOTP)</Card.Title>
           <Card.Text className="text-secondary small">
             Use an app such as Google Authenticator or Microsoft Authenticator. Time-based codes: 6 digits, 30 seconds,
             SHA-1 (±30s drift allowed).
           </Card.Text>
 
-          {status.two_factor_enabled ? (
+          {status.two_factor_enabled && status.second_factor_method === 'authenticator' ? (
             <div>
-              <p className="text-success small mb-3">Two-factor authentication is on for this account.</p>
+              <p className="text-success small mb-3">Authenticator two-factor authentication is on for this account.</p>
               <Form onSubmit={disable2fa}>
                 <Form.Group className="mb-3" controlId="disable-password">
                   <Form.Label className="small text-secondary text-uppercase">Current password</Form.Label>
@@ -218,10 +280,15 @@ export function SecuritySettingsSection({ setupRequired }: Props) {
                   />
                 </Form.Group>
                 <Button variant="outline-danger" type="submit" disabled={busy}>
-                  Turn off 2FA
+                  Turn off authenticator 2FA
                 </Button>
               </Form>
             </div>
+          ) : status.two_factor_enabled && status.second_factor_method === 'email_otp' ? (
+            <p className="small text-secondary mb-0">
+              You're using emailed sign-in codes as the second step. Turn those off in the Email card above if you want an
+              authenticator app instead.
+            </p>
           ) : enrollment || status.enrollment_pending ? (
             <div>
               {!enrollment && status.enrollment_pending ? (
@@ -280,7 +347,7 @@ export function SecuritySettingsSection({ setupRequired }: Props) {
             </div>
           ) : (
             <Button variant="success" disabled={busy} onClick={beginEnrollment}>
-              Set up authenticator app
+              Set up authenticator app instead
             </Button>
           )}
         </Card.Body>

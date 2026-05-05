@@ -12,7 +12,35 @@ public sealed record ProfileResponse(
     [property: JsonPropertyName("user_id")] Guid UserId,
     [property: JsonPropertyName("email")] string Email,
     [property: JsonPropertyName("role")] string Role,
-    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("email_verified")] bool EmailVerified);
+
+public sealed class VerifyEmailRequest
+{
+    [JsonPropertyName("token")]
+    public string? Token { get; set; }
+}
+
+public sealed class ForgotPasswordRequest
+{
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+}
+
+public sealed class ResetPasswordRequest
+{
+    [JsonPropertyName("token")]
+    public string? Token { get; set; }
+
+    [JsonPropertyName("new_password")]
+    public string? NewPassword { get; set; }
+}
+
+public sealed class ResendLoginOtpRequest
+{
+    [JsonPropertyName("temp_token")]
+    public string? TempToken { get; set; }
+}
 
 public sealed class TwoFactorVerifyLoginRequest
 {
@@ -63,4 +91,5 @@ public sealed record TwoFactorEnrollmentConfirmResult(
 
 public sealed record TwoFactorStatusResponse(
     [property: JsonPropertyName("two_factor_enabled")] bool TwoFactorEnabled,
-    [property: JsonPropertyName("enrollment_pending")] bool EnrollmentPending);
+    [property: JsonPropertyName("enrollment_pending")] bool EnrollmentPending,
+    [property: JsonPropertyName("second_factor_method")] string SecondFactorMethod);

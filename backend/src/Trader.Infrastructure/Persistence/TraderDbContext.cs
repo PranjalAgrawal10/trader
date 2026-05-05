@@ -10,6 +10,8 @@ public sealed class TraderDbContext : DbContext
     {
     }
 
+    public DbSet<EmailOtpChallenge> EmailOtpChallenges => Set<EmailOtpChallenge>();
+
     public DbSet<User> Users => Set<User>();
     public DbSet<Strategy> Strategies => Set<Strategy>();
     public DbSet<Bot> Bots => Set<Bot>();
@@ -18,6 +20,13 @@ public sealed class TraderDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<EmailOtpChallenge>(e =>
+        {
+            e.Property(x => x.NormalizedEmail).HasMaxLength(320);
+            e.Property(x => x.OtpHash).HasMaxLength(200);
+            e.HasIndex(x => new { x.NormalizedEmail, x.IsConsumed });
+        });
+
         modelBuilder.Entity<User>(e =>
         {
             e.HasIndex(x => x.Email).IsUnique();
@@ -32,6 +41,11 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.TotpSecretProtected);
             e.Property(x => x.TotpPendingSecretProtected);
             e.Property(x => x.TotpRecoveryCodesProtected);
+            e.Property(x => x.SecondFactorMethod).HasConversion<byte>();
+            e.Property(x => x.EmailVerificationTokenHash).HasMaxLength(64);
+            e.Property(x => x.PasswordResetTokenHash).HasMaxLength(64);
+            e.HasIndex(x => x.EmailVerificationTokenHash).IsUnique();
+            e.HasIndex(x => x.PasswordResetTokenHash).IsUnique();
         });
 
         modelBuilder.Entity<Strategy>(e =>

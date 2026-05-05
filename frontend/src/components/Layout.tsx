@@ -21,12 +21,9 @@ export function Layout({ children }: { children: ReactNode }) {
           </Navbar.Brand>
           <Navbar.Toggle aria-controls="main-nav" />
           <Navbar.Collapse id="main-nav">
-            <Nav className="me-auto">
+            <Nav className="me-auto mb-3 mb-lg-0">
               <Nav.Link as={NavLink} to="/" end>
                 Dashboard
-              </Nav.Link>
-              <Nav.Link as={NavLink} to="/brokers">
-                Broker
               </Nav.Link>
               <Nav.Link as={NavLink} to="/instruments">
                 F&amp;O / MCX
@@ -40,13 +37,15 @@ export function Layout({ children }: { children: ReactNode }) {
               <Nav.Link as={NavLink} to="/trades">
                 Trades
               </Nav.Link>
+            </Nav>
+            <Nav className="ms-lg-auto align-items-lg-center gap-2 flex-column flex-lg-row">
               <Nav.Link as={NavLink} to="/profile">
                 Profile
               </Nav.Link>
+              <Button variant="outline-light" size="sm" className="w-100 w-lg-auto" onClick={handleLogout}>
+                Sign out
+              </Button>
             </Nav>
-            <Button variant="outline-light" size="sm" onClick={handleLogout}>
-              Sign out
-            </Button>
           </Navbar.Collapse>
         </Container>
       </Navbar>

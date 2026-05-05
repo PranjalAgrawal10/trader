@@ -23,5 +23,5 @@ public sealed class ZerodhaKiteOptions
     public string RedirectUrl { get; set; } = string.Empty;
 
     /// <summary>Browser URL after OAuth completes (usually your SPA).</summary>
-    public string PostLoginRedirectUrl { get; set; } = "http://localhost:5173/brokers";
+    public string PostLoginRedirectUrl { get; set; } = "http://localhost:5173/profile#broker-connection";
 }

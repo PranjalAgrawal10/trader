@@ -2,7 +2,17 @@ namespace Trader.Application.Auth;
 
 public interface IAuthService
 {
-    Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken ct = default);
+    Task<RegistrationResult> RegisterAsync(RegisterRequest request, CancellationToken ct = default);
+
+    Task<AuthResponse> VerifyRegistrationEmailAsync(VerifyEmailRequest request, CancellationToken ct = default);
+
+    Task ForgotPasswordAsync(ForgotPasswordRequest request, CancellationToken ct = default);
+
+    Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken ct = default);
+
+    Task ResendLoginSecondFactorOtpAsync(ResendLoginOtpRequest request, CancellationToken ct = default);
+
+    Task EnableEmailSignInSecondFactorAsync(Guid userId, CancellationToken ct = default);
 
     Task<ProfileResponse> GetProfileAsync(Guid userId, CancellationToken ct = default);
 

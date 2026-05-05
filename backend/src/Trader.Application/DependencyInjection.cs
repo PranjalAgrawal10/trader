@@ -17,6 +17,7 @@ public static class DependencyInjection
         services.AddScoped<IStrategyService, StrategyService>();
         services.AddScoped<IBotService, BotService>();
         services.AddScoped<ITradeService, TradeService>();
+        services.AddScoped<IEmailOtpService, EmailOtpService>();
         return services;
     }
 }

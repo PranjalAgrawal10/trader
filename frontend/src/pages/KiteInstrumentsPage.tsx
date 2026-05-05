@@ -21,6 +21,7 @@ import {
 } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
+import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
 
 interface BrokerStatusResponse {
@@ -361,11 +362,11 @@ export function KiteInstrumentsPage() {
         <p className="text-secondary small">Loading broker status…</p>
       ) : !isZerodha ? (
         <Alert variant="info" className="mb-4">
-          Connect <strong>Zerodha (Kite)</strong> on the{' '}
-          <Link to="/brokers" className="alert-link">
-            Broker
+          Connect <strong>Zerodha (Kite)</strong> under <strong>Profile</strong> →{' '}
+          <Link to={`/profile#${BROKER_PROFILE_SECTION_ID}`} className="alert-link">
+            Broker connection
           </Link>{' '}
-          page to load instrument lists.
+          to load instrument lists.
         </Alert>
       ) : null}
 

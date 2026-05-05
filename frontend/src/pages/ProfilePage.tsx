@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Alert, Card, Col, Row, Spinner } from 'react-bootstrap'
 import { useSearchParams } from 'react-router-dom'
-import { api } from '../api/client'
+import { BrokerSettingsSection } from '../components/BrokerSettingsSection'
+import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
 import { SecuritySettingsSection } from '../components/SecuritySettingsSection'
+import { api } from '../api/client'
 import { useAuthStore } from '../store/useAuthStore'
 
 type ProfileMe = {
@@ -25,7 +27,10 @@ function formatJoined(iso: string): string {
 export function ProfilePage() {
   const [searchParams] = useSearchParams()
   const setupRequired = searchParams.get('required') === '1'
+  const brokerSetupRequired = searchParams.get('setup') === '1'
   const storeEmail = useAuthStore((s) => s.email)
+
+  const [twoFaEpoch, setTwoFaEpoch] = useState(0)
 
   const [profile, setProfile] = useState<ProfileMe | null>(null)
   const [profileError, setProfileError] = useState<string | null>(null)
@@ -48,6 +53,16 @@ export function ProfilePage() {
   useEffect(() => {
     void loadProfile()
   }, [loadProfile])
+
+  useEffect(() => {
+    const wantScroll =
+      brokerSetupRequired || window.location.hash === `#${BROKER_PROFILE_SECTION_ID}`
+    if (!wantScroll) return
+    const t = window.setTimeout(() => {
+      document.getElementById(BROKER_PROFILE_SECTION_ID)?.scrollIntoView({ behavior: 'smooth' })
+    }, 150)
+    return () => window.clearTimeout(t)
+  }, [brokerSetupRequired, searchParams])
 
   const displayEmail = profile?.email ?? storeEmail ?? '—'
   const displayRole = profile?.role ?? '—'
@@ -93,7 +108,13 @@ export function ProfilePage() {
           </Card>
 
           <h2 className="h5 mb-3">Security</h2>
-          <SecuritySettingsSection setupRequired={setupRequired} />
+          <SecuritySettingsSection
+            setupRequired={setupRequired}
+            onStatusUpdated={() => setTwoFaEpoch((n) => n + 1)}
+          />
+
+          <h2 className="h5 mt-4 mb-3">Broker connection</h2>
+          <BrokerSettingsSection brokerSetupRequired={brokerSetupRequired} twoFaEpoch={twoFaEpoch} />
         </Col>
       </Row>
     </Layout>

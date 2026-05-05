@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import { useEffect, useState } from 'react'
 import { Container, Spinner } from 'react-bootstrap'
 import { Navigate } from 'react-router-dom'
+import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { api } from '../api/client'
 import { useAuthStore } from '../store/useAuthStore'
 
@@ -9,7 +10,7 @@ interface BrokerStatus {
   connected: boolean
 }
 
-/** Sends users to /brokers until broker onboarding is complete. */
+/** Sends users to Profile (broker section) until broker onboarding is complete. */
 export function RequiresBroker({ children }: { children: ReactElement }) {
   const token = useAuthStore((s) => s.token)
   const [gate, setGate] = useState<'loading' | 'ok' | 'need'>('loading')
@@ -49,7 +50,8 @@ export function RequiresBroker({ children }: { children: ReactElement }) {
     )
   }
 
-  if (gate === 'need') return <Navigate to="/brokers?setup=1" replace />
+  if (gate === 'need')
+    return <Navigate to={`/profile?setup=1#${BROKER_PROFILE_SECTION_ID}`} replace />
 
   return children
 }
