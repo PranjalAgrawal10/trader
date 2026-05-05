@@ -1,6 +1,6 @@
 namespace Trader.Application.Broker;
 
-/// <summary>Encodes the signed user id passed as Kite OAuth <c>state</c>.</summary>
+/// <summary>HMAC-signed user id passed as Kite OAuth <c>state</c> (stable across DP key rotation; uses <c>Jwt:Key</c>).</summary>
 public interface IKiteOAuthStateCodec
 {
     string Encode(Guid userId);
