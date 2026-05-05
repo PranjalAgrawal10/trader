@@ -213,12 +213,13 @@ Add under the service (encrypt secrets in the control panel):
 | **`Database__Provider`** | `MySQL` |
 | **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** | **Required.** **Encrypt** password. Optional: **`Database__Port`**, **`Database__SslMode`**. Aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (also **`DB_*`** / **`DATABASE_*`** — see resolver). **`Database__UserId`** works instead of **`Username`**. |
 | **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** | **`Jwt__Key`** ≥ 32 chars; **secret**. |
+| **`Jwt__ExpiresHours`** (optional) | Access token lifetime in hours (default **12** in **`appsettings.json`**). Shorter values (e.g. **1**) cause **`SecurityTokenExpiredException`** in logs after idle time; users must sign in again or you can raise this in production. |
 | **`Cors__Origins__0`** | Your live site origin, e.g. **`https://your-app.ondigitalocean.app`** (no trailing slash). |
 | **`ZerodhaKite__*`** | If you use Kite: **secrets**; **`RedirectUrl`** must be the public **`https://…/api/v1/broker/kite/callback`**. |
 
 Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage** so **2FA and** broker encryption keys survive redeploys.
 
-**Debugging HTTP 401 (JWT):** When a **Bearer** token is present but invalid, logs include **`Trader.Api.JwtBearer`** at **Warning** with the validation exception (e.g. wrong signature, issuer, audience, or expired). Production also sets **`Microsoft.AspNetCore.Authentication`** and **`JwtBearer`** to **Information** in **`appsettings.Production.json`** (adjust via **`Logging__LogLevel__*`** env vars on the host if needed).
+**Debugging HTTP 401 (JWT):** When a **Bearer** token is present but invalid, logs include **`Trader.Api.JwtBearer`** at **Warning** with the validation exception (e.g. wrong signature, issuer, audience, or expired). Production also sets **`Microsoft.AspNetCore.Authentication`** and **`JwtBearer`** to **Information** in **`appsettings.Production.json`** (adjust via **`Logging__LogLevel__*`** env vars on the host if needed). The SPA omits **Authorization** on anonymous auth routes (so an expired stored token does not block login/register) and clears the session and redirects to **`/login`** on **401** when a token was present.
 
 ### 5. Frontend (Static Site `trader-web`)
 
