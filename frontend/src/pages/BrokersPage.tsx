@@ -1,15 +1,6 @@
 import axios from 'axios'
 import { useCallback, useEffect, useState } from 'react'
-import {
-  Alert,
-  Button,
-  Card,
-  Col,
-  Row,
-  Spinner,
-  Stack,
-  Table,
-} from 'react-bootstrap'
+import { Alert, Button, Card, Stack } from 'react-bootstrap'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Layout } from '../components/Layout'
@@ -18,87 +9,6 @@ interface BrokerStatusResponse {
   connected: boolean
   connectedAt: string | null
   provider: string | null
-}
-
-interface KiteInstrumentRow {
-  instrumentToken: string
-  tradingsymbol: string
-  exchange: string
-  name: string | null
-  instrumentType: string | null
-  segment: string | null
-  expiry: string | null
-  strike: number | null
-  lotSize: number | null
-}
-
-interface InstrumentsResponse {
-  fno: KiteInstrumentRow[]
-  commodities: KiteInstrumentRow[]
-  fnoTruncated: boolean
-  commoditiesTruncated: boolean
-}
-
-function InstrumentTable({
-  title,
-  rows,
-  truncated,
-  loading,
-  emptyHint,
-}: {
-  title: string
-  rows: KiteInstrumentRow[]
-  truncated: boolean
-  loading: boolean
-  emptyHint: string
-}) {
-  return (
-    <div className="mt-4">
-      <h3 className="h6 mb-2">{title}</h3>
-      {truncated ? (
-        <Alert variant="warning" className="py-2 small mb-2">
-          List may be incomplete (row cap applied when fetching).
-        </Alert>
-      ) : null}
-      <div className="rounded border border-secondary" style={{ maxHeight: '20rem', overflow: 'auto' }}>
-        {loading ? (
-          <div className="d-flex align-items-center gap-2 p-4 text-secondary small">
-            <Spinner animation="border" size="sm" role="status" />
-            Loading…
-          </div>
-        ) : rows.length === 0 ? (
-          <p className="p-4 text-secondary small mb-0">{emptyHint}</p>
-        ) : (
-          <Table striped hover size="sm" className="mb-0 align-middle small">
-            <thead className="table-dark sticky-top">
-              <tr>
-                <th>Symbol</th>
-                <th>Exch.</th>
-                <th>Type</th>
-                <th>Segment</th>
-                <th>Expiry</th>
-                <th>Strike</th>
-                <th>Lot</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={`${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`}>
-                  <td className="font-monospace">{r.tradingsymbol}</td>
-                  <td>{r.exchange}</td>
-                  <td>{r.instrumentType ?? '—'}</td>
-                  <td>{r.segment ?? '—'}</td>
-                  <td>{r.expiry ?? '—'}</td>
-                  <td>{r.strike != null ? r.strike : '—'}</td>
-                  <td>{r.lotSize ?? '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </div>
-    </div>
-  )
 }
 
 function problemDetail(err: unknown): string {
@@ -121,9 +31,6 @@ export function BrokersPage() {
   const [kiteBanner, setKiteBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(
     null,
   )
-  const [instruments, setInstruments] = useState<InstrumentsResponse | null>(null)
-  const [instrumentsLoading, setInstrumentsLoading] = useState(false)
-  const [instrumentsError, setInstrumentsError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -188,38 +95,12 @@ export function BrokersPage() {
 
   const isZerodha = provider?.toLowerCase() === 'zerodha'
 
-  const loadInstruments = useCallback(async () => {
-    if (!connected || !isZerodha) {
-      setInstruments(null)
-      setInstrumentsError(null)
-      setInstrumentsLoading(false)
-      return
-    }
-    setInstrumentsLoading(true)
-    setInstrumentsError(null)
-    try {
-      const { data } = await api.get<InstrumentsResponse>('/broker/kite/instruments/fno-commodities')
-      setInstruments(data)
-    } catch (err) {
-      setInstruments(null)
-      setInstrumentsError(problemDetail(err))
-    } finally {
-      setInstrumentsLoading(false)
-    }
-  }, [connected, isZerodha])
-
-  useEffect(() => {
-    void loadInstruments()
-  }, [loadInstruments])
-
   const disconnectBroker = async () => {
     setBusy(true)
     setError(null)
     try {
       await api.post('/broker/disconnect')
-      setInstruments(null)
       await load()
-      setInstrumentsError(null)
     } catch (err) {
       setError(problemDetail(err))
     } finally {
@@ -336,52 +217,6 @@ export function BrokersPage() {
           )}
         </Card.Body>
       </Card>
-
-      {connected && isZerodha ? (
-        <Card className="border-secondary mt-4">
-          <Card.Body>
-            <Row className="align-items-start g-3">
-              <Col>
-                <Card.Title className="h5">F&O & commodities (Kite)</Card.Title>
-                <Card.Text className="text-secondary small mb-0">
-                  Master contract rows from Kite for NFO, BFO, and MCX. Data is the daily instrument
-                  dump (not live quotes).
-                </Card.Text>
-              </Col>
-              <Col xs={12} md="auto">
-                <Button
-                  variant="outline-secondary"
-                  disabled={instrumentsLoading || busy}
-                  onClick={() => void loadInstruments()}
-                >
-                  {instrumentsLoading ? 'Refreshing…' : 'Refresh lists'}
-                </Button>
-              </Col>
-            </Row>
-
-            {instrumentsError ? (
-              <Alert variant="danger" className="mt-3 mb-0">
-                {instrumentsError}
-              </Alert>
-            ) : null}
-
-            <InstrumentTable
-              title="Futures & options (NFO / BFO)"
-              rows={instruments?.fno ?? []}
-              truncated={instruments?.fnoTruncated ?? false}
-              loading={instrumentsLoading}
-              emptyHint="No rows returned. Try Refresh or check your Kite session."
-            />
-            <InstrumentTable
-              title="Commodities (MCX)"
-              rows={instruments?.commodities ?? []}
-              truncated={instruments?.commoditiesTruncated ?? false}
-              loading={instrumentsLoading}
-              emptyHint="No rows returned. Try Refresh or check your Kite session."
-            />
-          </Card.Body>
-        </Card>
-      ) : null}
     </Layout>
   )
 }

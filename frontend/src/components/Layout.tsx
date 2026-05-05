@@ -28,6 +28,9 @@ export function Layout({ children }: { children: ReactNode }) {
               <Nav.Link as={NavLink} to="/brokers">
                 Broker
               </Nav.Link>
+              <Nav.Link as={NavLink} to="/instruments">
+                F&amp;O / MCX
+              </Nav.Link>
               <Nav.Link as={NavLink} to="/strategies">
                 Strategies
               </Nav.Link>

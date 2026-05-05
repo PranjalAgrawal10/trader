@@ -6,6 +6,7 @@ import { useAuthStore } from './store/useAuthStore'
 import { BotsPage } from './pages/BotsPage'
 import { BrokersPage } from './pages/BrokersPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { KiteInstrumentsPage } from './pages/KiteInstrumentsPage'
 import { LoginPage } from './pages/LoginPage'
 import { StrategiesPage } from './pages/StrategiesPage'
 import { SecurityPage } from './pages/SecurityPage'
@@ -27,6 +28,18 @@ export default function App() {
           <Protected>
             <RequiresTwoFactor>
               <BrokersPage />
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
+        path="/instruments"
+        element={
+          <Protected>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <KiteInstrumentsPage />
+              </RequiresBroker>
             </RequiresTwoFactor>
           </Protected>
         }
