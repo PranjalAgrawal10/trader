@@ -7,6 +7,8 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Trader.Api.Filters;
 using Trader.Api.Hosting;
 using Trader.Application;
@@ -136,6 +138,20 @@ public sealed class Program
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key)),
                     ClockSkew = TimeSpan.FromMinutes(1),
                     NameClaimType = JwtRegisteredClaimNames.Sub,
+                };
+                options.Events = new JwtBearerEvents
+                {
+                    OnAuthenticationFailed = context =>
+                    {
+                        var logger = context.HttpContext.RequestServices
+                            .GetRequiredService<ILoggerFactory>()
+                            .CreateLogger("Trader.Api.JwtBearer");
+                        logger.LogWarning(
+                            context.Exception,
+                            "JWT rejected: {Path}. See inner exception for issuer/audience/signature/lifetime details.",
+                            context.Request.Path);
+                        return Task.CompletedTask;
+                    },
                 };
             });
 

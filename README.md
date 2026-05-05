@@ -201,6 +201,8 @@ Add under the service (encrypt secrets in the control panel):
 
 Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage** so **2FA and** broker encryption keys survive redeploys.
 
+**Debugging HTTP 401 (JWT):** When a **Bearer** token is present but invalid, logs include **`Trader.Api.JwtBearer`** at **Warning** with the validation exception (e.g. wrong signature, issuer, audience, or expired). Production also sets **`Microsoft.AspNetCore.Authentication`** and **`JwtBearer`** to **Information** in **`appsettings.Production.json`** (adjust via **`Logging__LogLevel__*`** env vars on the host if needed).
+
 ### 5. Frontend (Static Site `trader-web`)
 
 - **Build command:** `npm install && npm run build` · **Output directory:** **`dist`** · **Source directory:** **`frontend`** (monorepo).
