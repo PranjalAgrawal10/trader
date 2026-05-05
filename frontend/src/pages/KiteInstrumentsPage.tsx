@@ -47,7 +47,7 @@ interface InstrumentsResponse {
   commoditiesTruncated: boolean
 }
 
-const INSTRUMENT_PAGE_SIZE = 500
+const INSTRUMENT_PAGE_SIZE = 100
 const SCROLL_LOAD_THRESHOLD_PX = 96
 
 function rowSearchHaystack(r: KiteInstrumentRow): string {
@@ -147,7 +147,7 @@ function InstrumentListPanel({
               ? 'No matches for this search.'
               : showing >= totalFiltered
                 ? `Showing all ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${totalApi.toLocaleString()} loaded from API).`
-                : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${totalApi.toLocaleString()} loaded). Scroll for 500 more.`}
+                : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${totalApi.toLocaleString()} loaded). Scroll for 100 more.`}
       </p>
       <div
         ref={scrollRef}
@@ -280,7 +280,7 @@ export function KiteInstrumentsPage() {
               <Col>
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
-                  Search and scroll to load more rows (500 per batch).
+                  Search and scroll to load more rows (100 per batch).
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">

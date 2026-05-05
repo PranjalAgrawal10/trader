@@ -10,6 +10,9 @@ public sealed class BrokerService : IBrokerService
     private const string PendingStateCachePrefix = "Trader.KiteOAuth.PendingState:";
     private static readonly TimeSpan PendingStateTtl = TimeSpan.FromMinutes(20);
 
+    /// <summary>Row cap per Kite <c>/instruments/{exchange}</c> response (streaming stops early; truncated flag set when more rows exist).</summary>
+    private const int KiteInstrumentsMaxRowsPerExchange = 100;
+
     private readonly IBrokerSetupGateway _brokerSetup;
     private readonly IKiteOAuthStateCodec _stateCodec;
     private readonly IKiteSessionExchange _kiteSessionExchange;
@@ -114,21 +117,32 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(
                 "Zerodha Kite is not configured. Set environment variable ZerodhaKite__ApiKey (see README).");
 
-        var nfo = await _kiteInstruments.FetchExchangeInstrumentsAsync("NFO", apiKey, accessToken, maxRows: null, ct);
+        var cap = (int?)KiteInstrumentsMaxRowsPerExchange;
+        var nfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("NFO", apiKey, accessToken, cap, ct);
+        var bfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("BFO", apiKey, accessToken, cap, ct);
+        var mcxTask = _kiteInstruments.FetchExchangeInstrumentsAsync("MCX", apiKey, accessToken, cap, ct);
+
+        await Task.WhenAll(nfoTask, bfoTask, mcxTask).ConfigureAwait(false);
+
+        var nfo = await nfoTask.ConfigureAwait(false);
         if (!nfo.Success)
             throw new InvalidOperationException(nfo.ErrorMessage ?? "Could not load NFO instruments from Kite.");
 
         var fno = new List<KiteInstrumentListItemDto>(nfo.Items);
+        var fnoTruncated = nfo.Truncated;
 
-        var bfo = await _kiteInstruments.FetchExchangeInstrumentsAsync("BFO", apiKey, accessToken, maxRows: null, ct);
+        var bfo = await bfoTask.ConfigureAwait(false);
         if (bfo.Success)
+        {
             fno.AddRange(bfo.Items);
+            fnoTruncated |= bfo.Truncated;
+        }
 
-        var mcx = await _kiteInstruments.FetchExchangeInstrumentsAsync("MCX", apiKey, accessToken, maxRows: null, ct);
+        var mcx = await mcxTask.ConfigureAwait(false);
         if (!mcx.Success)
             throw new InvalidOperationException(mcx.ErrorMessage ?? "Could not load MCX instruments from Kite.");
 
-        return new KiteFnoCommodityListsDto(fno, mcx.Items, false, false);
+        return new KiteFnoCommodityListsDto(fno, mcx.Items, fnoTruncated, mcx.Truncated);
     }
 
     /// <summary>Maps callback <paramref name="state"/> to the HMAC payload. Returns the server cache key when resolved from memory (for one-time removal).</summary>
