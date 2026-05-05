@@ -4,6 +4,8 @@ public interface IAuthService
 {
     Task<AuthResponse> RegisterAsync(RegisterRequest request, CancellationToken ct = default);
 
+    Task<ProfileResponse> GetProfileAsync(Guid userId, CancellationToken ct = default);
+
     Task<LoginResult> LoginAsync(LoginRequest request, CancellationToken ct = default);
 
     Task<AuthResponse> CompleteTwoFactorLoginAsync(TwoFactorVerifyLoginRequest request, CancellationToken ct = default);

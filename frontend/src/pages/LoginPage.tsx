@@ -50,11 +50,11 @@ export function LoginPage() {
     try {
       const { data } = await api.get<{ two_factor_enabled: boolean }>('/2fa/status')
       if (!data.two_factor_enabled) {
-        navigate('/security?required=1', { replace: true })
+        navigate('/profile?required=1', { replace: true })
         return
       }
     } catch {
-      navigate('/security?required=1', { replace: true })
+      navigate('/profile?required=1', { replace: true })
       return
     }
     await navigateToAppAfterTwoFactor(navigate)

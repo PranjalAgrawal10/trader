@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 import { RequiresBroker } from './components/RequiresBroker'
 import { RequiresTwoFactor } from './components/RequiresTwoFactor'
 import { useAuthStore } from './store/useAuthStore'
@@ -8,14 +8,21 @@ import { BrokersPage } from './pages/BrokersPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { KiteInstrumentsPage } from './pages/KiteInstrumentsPage'
 import { LoginPage } from './pages/LoginPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { StrategiesPage } from './pages/StrategiesPage'
-import { SecurityPage } from './pages/SecurityPage'
 import { TradesPage } from './pages/TradesPage'
 
 function Protected({ children }: { children: ReactElement }) {
   const token = useAuthStore((s) => s.token)
   if (!token) return <Navigate to="/login" replace />
   return children
+}
+
+/** Preserves query string (e.g. <code>?required=1</code>) for old <code>/security</code> bookmarks. */
+function SecurityToProfileRedirect() {
+  const [searchParams] = useSearchParams()
+  const q = searchParams.toString()
+  return <Navigate to={q ? `/profile?${q}` : '/profile'} replace />
 }
 
 export default function App() {
@@ -45,10 +52,18 @@ export default function App() {
         }
       />
       <Route
+        path="/profile"
+        element={
+          <Protected>
+            <ProfilePage />
+          </Protected>
+        }
+      />
+      <Route
         path="/security"
         element={
           <Protected>
-            <SecurityPage />
+            <SecurityToProfileRedirect />
           </Protected>
         }
       />

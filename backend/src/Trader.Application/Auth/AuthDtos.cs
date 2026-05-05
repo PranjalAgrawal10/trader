@@ -8,6 +8,12 @@ public sealed record LoginRequest(string Email, string Password);
 
 public sealed record AuthResponse(string Token, Guid UserId, string Email, string Role);
 
+public sealed record ProfileResponse(
+    [property: JsonPropertyName("user_id")] Guid UserId,
+    [property: JsonPropertyName("email")] string Email,
+    [property: JsonPropertyName("role")] string Role,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+
 public sealed class TwoFactorVerifyLoginRequest
 {
     [JsonPropertyName("temp_token")]

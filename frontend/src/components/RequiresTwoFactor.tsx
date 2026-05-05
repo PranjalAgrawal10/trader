@@ -9,7 +9,7 @@ interface TwoFactorStatus {
   two_factor_enabled: boolean
 }
 
-/** Until TOTP 2FA is enabled, only `/security` (and login) are reachable with a session. */
+/** Until TOTP 2FA is enabled, only `/profile` (and login) are reachable with a session. */
 export function RequiresTwoFactor({ children }: { children: ReactElement }) {
   const token = useAuthStore((s) => s.token)
   const [gate, setGate] = useState<'loading' | 'ok' | 'need'>('loading')
@@ -49,7 +49,7 @@ export function RequiresTwoFactor({ children }: { children: ReactElement }) {
     )
   }
 
-  if (gate === 'need') return <Navigate to="/security?required=1" replace />
+  if (gate === 'need') return <Navigate to="/profile?required=1" replace />
 
   return children
 }

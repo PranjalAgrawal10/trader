@@ -61,6 +61,12 @@ public sealed class AuthService : IAuthService
         return new AuthResponse(token, user.Id, user.Email, user.Role);
     }
 
+    public async Task<ProfileResponse> GetProfileAsync(Guid userId, CancellationToken ct = default)
+    {
+        var user = await RequireUserAsync(userId, ct);
+        return new ProfileResponse(user.Id, user.Email, user.Role, user.CreatedAt);
+    }
+
     public async Task<LoginResult> LoginAsync(LoginRequest request, CancellationToken ct = default)
     {
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();

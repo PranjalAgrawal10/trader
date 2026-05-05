@@ -1,6 +1,7 @@
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Trader.Api.Extensions;
 using Trader.Api.Models;
 using Trader.Application.Auth;
 
@@ -18,6 +19,11 @@ public sealed class AuthController : ControllerBase
     {
         _auth = auth;
     }
+
+    [Authorize]
+    [HttpGet("me")]
+    public async Task<ActionResult<ProfileResponse>> Me(CancellationToken ct) =>
+        Ok(await _auth.GetProfileAsync(User.GetUserId(), ct));
 
     [AllowAnonymous]
     [HttpPost("register")]

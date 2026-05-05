@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/useAuthStore'
 
 export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
-  const { email, logout } = useAuthStore()
+  const { logout } = useAuthStore()
 
   const handleLogout = () => {
     logout()
@@ -40,11 +40,10 @@ export function Layout({ children }: { children: ReactNode }) {
               <Nav.Link as={NavLink} to="/trades">
                 Trades
               </Nav.Link>
-              <Nav.Link as={NavLink} to="/security">
-                Security
+              <Nav.Link as={NavLink} to="/profile">
+                Profile
               </Nav.Link>
             </Nav>
-            <Navbar.Text className="me-3 d-none d-sm-inline text-secondary">{email}</Navbar.Text>
             <Button variant="outline-light" size="sm" onClick={handleLogout}>
               Sign out
             </Button>
