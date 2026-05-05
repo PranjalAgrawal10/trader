@@ -65,6 +65,26 @@ public sealed class BrokerController : ControllerBase
         return Ok(dto);
     }
 
+    /// <summary>Streaming substring search across Kite instrument CSVs for F&amp;O (NFO+BFO) or MCX. Use when the preview list has no match.</summary>
+    [Authorize]
+    [HttpGet("kite/instruments/search")]
+    public async Task<ActionResult<KiteInstrumentSearchDto>> SearchKiteInstruments(
+        [FromQuery(Name = "q")] string? q,
+        [FromQuery] KiteInstrumentSearchSegment segment,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(q) || q.Trim().Length > 128)
+        {
+            return Problem(
+                title: "Invalid query",
+                detail: "Provide non-empty q (max 128 characters).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var dto = await _broker.SearchKiteInstrumentsAsync(User.GetUserId(), q, segment, ct);
+        return Ok(dto);
+    }
+
     [Authorize]
     [HttpGet("kite/login-url")]
     public async Task<ActionResult<KiteLoginUrlDto>> KiteLoginUrl(CancellationToken ct)

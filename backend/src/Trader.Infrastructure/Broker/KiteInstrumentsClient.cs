@@ -74,6 +74,85 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         return new KiteInstrumentsFetchResult(true, null, items, truncated);
     }
 
+    public async Task<KiteInstrumentsFetchResult> SearchExchangeInstrumentsAsync(
+        string exchange,
+        string apiKey,
+        string accessToken,
+        string query,
+        int maxMatches,
+        CancellationToken ct = default)
+    {
+        if (maxMatches < 1)
+            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        var needle = query.Trim().ToLowerInvariant();
+        if (needle.Length == 0)
+            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        var ex = Uri.EscapeDataString(exchange);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"instruments/{ex}");
+        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for instruments/{exchange}.";
+            return new KiteInstrumentsFetchResult(false, msg, Array.Empty<KiteInstrumentListItemDto>(), false);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+
+        var header = await reader.ReadLineAsync(ct);
+        if (header is null)
+            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        var items = new List<KiteInstrumentListItemDto>();
+        var scanTruncated = false;
+
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            var row = TryParseRow(line);
+            if (row is null || !RowMatchesNeedle(row, needle))
+                continue;
+
+            items.Add(row);
+            if (items.Count != maxMatches)
+                continue;
+
+            scanTruncated = await reader.ReadLineAsync(ct) is not null;
+            break;
+        }
+
+        return new KiteInstrumentsFetchResult(true, null, items, scanTruncated);
+    }
+
+    private static bool RowMatchesNeedle(KiteInstrumentListItemDto row, string needleNormalized)
+    {
+        var haystack = string.Join(
+                ' ',
+                new[]
+                {
+                    row.Tradingsymbol,
+                    row.Name ?? "",
+                    row.Exchange,
+                    row.InstrumentType ?? "",
+                    row.Segment ?? "",
+                    row.Expiry ?? "",
+                    row.Strike?.ToString(CultureInfo.InvariantCulture) ?? "",
+                    row.LotSize?.ToString(CultureInfo.InvariantCulture) ?? "",
+                    row.InstrumentToken,
+                })
+            .ToLowerInvariant();
+        return haystack.Contains(needleNormalized, StringComparison.Ordinal);
+    }
+
     private static KiteInstrumentListItemDto? TryParseRow(string line)
     {
         var parts = line.Split(',');

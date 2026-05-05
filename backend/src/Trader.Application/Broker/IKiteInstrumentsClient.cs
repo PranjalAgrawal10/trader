@@ -11,6 +11,17 @@ public interface IKiteInstrumentsClient
         string accessToken,
         int? maxRows,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Streams Kite <c>/instruments/{exchange}</c> and returns rows whose searchable fields contain <paramref name="query"/> (case-insensitive). Stops after <paramref name="maxMatches"/> hits; <see cref="KiteInstrumentsFetchResult.Truncated"/> indicates the exchange dump may have more matches.
+    /// </summary>
+    Task<KiteInstrumentsFetchResult> SearchExchangeInstrumentsAsync(
+        string exchange,
+        string apiKey,
+        string accessToken,
+        string query,
+        int maxMatches,
+        CancellationToken ct = default);
 }
 
 public sealed record KiteInstrumentsFetchResult(

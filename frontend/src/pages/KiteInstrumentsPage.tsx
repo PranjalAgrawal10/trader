@@ -14,6 +14,7 @@ import {
   Card,
   Col,
   Form,
+  InputGroup,
   Row,
   Spinner,
   Table,
@@ -47,6 +48,11 @@ interface InstrumentsResponse {
   commoditiesTruncated: boolean
 }
 
+interface InstrumentSearchResponse {
+  items: KiteInstrumentRow[]
+  scanTruncated: boolean
+}
+
 const INSTRUMENT_PAGE_SIZE = 100
 const SCROLL_LOAD_THRESHOLD_PX = 96
 
@@ -73,12 +79,14 @@ function InstrumentListPanel({
   truncated,
   loading,
   emptyHint,
+  searchSegment,
 }: {
   title: string
   rows: KiteInstrumentRow[]
   truncated: boolean
   loading: boolean
   emptyHint: string
+  searchSegment: 'fno' | 'mcx'
 }) {
   const searchFieldId = useId()
   const [search, setSearch] = useState('')
@@ -86,16 +94,29 @@ function InstrumentListPanel({
   const [visibleCount, setVisibleCount] = useState(INSTRUMENT_PAGE_SIZE)
   const scrollRef = useRef<HTMLDivElement>(null)
 
+  const [serverMode, setServerMode] = useState(false)
+  const [serverHits, setServerHits] = useState<KiteInstrumentRow[]>([])
+  const [serverScanTruncated, setServerScanTruncated] = useState(false)
+  const [liveSearchLoading, setLiveSearchLoading] = useState(false)
+  const [liveSearchError, setLiveSearchError] = useState<string | null>(null)
+
   const filtered = useMemo(() => {
+    if (serverMode) return serverHits
     const q = deferredSearch.trim().toLowerCase()
     if (!q) return rows
     return rows.filter((r) => rowSearchHaystack(r).includes(q))
-  }, [rows, deferredSearch])
+  }, [rows, deferredSearch, serverMode, serverHits])
+
+  const localHasMatchForTypedQuery = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return false
+    return rows.some((r) => rowSearchHaystack(r).includes(q))
+  }, [search, rows])
 
   useEffect(() => {
     setVisibleCount(INSTRUMENT_PAGE_SIZE)
     scrollRef.current?.scrollTo({ top: 0 })
-  }, [filtered.length, deferredSearch, rows.length])
+  }, [filtered.length, deferredSearch, rows.length, serverMode, serverHits.length])
 
   const displayed = useMemo(
     () => filtered.slice(0, visibleCount),
@@ -115,54 +136,129 @@ function InstrumentListPanel({
 
   const showing = displayed.length
   const totalFiltered = filtered.length
-  const totalApi = rows.length
+
+  const runLiveSearch = useCallback(async () => {
+    const q = search.trim()
+    if (!q || loading || liveSearchLoading) return
+    if (localHasMatchForTypedQuery) return
+
+    setLiveSearchLoading(true)
+    setLiveSearchError(null)
+    try {
+      const { data } = await api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', {
+        params: { q, segment: searchSegment },
+      })
+      setServerHits(data.items)
+      setServerScanTruncated(data.scanTruncated)
+      setServerMode(true)
+    } catch (err) {
+      setLiveSearchError(problemDetail(err))
+      setServerMode(false)
+      setServerHits([])
+      setServerScanTruncated(false)
+    } finally {
+      setLiveSearchLoading(false)
+    }
+  }, [search, loading, liveSearchLoading, localHasMatchForTypedQuery, searchSegment])
+
+  const onSearchChange = (value: string) => {
+    setSearch(value)
+    if (serverMode || liveSearchError) {
+      setServerMode(false)
+      setServerHits([])
+      setServerScanTruncated(false)
+      setLiveSearchError(null)
+    }
+  }
+
+  const combinedLoading = loading || liveSearchLoading
 
   return (
     <div className="mt-4">
       <h2 className="h6 mb-2">{title}</h2>
-      {truncated ? (
+      {truncated && !serverMode ? (
         <Alert variant="warning" className="py-2 small mb-2">
           List may be incomplete (row cap applied when fetching).
         </Alert>
       ) : null}
-      <Form.Group className="mb-2" controlId={searchFieldId}>
-        <Form.Label className="small text-secondary text-uppercase">Search</Form.Label>
-        <Form.Control
-          type="search"
-          size="sm"
-          placeholder="Symbol, name, exchange, expiry…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          disabled={loading || rows.length === 0}
-          aria-label={`Search ${title}`}
-          autoComplete="off"
-        />
-      </Form.Group>
+      {serverMode && serverScanTruncated ? (
+        <Alert variant="info" className="py-2 small mb-2">
+          Showing up to the server match limit — more contracts may match on Kite.
+        </Alert>
+      ) : null}
+      <Form
+        onSubmit={(e) => {
+          e.preventDefault()
+          void runLiveSearch()
+        }}
+      >
+        <Form.Group className="mb-2" controlId={searchFieldId}>
+          <Form.Label className="small text-secondary text-uppercase">Search</Form.Label>
+          <InputGroup size="sm">
+            <Form.Control
+              type="search"
+              placeholder="Symbol, name, exchange, expiry…"
+              value={search}
+              onChange={(e) => onSearchChange(e.target.value)}
+              disabled={loading && rows.length === 0}
+              aria-label={`Search ${title}`}
+              autoComplete="off"
+            />
+            <Button
+              type="submit"
+              variant="outline-secondary"
+              disabled={
+                combinedLoading || !search.trim() || localHasMatchForTypedQuery
+              }
+            >
+              {liveSearchLoading ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-1" />
+                  Kite…
+                </>
+              ) : (
+                'Search Kite'
+              )}
+            </Button>
+          </InputGroup>
+        </Form.Group>
+      </Form>
       <p className="small text-secondary mb-2">
-        {loading
+        {combinedLoading && !liveSearchLoading
           ? 'Loading…'
-          : totalApi === 0
-            ? emptyHint
-            : totalFiltered === 0
-              ? 'No matches for this search.'
-              : showing >= totalFiltered
-                ? `Showing all ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${totalApi.toLocaleString()} loaded from API).`
-                : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${totalApi.toLocaleString()} loaded). Scroll for 100 more.`}
+          : liveSearchLoading
+            ? 'Searching full Kite instrument files…'
+            : rows.length === 0 && !serverMode
+              ? emptyHint
+              : serverMode && totalFiltered === 0
+                ? 'No matches from Kite for this text.'
+                : totalFiltered === 0
+                  ? 'No matches in the preview list — press Enter or Search Kite to scan the full file.'
+                  : showing >= totalFiltered
+                    ? serverMode
+                      ? `Full Kite search: ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}.`
+                      : `Showing all ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${rows.length.toLocaleString()} in preview).`
+                    : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}. Scroll for 100 more.`}
       </p>
+      {liveSearchError ? (
+        <Alert variant="danger" className="py-2 small mb-2">
+          {liveSearchError}
+        </Alert>
+      ) : null}
       <div
         ref={scrollRef}
         className="rounded border border-secondary"
         style={{ maxHeight: '24rem', overflow: 'auto' }}
         onScroll={onScroll}
       >
-        {loading ? (
+        {loading && rows.length === 0 && !serverMode ? (
           <div className="d-flex align-items-center gap-2 p-4 text-secondary small">
             <Spinner animation="border" size="sm" role="status" />
             Loading…
           </div>
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && !serverMode ? (
           <p className="p-4 text-secondary small mb-0">{emptyHint}</p>
-        ) : totalFiltered === 0 ? null : (
+        ) : totalFiltered === 0 && !liveSearchLoading ? null : (
           <Table striped hover size="sm" className="mb-0 align-middle small">
             <thead className="table-dark sticky-top">
               <tr>
@@ -280,7 +376,9 @@ export function KiteInstrumentsPage() {
               <Col>
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
-                  Search and scroll to load more rows (100 per batch).
+                  Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
+                  <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
+                  server.
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">
@@ -306,6 +404,7 @@ export function KiteInstrumentsPage() {
               truncated={instruments?.fnoTruncated ?? false}
               loading={instrumentsLoading}
               emptyHint="No rows returned. Try Refresh or check your Kite session."
+              searchSegment="fno"
             />
             <InstrumentListPanel
               title="Commodities (MCX)"
@@ -313,6 +412,7 @@ export function KiteInstrumentsPage() {
               truncated={instruments?.commoditiesTruncated ?? false}
               loading={instrumentsLoading}
               emptyHint="No rows returned. Try Refresh or check your Kite session."
+              searchSegment="mcx"
             />
           </Card.Body>
         </Card>

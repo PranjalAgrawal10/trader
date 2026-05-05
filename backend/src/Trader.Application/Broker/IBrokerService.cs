@@ -22,4 +22,11 @@ public interface IBrokerService
     /// Full F&O master (NFO + BFO) and MCX commodity instruments from Kite’s daily CSV dumps.
     /// </summary>
     Task<KiteFnoCommodityListsDto> GetKiteFnoCommodityInstrumentsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>Substring search across the Kite instrument CSVs for the given segment (streams until enough matches).</summary>
+    Task<KiteInstrumentSearchDto> SearchKiteInstrumentsAsync(
+        Guid userId,
+        string query,
+        KiteInstrumentSearchSegment segment,
+        CancellationToken ct = default);
 }

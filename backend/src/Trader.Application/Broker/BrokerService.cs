@@ -13,6 +13,10 @@ public sealed class BrokerService : IBrokerService
     /// <summary>Row cap per Kite <c>/instruments/{exchange}</c> response (streaming stops early; truncated flag set when more rows exist).</summary>
     private const int KiteInstrumentsMaxRowsPerExchange = 100;
 
+    private const int KiteInstrumentSearchMaxMatchesFnoPerExchange = 50;
+    private const int KiteInstrumentSearchMaxMatchesMcx = 100;
+    private const int KiteInstrumentSearchQueryMaxLength = 128;
+
     private readonly IBrokerSetupGateway _brokerSetup;
     private readonly IKiteOAuthStateCodec _stateCodec;
     private readonly IKiteSessionExchange _kiteSessionExchange;
@@ -101,21 +105,7 @@ public sealed class BrokerService : IBrokerService
 
     public async Task<KiteFnoCommodityListsDto> GetKiteFnoCommodityInstrumentsAsync(Guid userId, CancellationToken ct = default)
     {
-        var snapshot = await _brokerSetup.GetSnapshotAsync(userId, ct);
-        if (snapshot is null)
-            throw new InvalidOperationException("User not found.");
-
-        if (!string.Equals(snapshot.BrokerProvider, "Zerodha", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Zerodha (Kite) is not connected.");
-
-        var accessToken = await _brokerSetup.GetKiteAccessTokenAsync(userId, ct);
-        if (string.IsNullOrEmpty(accessToken))
-            throw new InvalidOperationException("No valid Kite session. Reconnect Zerodha.");
-
-        var apiKey = _kiteOptions.Value.ApiKey;
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException(
-                "Zerodha Kite is not configured. Set environment variable ZerodhaKite__ApiKey (see README).");
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
 
         var cap = (int?)KiteInstrumentsMaxRowsPerExchange;
         var nfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("NFO", apiKey, accessToken, cap, ct);
@@ -143,6 +133,85 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(mcx.ErrorMessage ?? "Could not load MCX instruments from Kite.");
 
         return new KiteFnoCommodityListsDto(fno, mcx.Items, fnoTruncated, mcx.Truncated);
+    }
+
+    public async Task<KiteInstrumentSearchDto> SearchKiteInstrumentsAsync(
+        Guid userId,
+        string query,
+        KiteInstrumentSearchSegment segment,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            throw new InvalidOperationException("Search text is required.");
+
+        var needle = query.Trim();
+        if (needle.Length > KiteInstrumentSearchQueryMaxLength)
+            throw new InvalidOperationException($"Search text must be at most {KiteInstrumentSearchQueryMaxLength} characters.");
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+
+        if (segment == KiteInstrumentSearchSegment.Fno)
+        {
+            var cap = KiteInstrumentSearchMaxMatchesFnoPerExchange;
+            var nfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("NFO", apiKey, accessToken, needle, cap, ct);
+            var bfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("BFO", apiKey, accessToken, needle, cap, ct);
+            await Task.WhenAll(nfoTask, bfoTask).ConfigureAwait(false);
+
+            var nfo = await nfoTask.ConfigureAwait(false);
+            if (!nfo.Success)
+                throw new InvalidOperationException(nfo.ErrorMessage ?? "Could not search NFO instruments on Kite.");
+
+            var combined = new List<KiteInstrumentListItemDto>(nfo.Items);
+            var scanTruncated = nfo.Truncated;
+
+            var bfo = await bfoTask.ConfigureAwait(false);
+            if (bfo.Success)
+            {
+                combined.AddRange(bfo.Items);
+                scanTruncated |= bfo.Truncated;
+            }
+
+            return new KiteInstrumentSearchDto(combined, scanTruncated);
+        }
+
+        {
+            var mcx = await _kiteInstruments
+                .SearchExchangeInstrumentsAsync(
+                    "MCX",
+                    apiKey,
+                    accessToken,
+                    needle,
+                    KiteInstrumentSearchMaxMatchesMcx,
+                    ct)
+                .ConfigureAwait(false);
+            if (!mcx.Success)
+                throw new InvalidOperationException(mcx.ErrorMessage ?? "Could not search MCX instruments on Kite.");
+
+            return new KiteInstrumentSearchDto(mcx.Items, mcx.Truncated);
+        }
+    }
+
+    private async Task<(string ApiKey, string AccessToken)> RequireKiteInstrumentSessionAsync(
+        Guid userId,
+        CancellationToken ct)
+    {
+        var snapshot = await _brokerSetup.GetSnapshotAsync(userId, ct).ConfigureAwait(false);
+        if (snapshot is null)
+            throw new InvalidOperationException("User not found.");
+
+        if (!string.Equals(snapshot.BrokerProvider, "Zerodha", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Zerodha (Kite) is not connected.");
+
+        var accessToken = await _brokerSetup.GetKiteAccessTokenAsync(userId, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(accessToken))
+            throw new InvalidOperationException("No valid Kite session. Reconnect Zerodha.");
+
+        var apiKey = _kiteOptions.Value.ApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+            throw new InvalidOperationException(
+                "Zerodha Kite is not configured. Set environment variable ZerodhaKite__ApiKey (see README).");
+
+        return (apiKey, accessToken);
     }
 
     /// <summary>Maps callback <paramref name="state"/> to the HMAC payload. Returns the server cache key when resolved from memory (for one-time removal).</summary>

@@ -25,3 +25,14 @@ public sealed record KiteFnoCommodityListsDto(
     IReadOnlyList<KiteInstrumentListItemDto> Commodities,
     bool FnoTruncated,
     bool CommoditiesTruncated);
+
+/// <summary>F&amp;O (NFO+BFO) or MCX only.</summary>
+public enum KiteInstrumentSearchSegment
+{
+    Fno,
+    Mcx,
+}
+
+public sealed record KiteInstrumentSearchDto(
+    IReadOnlyList<KiteInstrumentListItemDto> Items,
+    bool ScanTruncated);
