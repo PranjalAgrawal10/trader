@@ -153,6 +153,18 @@ Required for a real MySQL run: **`Database:Provider`**, then all of **`Database:
 
 Successful redirects from Kite include **`request_token`**; a **`status=success`** query parameter is **not** always present. The API treats the callback as failed only if **`status`** is sent and is **not** `success`.
 
+**Split SPA and API (two public hostnames)** — e.g. static site at `https://trader-fe-vumpy.ondigitalocean.app` and API at `https://trader-be-7cdnc.ondigitalocean.app` ([Trader Console](https://trader-fe-vumpy.ondigitalocean.app/) · [API root](https://trader-be-7cdnc.ondigitalocean.app/)):
+
+| Where | Setting |
+|--------|---------|
+| **Frontend build** | **`VITE_API_BASE_URL`** = `https://trader-be-7cdnc.ondigitalocean.app` (no trailing slash). Required when the SPA origin ≠ API origin. |
+| **API env** | **`Cors__Origins__0`** = `https://trader-fe-vumpy.ondigitalocean.app` (exact SPA origin; no trailing slash). |
+| **Kite developer console** | **Redirect URL** = `https://trader-be-7cdnc.ondigitalocean.app/api/v1/broker/kite/callback` — must be the **API** host, not the static site. |
+| **API env** | **`ZerodhaKite__RedirectUrl`** = same URL as in Kite console. |
+| **API env** | **`ZerodhaKite__PostLoginRedirectUrl`** = `https://trader-fe-vumpy.ondigitalocean.app/brokers` (where users land after OAuth). |
+
+If **Redirect URL** is registered on the frontend hostname, Zerodha will call the wrong service and linking will fail.
+
 The API exchanges the `request_token` at Kite’s token endpoint and stores **encrypted** access (and refresh when present) tokens using ASP.NET Core Data Protection. The OAuth **`state`** sent to Zerodha is a **short id** mapped in **server memory** to the HMAC-signed payload (`AddMemoryCache`); this avoids long URLs being dropped and avoids relying on cookies when the API and SPA share one public host. **Scaling to multiple API instances** requires **session affinity** or a **shared distributed cache** for that mapping (single-instance App Platform is fine). OAuth **`state`** signing for the stored payload still uses **`Jwt:Key`**. Persist **`DataProtection__KeyRingPath`** so stored broker tokens and 2FA secrets keep working across deploys. **Do not commit API secrets**; keep them in local env files or a secrets manager.
 
 - **Instruments (F&O + MCX)**: with a valid Zerodha-linked session, `GET /api/v1/broker/kite/instruments/fno-commodities` returns the full NFO, BFO, and MCX instrument rows from Kite’s daily CSV dumps (large payload; requires `Authorization: Bearer …`).

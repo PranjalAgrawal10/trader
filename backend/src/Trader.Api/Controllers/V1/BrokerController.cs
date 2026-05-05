@@ -82,13 +82,16 @@ public sealed class BrokerController : ControllerBase
         [FromQuery] string? request_token,
         [FromQuery] string? status,
         [FromQuery] string? state,
+        [FromQuery(Name = "trader_oauth")] string? traderOauth,
         CancellationToken ct)
     {
         var redirectBase = _kiteOptions.Value.PostLoginRedirectUrl.TrimEnd('/');
         var cookieOptions = BuildKiteOAuthCookieOptions();
-        var effectiveState = string.IsNullOrWhiteSpace(state)
-            ? Request.Cookies[KiteOAuthStateCookie]
-            : state;
+
+        var traderFromQuery = FirstNonEmpty(
+            traderOauth,
+            Request.Query["trader_oauth"].FirstOrDefault());
+        var effectiveState = FirstNonEmpty(state, traderFromQuery, Request.Cookies[KiteOAuthStateCookie]);
 
         Response.Cookies.Delete(KiteOAuthStateCookie, new CookieOptions
         {
@@ -107,13 +110,16 @@ public sealed class BrokerController : ControllerBase
             || string.IsNullOrWhiteSpace(effectiveState))
         {
             var cookieHadState = Request.Cookies.ContainsKey(KiteOAuthStateCookie);
+            var queryKeys = string.Join(',', Request.Query.Keys);
             _logger.LogWarning(
-                "Kite OAuth callback rejected: StatusPresentAndFailed={StatusFailed}, HasRequestToken={HasToken}, HasStateQuery={HasStateQ}, CookieHadFallback={CookieFallback}, CallbackStatus={KiteStatus}",
+                "Kite OAuth callback rejected: StatusPresentAndFailed={StatusFailed}, HasRequestToken={HasToken}, HasStateQuery={HasStateQ}, HasTraderOauth={HasTraderOauth}, CookieHadFallback={CookieFallback}, CallbackStatus={KiteStatus}, QueryKeys={QueryKeys}",
                 statusPresentAndFailed,
                 !string.IsNullOrEmpty(request_token),
                 !string.IsNullOrWhiteSpace(state),
+                !string.IsNullOrWhiteSpace(traderFromQuery),
                 cookieHadState,
-                status ?? "(null)");
+                status ?? "(null)",
+                queryKeys);
 
             string userMessage = statusPresentAndFailed
                 ? "Login was cancelled or failed at Zerodha."
@@ -139,13 +145,26 @@ public sealed class BrokerController : ControllerBase
 
     private CookieOptions BuildKiteOAuthCookieOptions()
     {
+        // SPA (other origin) calls /broker/kite/login-url with credentials: SameSite=None + Secure helps the fallback cookie stick in production HTTPS.
+        var https = Request.IsHttps;
         return new CookieOptions
         {
             HttpOnly = true,
-            Secure = Request.IsHttps,
-            SameSite = SameSiteMode.Lax,
+            Secure = https,
+            SameSite = https ? SameSiteMode.None : SameSiteMode.Lax,
             Path = "/",
             MaxAge = TimeSpan.FromMinutes(20),
         };
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        foreach (var v in values)
+        {
+            if (!string.IsNullOrWhiteSpace(v))
+                return v.Trim();
+        }
+
+        return null;
     }
 }

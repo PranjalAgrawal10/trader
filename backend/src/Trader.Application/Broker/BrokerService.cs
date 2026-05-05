@@ -60,8 +60,10 @@ public sealed class BrokerService : IBrokerService
         var shortKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         _memoryCache.Set(PendingStateCachePrefix + shortKey, fullState, PendingStateTtl);
 
+        // redirect_params: Kite appends these to the redirect URL (see kite.trade docs). Backup if `state` is omitted.
+        var redirectParams = Uri.EscapeDataString($"trader_oauth={shortKey}");
         var url =
-            $"https://kite.zerodha.com/connect/login?v=3&api_key={Uri.EscapeDataString(opt.ApiKey)}&state={Uri.EscapeDataString(shortKey)}";
+            $"https://kite.zerodha.com/connect/login?v=3&api_key={Uri.EscapeDataString(opt.ApiKey)}&state={Uri.EscapeDataString(shortKey)}&redirect_params={redirectParams}";
         return Task.FromResult(new KiteLoginUrlBuildResult(url, shortKey));
     }
 
