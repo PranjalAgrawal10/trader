@@ -31,6 +31,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.KiteRefreshTokenProtected);
             e.Property(x => x.TotpSecretProtected);
             e.Property(x => x.TotpPendingSecretProtected);
+            e.Property(x => x.TotpRecoveryCodesProtected);
         });
 
         modelBuilder.Entity<Strategy>(e =>

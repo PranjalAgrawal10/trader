@@ -31,6 +31,8 @@ public static class DependencyInjection
             var provider = sp.GetRequiredService<IDataProtectionProvider>();
             return new TwoFactorTotpHelper(provider.CreateProtector("Trader.Security.TotpSecret"));
         });
+        services.AddSingleton<ITwoFactorRecoveryCodesHelper, TwoFactorRecoveryCodesHelper>();
+        services.AddSingleton<ITwoFactorOtpAttemptLimiter, TwoFactorOtpAttemptLimiter>();
         services.AddSingleton<ITwoFactorLoginTicketService>(sp =>
         {
             var provider = sp.GetRequiredService<IDataProtectionProvider>();

@@ -15,6 +15,8 @@ public sealed class AuthService : IAuthService
     private readonly IJwtTokenService _jwtTokenService;
     private readonly ITwoFactorTotpHelper _totp;
     private readonly ITwoFactorLoginTicketService _twoFactorLoginTicket;
+    private readonly ITwoFactorOtpAttemptLimiter _attemptLimiter;
+    private readonly ITwoFactorRecoveryCodesHelper _recoveryCodes;
     private readonly JwtOptions _jwtOptions;
 
     public AuthService(
@@ -23,6 +25,8 @@ public sealed class AuthService : IAuthService
         IJwtTokenService jwtTokenService,
         ITwoFactorTotpHelper totp,
         ITwoFactorLoginTicketService twoFactorLoginTicket,
+        ITwoFactorOtpAttemptLimiter attemptLimiter,
+        ITwoFactorRecoveryCodesHelper recoveryCodes,
         IOptions<JwtOptions> jwtOptions)
     {
         _users = users;
@@ -30,6 +34,8 @@ public sealed class AuthService : IAuthService
         _jwtTokenService = jwtTokenService;
         _totp = totp;
         _twoFactorLoginTicket = twoFactorLoginTicket;
+        _attemptLimiter = attemptLimiter;
+        _recoveryCodes = recoveryCodes;
         _jwtOptions = jwtOptions.Value;
     }
 
@@ -75,12 +81,14 @@ public sealed class AuthService : IAuthService
         return new LoginSucceeded(new AuthResponse(token, user.Id, user.Email, user.Role));
     }
 
-    public async Task<AuthResponse> CompleteTwoFactorLoginAsync(TwoFactorLoginRequest request, CancellationToken ct = default)
+    public async Task<AuthResponse> CompleteTwoFactorLoginAsync(TwoFactorVerifyLoginRequest request, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(request.TwoFactorToken) || string.IsNullOrWhiteSpace(request.Code))
-            throw new InvalidOperationException("Two-factor token and authenticator code are required.");
+        var ticket = request.ResolveTicket();
+        var code = request.ResolveCode();
+        if (string.IsNullOrWhiteSpace(ticket) || string.IsNullOrWhiteSpace(code))
+            throw new InvalidOperationException("temp_token and otp are required.");
 
-        var ticketStatus = _twoFactorLoginTicket.ValidatePendingLoginTicket(request.TwoFactorToken.Trim(), out var userId);
+        var ticketStatus = _twoFactorLoginTicket.ValidatePendingLoginTicket(ticket, out var userId);
         if (ticketStatus == TwoFactorPendingTicketStatus.Expired)
         {
             throw new InvalidOperationException(
@@ -92,6 +100,9 @@ public sealed class AuthService : IAuthService
             throw new InvalidOperationException(
                 "This sign-in step is not valid. Use Back and sign in again with your password.");
         }
+
+        var scope = LoginScope(userId);
+        _attemptLimiter.EnsureNotBlocked(scope);
 
         var user = await _users.GetByIdAsync(userId, ct);
         if (user is null || !user.TwoFactorEnabled || string.IsNullOrEmpty(user.TotpSecretProtected))
@@ -111,11 +122,22 @@ public sealed class AuthService : IAuthService
                 "Could not read two-factor data. Use Back and sign in again with your password.");
         }
 
-        if (!_totp.VerifyCode(secret, request.Code))
-            throw new InvalidOperationException("Invalid authenticator code.");
+        if (_totp.VerifyCode(secret, code))
+        {
+            _attemptLimiter.Reset(scope);
+            return IssueToken(user);
+        }
 
-        var token = _jwtTokenService.CreateToken(user.Id, user.Email, user.Role);
-        return new AuthResponse(token, user.Id, user.Email, user.Role);
+        if (_recoveryCodes.TryConsumeOne(user.TotpRecoveryCodesProtected, code, out var updatedPayload))
+        {
+            user.TotpRecoveryCodesProtected = updatedPayload;
+            await _users.SaveChangesAsync(ct);
+            _attemptLimiter.Reset(scope);
+            return IssueToken(user);
+        }
+
+        _attemptLimiter.RegisterFailure(scope);
+        throw new InvalidOperationException("Invalid authenticator or recovery code.");
     }
 
     public async Task<TwoFactorEnrollmentResponse> BeginTwoFactorEnrollmentAsync(Guid userId, CancellationToken ct = default)
@@ -134,8 +156,14 @@ public sealed class AuthService : IAuthService
         return new TwoFactorEnrollmentResponse(manual, uri);
     }
 
-    public async Task ConfirmTwoFactorEnrollmentAsync(Guid userId, TwoFactorConfirmRequest request, CancellationToken ct = default)
+    public async Task<TwoFactorEnrollmentConfirmResult> ConfirmTwoFactorEnrollmentAsync(
+        Guid userId,
+        TwoFactorConfirmRequest request,
+        CancellationToken ct = default)
     {
+        var scope = EnrollScope(userId);
+        _attemptLimiter.EnsureNotBlocked(scope);
+
         var user = await RequireUserAsync(userId, ct);
         if (user.TwoFactorEnabled)
             throw new ConflictException("Two-factor authentication is already enabled.");
@@ -150,22 +178,33 @@ public sealed class AuthService : IAuthService
         }
         catch
         {
+            _attemptLimiter.RegisterFailure(scope);
             throw new InvalidOperationException("Could not read pending enrollment. Start setup again.");
         }
 
-        if (!_totp.VerifyCode(secret, request.Code))
+        if (!_totp.VerifyCode(secret, request.ResolveCode()))
+        {
+            _attemptLimiter.RegisterFailure(scope);
             throw new InvalidOperationException("Invalid authenticator code.");
+        }
 
+        _attemptLimiter.Reset(scope);
+
+        var (plaintext, protectedPayload) = _recoveryCodes.IssueNewProtectedPayload();
         user.TotpSecretProtected = user.TotpPendingSecretProtected;
         user.TotpPendingSecretProtected = null;
+        user.TotpRecoveryCodesProtected = protectedPayload;
         user.TwoFactorEnabled = true;
         await _users.SaveChangesAsync(ct);
+
+        return new TwoFactorEnrollmentConfirmResult(plaintext);
     }
 
     public async Task CancelTwoFactorEnrollmentAsync(Guid userId, CancellationToken ct = default)
     {
         var user = await RequireUserAsync(userId, ct);
         user.TotpPendingSecretProtected = null;
+        _attemptLimiter.Reset(EnrollScope(userId));
         await _users.SaveChangesAsync(ct);
     }
 
@@ -175,11 +214,26 @@ public sealed class AuthService : IAuthService
         if (!user.TwoFactorEnabled)
             throw new InvalidOperationException("Two-factor authentication is not enabled.");
 
-        if (!_passwordHasher.Verify(request.Password, user.PasswordHash))
-            throw new InvalidOperationException("Invalid password.");
-
         if (string.IsNullOrEmpty(user.TotpSecretProtected))
             throw new InvalidOperationException("Two-factor data is inconsistent. Contact support.");
+
+        var password = request.Password?.Trim();
+        if (!string.IsNullOrEmpty(password) && _passwordHasher.Verify(password, user.PasswordHash))
+        {
+            ClearTwoFactor(user);
+            _attemptLimiter.Reset(DisableScope(userId));
+            await _users.SaveChangesAsync(ct);
+            return;
+        }
+
+        var otpOrRecovery = request.ResolveOtpOrCode();
+        if (string.IsNullOrEmpty(otpOrRecovery))
+        {
+            throw new InvalidOperationException("Provide your current password or an authenticator/recovery code.");
+        }
+
+        var scope = DisableScope(userId);
+        _attemptLimiter.EnsureNotBlocked(scope);
 
         byte[] secret;
         try
@@ -191,13 +245,33 @@ public sealed class AuthService : IAuthService
             throw new InvalidOperationException("Could not read two-factor secret.");
         }
 
-        if (!_totp.VerifyCode(secret, request.Code))
-            throw new InvalidOperationException("Invalid authenticator code.");
+        if (_totp.VerifyCode(secret, otpOrRecovery))
+        {
+            ClearTwoFactor(user);
+            _attemptLimiter.Reset(scope);
+            await _users.SaveChangesAsync(ct);
+            return;
+        }
 
+        if (_recoveryCodes.TryConsumeOne(user.TotpRecoveryCodesProtected, otpOrRecovery, out _))
+        {
+            ClearTwoFactor(user);
+            _attemptLimiter.Reset(scope);
+            await _users.SaveChangesAsync(ct);
+            return;
+        }
+
+        _attemptLimiter.RegisterFailure(scope);
+        throw new InvalidOperationException("Invalid password or authenticator/recovery code.");
+    }
+
+    /// <summary>Clears stored TOTP/recovery state; caller must save.</summary>
+    private static void ClearTwoFactor(User user)
+    {
         user.TwoFactorEnabled = false;
         user.TotpSecretProtected = null;
         user.TotpPendingSecretProtected = null;
-        await _users.SaveChangesAsync(ct);
+        user.TotpRecoveryCodesProtected = null;
     }
 
     public async Task<TwoFactorStatusResponse> GetTwoFactorStatusAsync(Guid userId, CancellationToken ct = default)
@@ -207,6 +281,18 @@ public sealed class AuthService : IAuthService
             user.TwoFactorEnabled,
             !string.IsNullOrEmpty(user.TotpPendingSecretProtected));
     }
+
+    private AuthResponse IssueToken(User user)
+    {
+        var token = _jwtTokenService.CreateToken(user.Id, user.Email, user.Role);
+        return new AuthResponse(token, user.Id, user.Email, user.Role);
+    }
+
+    private static string LoginScope(Guid userId) => $"2fa-login:{userId:N}";
+
+    private static string EnrollScope(Guid userId) => $"2fa-enroll:{userId:N}";
+
+    private static string DisableScope(Guid userId) => $"2fa-disable:{userId:N}";
 
     private async Task<User> RequireUserAsync(Guid userId, CancellationToken ct)
     {

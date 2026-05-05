@@ -6,11 +6,14 @@ public interface IAuthService
 
     Task<LoginResult> LoginAsync(LoginRequest request, CancellationToken ct = default);
 
-    Task<AuthResponse> CompleteTwoFactorLoginAsync(TwoFactorLoginRequest request, CancellationToken ct = default);
+    Task<AuthResponse> CompleteTwoFactorLoginAsync(TwoFactorVerifyLoginRequest request, CancellationToken ct = default);
 
     Task<TwoFactorEnrollmentResponse> BeginTwoFactorEnrollmentAsync(Guid userId, CancellationToken ct = default);
 
-    Task ConfirmTwoFactorEnrollmentAsync(Guid userId, TwoFactorConfirmRequest request, CancellationToken ct = default);
+    Task<TwoFactorEnrollmentConfirmResult> ConfirmTwoFactorEnrollmentAsync(
+        Guid userId,
+        TwoFactorConfirmRequest request,
+        CancellationToken ct = default);
 
     Task CancelTwoFactorEnrollmentAsync(Guid userId, CancellationToken ct = default);
 

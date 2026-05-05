@@ -32,6 +32,9 @@ public class User
     /// <summary>Pending enrollment: encrypted secret until the user confirms the first code.</summary>
     public string? TotpPendingSecretProtected { get; set; }
 
+    /// <summary>Data-protection encrypted JSON of hashed one-time recovery codes when <see cref="TwoFactorEnabled"/>.</summary>
+    public string? TotpRecoveryCodesProtected { get; set; }
+
     public void MarkBrokerConnected(DateTimeOffset connectedAt) =>
         BrokerConnectedAt = connectedAt;
 

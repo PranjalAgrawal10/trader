@@ -6,7 +6,7 @@ import { api } from '../api/client'
 import { useAuthStore } from '../store/useAuthStore'
 
 interface TwoFactorStatus {
-  twoFactorEnabled: boolean
+  two_factor_enabled: boolean
 }
 
 /** Until TOTP 2FA is enabled, only `/security` (and login) are reachable with a session. */
@@ -23,8 +23,8 @@ export function RequiresTwoFactor({ children }: { children: ReactElement }) {
     let cancelled = false
     ;(async () => {
       try {
-        const { data } = await api.get<TwoFactorStatus>('/auth/2fa/status')
-        if (!cancelled) setGate(data.twoFactorEnabled ? 'ok' : 'need')
+        const { data } = await api.get<TwoFactorStatus>('/2fa/status')
+        if (!cancelled) setGate(data.two_factor_enabled ? 'ok' : 'need')
       } catch {
         if (!cancelled) setGate('need')
       }

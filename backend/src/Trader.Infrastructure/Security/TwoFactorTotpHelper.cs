@@ -37,8 +37,8 @@ public sealed class TwoFactorTotpHelper : ITwoFactorTotpHelper
             return false;
 
         var totp = new Totp(secretKey);
-        // ±3 steps (~90s) vs server UTC helps device clock drift and edge-of-window entry.
-        return totp.VerifyTotp(normalized, out _, new VerificationWindow(previous: 3, future: 3));
+        // ±1 step (~30s) per TOTP best practice; small clock drift only.
+        return totp.VerifyTotp(normalized, out _, new VerificationWindow(previous: 1, future: 1));
     }
 
     public string BuildOtpAuthUri(string accountEmail, byte[] secretKey, string issuer)

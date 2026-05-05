@@ -22,10 +22,10 @@ type AuthPayload = {
   role: string
 }
 
-function isTwoFactorChallenge(x: unknown): x is { requiresTwoFactor: true; twoFactorToken: string } {
+function isTwoFactorChallenge(x: unknown): x is { requires_2fa: true; temp_token: string } {
   if (typeof x !== 'object' || x === null) return false
   const o = x as Record<string, unknown>
-  return o.requiresTwoFactor === true && typeof o.twoFactorToken === 'string'
+  return o.requires_2fa === true && typeof o.temp_token === 'string'
 }
 
 function isAuthPayload(x: unknown): x is AuthPayload {
@@ -48,8 +48,8 @@ export function LoginPage() {
   const continueAfterAuth = async (token: string, accountEmail: string) => {
     setAuth(token, accountEmail)
     try {
-      const { data } = await api.get<{ twoFactorEnabled: boolean }>('/auth/2fa/status')
-      if (!data.twoFactorEnabled) {
+      const { data } = await api.get<{ two_factor_enabled: boolean }>('/2fa/status')
+      if (!data.two_factor_enabled) {
         navigate('/security?required=1', { replace: true })
         return
       }
@@ -84,7 +84,7 @@ export function LoginPage() {
       })
 
       if (isTwoFactorChallenge(data)) {
-        setTwoFactorToken(data.twoFactorToken)
+        setTwoFactorToken(data.temp_token)
         setTotpCode('')
         return
       }
@@ -112,9 +112,9 @@ export function LoginPage() {
     setError(null)
     setBusy(true)
     try {
-      const { data } = await api.post<unknown>('/auth/login/2fa', {
-        twoFactorToken,
-        code: totpCode.trim(),
+      const { data } = await api.post<unknown>('/2fa/verify-login', {
+        temp_token: twoFactorToken,
+        otp: totpCode.trim(),
       })
       if (!isAuthPayload(data)) {
         setError('Unexpected response from server.')
@@ -150,14 +150,14 @@ export function LoginPage() {
               {twoFactorToken ? (
                 <Form onSubmit={submitTotp}>
                   <p className="small text-secondary mb-3">
-                    Enter the 6-digit code from your authenticator app for <strong>{email}</strong>. If you waited a long
-                    time after entering your password, this step may time out — use <strong>Back</strong> and sign in
-                    again.
+                    Enter your 6-digit authenticator code, or an unused recovery code, for <strong>{email}</strong>. If you
+                    waited a long time after entering your password, this step may time out — use <strong>Back</strong> and
+                    sign in again.
                   </p>
                   <Form.Group className="mb-3" controlId="login-totp">
-                    <Form.Label className="small text-secondary text-uppercase">Authenticator code</Form.Label>
+                    <Form.Label className="small text-secondary text-uppercase">Authenticator or recovery code</Form.Label>
                     <Form.Control
-                      inputMode="numeric"
+                      inputMode="text"
                       autoComplete="one-time-code"
                       value={totpCode}
                       onChange={(ev) => setTotpCode(ev.target.value)}
