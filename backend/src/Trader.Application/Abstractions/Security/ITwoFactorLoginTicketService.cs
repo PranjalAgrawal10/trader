@@ -5,5 +5,13 @@ public interface ITwoFactorLoginTicketService
 {
     string CreatePendingLoginTicket(Guid userId);
 
-    bool TryValidatePendingLoginTicket(string ticket, out Guid userId);
+    /// <summary>Validates payload signature, parse, and max age.</summary>
+    TwoFactorPendingTicketStatus ValidatePendingLoginTicket(string ticket, out Guid userId);
+}
+
+public enum TwoFactorPendingTicketStatus
+{
+    Invalid,
+    Expired,
+    Valid,
 }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Pomelo.EntityFrameworkCore.MySql;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
@@ -20,6 +21,7 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.SectionName));
+        services.Configure<AuthOptions>(configuration.GetSection(AuthOptions.SectionName));
         // Kite ApiKey/ApiSecret/RedirectUrl: environment variables (ZerodhaKite__*) and Development .env — not committed appsettings.
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
 
@@ -32,7 +34,8 @@ public static class DependencyInjection
         services.AddSingleton<ITwoFactorLoginTicketService>(sp =>
         {
             var provider = sp.GetRequiredService<IDataProtectionProvider>();
-            return new TwoFactorLoginTicketService(provider.CreateProtector("Trader.Auth.TwoFactorLogin"));
+            var auth = sp.GetRequiredService<IOptions<AuthOptions>>();
+            return new TwoFactorLoginTicketService(provider.CreateProtector("Trader.Auth.TwoFactorLogin"), auth);
         });
         services.AddHttpClient<IKiteSessionExchange, KiteSessionExchange>(client =>
         {

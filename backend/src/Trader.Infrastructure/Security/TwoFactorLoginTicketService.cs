@@ -1,16 +1,23 @@
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Security;
+using Trader.Application.Configuration;
 
 namespace Trader.Infrastructure.Security;
 
 public sealed class TwoFactorLoginTicketService : ITwoFactorLoginTicketService
 {
-    private static readonly TimeSpan MaxAge = TimeSpan.FromMinutes(5);
+    private readonly TimeSpan _maxAge;
     private readonly IDataProtector _protector;
 
-    public TwoFactorLoginTicketService(IDataProtector protector)
+    public TwoFactorLoginTicketService(
+        IDataProtector protector,
+        IOptions<AuthOptions> authOptions)
     {
         _protector = protector;
+        var minutes = authOptions.Value.TwoFactorLoginTicketLifetimeMinutes;
+        minutes = Math.Clamp(minutes, 1, 120);
+        _maxAge = TimeSpan.FromMinutes(minutes);
     }
 
     public string CreatePendingLoginTicket(Guid userId)
@@ -19,32 +26,34 @@ public sealed class TwoFactorLoginTicketService : ITwoFactorLoginTicketService
         return _protector.Protect(payload);
     }
 
-    public bool TryValidatePendingLoginTicket(string ticket, out Guid userId)
+    public TwoFactorPendingTicketStatus ValidatePendingLoginTicket(string ticket, out Guid userId)
     {
         userId = default;
         if (string.IsNullOrWhiteSpace(ticket))
-            return false;
+            return TwoFactorPendingTicketStatus.Invalid;
 
+        string payload;
         try
         {
-            var payload = _protector.Unprotect(ticket);
-            var parts = payload.Split('|');
-            if (parts.Length != 2)
-                return false;
-            if (!Guid.TryParse(parts[0], out userId))
-                return false;
-            if (!long.TryParse(parts[1], out var unix))
-                return false;
-
-            var created = DateTimeOffset.FromUnixTimeSeconds(unix);
-            if (DateTimeOffset.UtcNow - created > MaxAge)
-                return false;
-
-            return true;
+            payload = _protector.Unprotect(ticket);
         }
         catch
         {
-            return false;
+            return TwoFactorPendingTicketStatus.Invalid;
         }
+
+        var parts = payload.Split('|');
+        if (parts.Length != 2)
+            return TwoFactorPendingTicketStatus.Invalid;
+        if (!Guid.TryParse(parts[0], out userId))
+            return TwoFactorPendingTicketStatus.Invalid;
+        if (!long.TryParse(parts[1], out var unix))
+            return TwoFactorPendingTicketStatus.Invalid;
+
+        var created = DateTimeOffset.FromUnixTimeSeconds(unix);
+        if (DateTimeOffset.UtcNow - created > _maxAge)
+            return TwoFactorPendingTicketStatus.Expired;
+
+        return TwoFactorPendingTicketStatus.Valid;
     }
 }

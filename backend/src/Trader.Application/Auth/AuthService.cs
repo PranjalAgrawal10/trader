@@ -75,17 +75,30 @@ public sealed class AuthService : IAuthService
         return new LoginSucceeded(new AuthResponse(token, user.Id, user.Email, user.Role));
     }
 
-    public async Task<AuthResponse?> CompleteTwoFactorLoginAsync(TwoFactorLoginRequest request, CancellationToken ct = default)
+    public async Task<AuthResponse> CompleteTwoFactorLoginAsync(TwoFactorLoginRequest request, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(request.TwoFactorToken) || string.IsNullOrWhiteSpace(request.Code))
-            return null;
+            throw new InvalidOperationException("Two-factor token and authenticator code are required.");
 
-        if (!_twoFactorLoginTicket.TryValidatePendingLoginTicket(request.TwoFactorToken.Trim(), out var userId))
-            return null;
+        var ticketStatus = _twoFactorLoginTicket.ValidatePendingLoginTicket(request.TwoFactorToken.Trim(), out var userId);
+        if (ticketStatus == TwoFactorPendingTicketStatus.Expired)
+        {
+            throw new InvalidOperationException(
+                "This sign-in step expired. Use Back and sign in again with your password.");
+        }
+
+        if (ticketStatus != TwoFactorPendingTicketStatus.Valid)
+        {
+            throw new InvalidOperationException(
+                "This sign-in step is not valid. Use Back and sign in again with your password.");
+        }
 
         var user = await _users.GetByIdAsync(userId, ct);
         if (user is null || !user.TwoFactorEnabled || string.IsNullOrEmpty(user.TotpSecretProtected))
-            return null;
+        {
+            throw new InvalidOperationException(
+                "Could not complete sign-in. Use Back and sign in again with your password.");
+        }
 
         byte[] secret;
         try
@@ -94,11 +107,12 @@ public sealed class AuthService : IAuthService
         }
         catch
         {
-            return null;
+            throw new InvalidOperationException(
+                "Could not read two-factor data. Use Back and sign in again with your password.");
         }
 
         if (!_totp.VerifyCode(secret, request.Code))
-            return null;
+            throw new InvalidOperationException("Invalid authenticator code.");
 
         var token = _jwtTokenService.CreateToken(user.Id, user.Email, user.Role);
         return new AuthResponse(token, user.Id, user.Email, user.Role);

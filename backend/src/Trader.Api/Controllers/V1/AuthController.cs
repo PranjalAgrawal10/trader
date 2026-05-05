@@ -43,11 +43,8 @@ public sealed class AuthController : ControllerBase
 
     [AllowAnonymous]
     [HttpPost("login/2fa")]
-    public async Task<ActionResult<AuthResponse>> CompleteTwoFactorLogin([FromBody] TwoFactorLoginRequest request, CancellationToken ct)
-    {
-        var auth = await _auth.CompleteTwoFactorLoginAsync(request, ct);
-        return auth is null ? Unauthorized() : Ok(auth);
-    }
+    public async Task<ActionResult<AuthResponse>> CompleteTwoFactorLogin([FromBody] TwoFactorLoginRequest request, CancellationToken ct) =>
+        Ok(await _auth.CompleteTwoFactorLoginAsync(request, ct));
 
     [Authorize]
     [HttpGet("2fa/status")]

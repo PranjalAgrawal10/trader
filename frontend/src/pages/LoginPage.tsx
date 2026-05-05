@@ -1,9 +1,19 @@
+import axios from 'axios'
 import { type FormEvent, useState } from 'react'
 import { Button, ButtonGroup, Card, Col, Container, Form, Row } from 'react-bootstrap'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { navigateToAppAfterTwoFactor } from '../navigation/afterTwoFactor'
 import { useAuthStore } from '../store/useAuthStore'
+
+function problemDetail(err: unknown): string | null {
+  if (axios.isAxiosError(err)) {
+    const body = err.response?.data as { detail?: string; title?: string } | undefined
+    const s = body?.detail ?? body?.title ?? (err.response?.status === 401 ? err.message : null)
+    return s && s.length > 0 ? s : null
+  }
+  return null
+}
 
 type AuthPayload = {
   token: string
@@ -107,14 +117,14 @@ export function LoginPage() {
         code: totpCode.trim(),
       })
       if (!isAuthPayload(data)) {
-        setError('Invalid or expired code. Try signing in again.')
+        setError('Unexpected response from server.')
         return
       }
       setTwoFactorToken(null)
       setTotpCode('')
       await continueAfterAuth(data.token, data.email)
-    } catch {
-      setError('Invalid or expired code. Try signing in again.')
+    } catch (err) {
+      setError(problemDetail(err) ?? 'Could not verify sign-in. Try again or use Back.')
     } finally {
       setBusy(false)
     }
@@ -140,7 +150,9 @@ export function LoginPage() {
               {twoFactorToken ? (
                 <Form onSubmit={submitTotp}>
                   <p className="small text-secondary mb-3">
-                    Enter the 6-digit code from your authenticator app for <strong>{email}</strong>.
+                    Enter the 6-digit code from your authenticator app for <strong>{email}</strong>. If you waited a long
+                    time after entering your password, this step may time out — use <strong>Back</strong> and sign in
+                    again.
                   </p>
                   <Form.Group className="mb-3" controlId="login-totp">
                     <Form.Label className="small text-secondary text-uppercase">Authenticator code</Form.Label>
