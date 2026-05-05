@@ -4,6 +4,11 @@ public sealed record BrokerStatusDto(bool Connected, DateTimeOffset? ConnectedAt
 
 public sealed record KiteLoginUrlDto(string LoginUrl);
 
+/// <summary>
+/// <see cref="LoginUrl"/> goes to the client; <see cref="PendingOAuthStateKey"/> mirrors the OAuth <c>state</c> query (short server-side key) for the HttpOnly cookie fallback.
+/// </summary>
+public sealed record KiteLoginUrlBuildResult(string LoginUrl, string PendingOAuthStateKey);
+
 public sealed record KiteInstrumentListItemDto(
     string InstrumentToken,
     string Tradingsymbol,

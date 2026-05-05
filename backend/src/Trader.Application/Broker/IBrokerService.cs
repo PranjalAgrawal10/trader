@@ -7,8 +7,10 @@ public interface IBrokerService
     /// <summary>Marks broker setup complete without a live broker (demo / placeholder).</summary>
     Task CompleteSetupAsync(Guid userId, CancellationToken ct = default);
 
-    /// <summary>Kite login URL including signed <c>state</c> for the current user.</summary>
-    Task<KiteLoginUrlDto> GetKiteLoginUrlAsync(Guid userId, CancellationToken ct = default);
+    /// <summary>
+    /// Kite login URL including <c>state</c>. Uses a short server-stored key so Zerodha does not truncate a long signed payload.
+    /// </summary>
+    Task<KiteLoginUrlBuildResult> GetKiteLoginUrlAsync(Guid userId, CancellationToken ct = default);
 
     /// <summary>Completes OAuth using request_token and state from Kite redirect.</summary>
     Task<BrokerStatusDto> CompleteKiteOAuthAsync(string requestToken, string state, CancellationToken ct = default);

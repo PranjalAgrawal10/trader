@@ -11,6 +11,7 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
+        services.AddMemoryCache();
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IBrokerService, BrokerService>();
         services.AddScoped<IStrategyService, StrategyService>();

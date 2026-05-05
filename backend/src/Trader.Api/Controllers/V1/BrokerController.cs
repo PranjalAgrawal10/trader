@@ -20,18 +20,15 @@ public sealed class BrokerController : ControllerBase
 
     private readonly IBrokerService _broker;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
-    private readonly IKiteOAuthStateCodec _stateCodec;
     private readonly ILogger<BrokerController> _logger;
 
     public BrokerController(
         IBrokerService broker,
         IOptions<ZerodhaKiteOptions> kiteOptions,
-        IKiteOAuthStateCodec stateCodec,
         ILogger<BrokerController> logger)
     {
         _broker = broker;
         _kiteOptions = kiteOptions;
-        _stateCodec = stateCodec;
         _logger = logger;
     }
 
@@ -73,10 +70,9 @@ public sealed class BrokerController : ControllerBase
     public async Task<ActionResult<KiteLoginUrlDto>> KiteLoginUrl(CancellationToken ct)
     {
         var userId = User.GetUserId();
-        var dto = await _broker.GetKiteLoginUrlAsync(userId, ct);
-        // Zerodha sometimes omits `state` on the callback query string; keep a signed fallback on the API origin.
-        Response.Cookies.Append(KiteOAuthStateCookie, _stateCodec.Encode(userId), BuildKiteOAuthCookieOptions());
-        return Ok(dto);
+        var r = await _broker.GetKiteLoginUrlAsync(userId, ct);
+        Response.Cookies.Append(KiteOAuthStateCookie, r.PendingOAuthStateKey, BuildKiteOAuthCookieOptions());
+        return Ok(new KiteLoginUrlDto(r.LoginUrl));
     }
 
     /// <summary>Kite redirect target — register this exact URL on the Kite developer console.</summary>
@@ -148,7 +144,7 @@ public sealed class BrokerController : ControllerBase
             HttpOnly = true,
             Secure = Request.IsHttps,
             SameSite = SameSiteMode.Lax,
-            Path = "/api/v1/broker",
+            Path = "/",
             MaxAge = TimeSpan.FromMinutes(20),
         };
     }

@@ -1,29 +1,36 @@
+using System.Security.Cryptography;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Trader.Application.Configuration;
-using Newtonsoft.Json;
 
 namespace Trader.Application.Broker;
 
 public sealed class BrokerService : IBrokerService
 {
+    private const string PendingStateCachePrefix = "Trader.KiteOAuth.PendingState:";
+    private static readonly TimeSpan PendingStateTtl = TimeSpan.FromMinutes(20);
+
     private readonly IBrokerSetupGateway _brokerSetup;
     private readonly IKiteOAuthStateCodec _stateCodec;
     private readonly IKiteSessionExchange _kiteSessionExchange;
     private readonly IKiteInstrumentsClient _kiteInstruments;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
+    private readonly IMemoryCache _memoryCache;
 
     public BrokerService(
         IBrokerSetupGateway brokerSetup,
         IKiteOAuthStateCodec stateCodec,
         IKiteSessionExchange kiteSessionExchange,
         IKiteInstrumentsClient kiteInstruments,
-        IOptions<ZerodhaKiteOptions> kiteOptions)
+        IOptions<ZerodhaKiteOptions> kiteOptions,
+        IMemoryCache memoryCache)
     {
         _brokerSetup = brokerSetup;
         _stateCodec = stateCodec;
         _kiteSessionExchange = kiteSessionExchange;
         _kiteInstruments = kiteInstruments;
         _kiteOptions = kiteOptions;
+        _memoryCache = memoryCache;
     }
 
     public async Task<BrokerStatusDto> GetStatusAsync(Guid userId, CancellationToken ct = default)
@@ -39,7 +46,7 @@ public sealed class BrokerService : IBrokerService
     public Task CompleteSetupAsync(Guid userId, CancellationToken ct = default) =>
         _brokerSetup.CompleteBrokerSetupAsync(userId, ct);
 
-    public Task<KiteLoginUrlDto> GetKiteLoginUrlAsync(Guid userId, CancellationToken ct = default)
+    public Task<KiteLoginUrlBuildResult> GetKiteLoginUrlAsync(Guid userId, CancellationToken ct = default)
     {
         _ = ct;
         var opt = _kiteOptions.Value;
@@ -49,15 +56,19 @@ public sealed class BrokerService : IBrokerService
                 "Zerodha Kite is not configured. Set environment variables ZerodhaKite__ApiKey and ZerodhaKite__RedirectUrl (or use .env.development in Development; see README).");
         }
 
-        var state = _stateCodec.Encode(userId);
+        var fullState = _stateCodec.Encode(userId);
+        var shortKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+        _memoryCache.Set(PendingStateCachePrefix + shortKey, fullState, PendingStateTtl);
+
         var url =
-            $"https://kite.zerodha.com/connect/login?v=3&api_key={Uri.EscapeDataString(opt.ApiKey)}&state={Uri.EscapeDataString(state)}";
-        return Task.FromResult(new KiteLoginUrlDto(url));
+            $"https://kite.zerodha.com/connect/login?v=3&api_key={Uri.EscapeDataString(opt.ApiKey)}&state={Uri.EscapeDataString(shortKey)}";
+        return Task.FromResult(new KiteLoginUrlBuildResult(url, shortKey));
     }
 
     public async Task<BrokerStatusDto> CompleteKiteOAuthAsync(string requestToken, string state, CancellationToken ct = default)
     {
-        var userId = _stateCodec.TryDecode(state)
+        var (signedState, pendingKey) = ResolveKiteOAuthState(state);
+        var userId = _stateCodec.TryDecode(signedState)
                      ?? throw new InvalidOperationException("Invalid or expired OAuth state. Try connecting again.");
 
         var exchanged = await _kiteSessionExchange.ExchangeAsync(requestToken, ct);
@@ -70,6 +81,9 @@ public sealed class BrokerService : IBrokerService
             userId,
             new BrokerKitePersistRequest(exchanged.AccessToken, exchanged.RefreshToken, exchanged.KiteUserId),
             ct);
+
+        if (pendingKey is not null)
+            _memoryCache.Remove(PendingStateCachePrefix + pendingKey);
 
         return await GetStatusAsync(userId, ct);
     }
@@ -113,5 +127,27 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(mcx.ErrorMessage ?? "Could not load MCX instruments from Kite.");
 
         return new KiteFnoCommodityListsDto(fno, mcx.Items, false, false);
+    }
+
+    /// <summary>Maps callback <paramref name="state"/> to the HMAC payload. Returns the server cache key when resolved from memory (for one-time removal).</summary>
+    private (string SignedState, string? PendingKey) ResolveKiteOAuthState(string state)
+    {
+        if (string.IsNullOrWhiteSpace(state))
+            return (state, null);
+
+        var trimmed = state.Trim();
+
+        if (trimmed.Length == 32
+            && trimmed.All(char.IsAsciiHexDigit)
+            && _memoryCache.TryGetValue(
+                PendingStateCachePrefix + trimmed.ToLowerInvariant(),
+                out var cached)
+            && cached is string full
+            && !string.IsNullOrEmpty(full))
+        {
+            return (full, trimmed.ToLowerInvariant());
+        }
+
+        return (trimmed, null);
     }
 }
