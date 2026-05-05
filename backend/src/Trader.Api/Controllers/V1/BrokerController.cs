@@ -2,6 +2,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Trader.Api.Extensions;
 using Trader.Application.Broker;
@@ -20,15 +21,18 @@ public sealed class BrokerController : ControllerBase
     private readonly IBrokerService _broker;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
     private readonly IKiteOAuthStateCodec _stateCodec;
+    private readonly ILogger<BrokerController> _logger;
 
     public BrokerController(
         IBrokerService broker,
         IOptions<ZerodhaKiteOptions> kiteOptions,
-        IKiteOAuthStateCodec stateCodec)
+        IKiteOAuthStateCodec stateCodec,
+        ILogger<BrokerController> logger)
     {
         _broker = broker;
         _kiteOptions = kiteOptions;
         _stateCodec = stateCodec;
+        _logger = logger;
     }
 
     [Authorize]
@@ -98,11 +102,32 @@ public sealed class BrokerController : ControllerBase
             SameSite = cookieOptions.SameSite,
         });
 
-        if (!string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
+        // Kite v3 docs: redirect includes request_token; `status` query is not always sent. Only fail if status is present and not success.
+        var statusPresentAndFailed = !string.IsNullOrEmpty(status)
+            && !string.Equals(status, "success", StringComparison.OrdinalIgnoreCase);
+
+        if (statusPresentAndFailed
             || string.IsNullOrEmpty(request_token)
             || string.IsNullOrWhiteSpace(effectiveState))
         {
-            return Redirect($"{redirectBase}?kite=error&message={Uri.EscapeDataString("Login was cancelled or failed.")}");
+            var cookieHadState = Request.Cookies.ContainsKey(KiteOAuthStateCookie);
+            _logger.LogWarning(
+                "Kite OAuth callback rejected: StatusPresentAndFailed={StatusFailed}, HasRequestToken={HasToken}, HasStateQuery={HasStateQ}, CookieHadFallback={CookieFallback}, CallbackStatus={KiteStatus}",
+                statusPresentAndFailed,
+                !string.IsNullOrEmpty(request_token),
+                !string.IsNullOrWhiteSpace(state),
+                cookieHadState,
+                status ?? "(null)");
+
+            string userMessage = statusPresentAndFailed
+                ? "Login was cancelled or failed at Zerodha."
+                : string.IsNullOrEmpty(request_token)
+                    ? "Missing request token from Kite. Check the redirect URL in the developer console."
+                    : string.IsNullOrWhiteSpace(effectiveState)
+                        ? "Missing OAuth state. Use the same browser session, or ensure the Kite redirect URL matches this API (see README)."
+                        : "Login was cancelled or failed.";
+
+            return Redirect($"{redirectBase}?kite=error&message={Uri.EscapeDataString(userMessage)}");
         }
 
         try
