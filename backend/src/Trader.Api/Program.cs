@@ -29,6 +29,24 @@ public sealed class Program
             options.JsonSerializerOptions.Converters.Add(
                 new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
         });
+
+        // Single registration: TOTP secrets, pending login tickets, and broker OAuth state all use this key ring.
+        var dataProtectionBuilder = builder.Services.AddDataProtection().SetApplicationName("Trader");
+        if (!builder.Environment.IsEnvironment("IntegrationTesting"))
+        {
+            var dataProtectionKeysPath = builder.Configuration["DataProtection:KeyRingPath"];
+            if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+            {
+                Directory.CreateDirectory(dataProtectionKeysPath);
+                dataProtectionBuilder.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+            }
+            else if (builder.Environment.IsProduction())
+            {
+                // Without a persisted path, redeploys rotate keys — encrypted DB fields (2FA, Kite tokens) become unreadable.
+                dataProtectionBuilder.UseEphemeralDataProtectionProvider();
+            }
+        }
+
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);
 
@@ -102,26 +120,6 @@ public sealed class Program
                 options.KnownNetworks.Clear();
                 options.KnownProxies.Clear();
             });
-        }
-
-        if (!builder.Environment.IsEnvironment("IntegrationTesting"))
-        {
-            var dataProtectionKeysPath = builder.Configuration["DataProtection:KeyRingPath"];
-            if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
-            {
-                Directory.CreateDirectory(dataProtectionKeysPath);
-                builder.Services.AddDataProtection()
-                    .SetApplicationName("Trader")
-                    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
-            }
-            else if (builder.Environment.IsProduction())
-            {
-                // Stateless hosts (e.g. App Platform without a mounted key path): avoid filesystem key ring warnings;
-                // keys still reset on restart — use DataProtection:KeyRingPath + persistent storage to keep payloads stable.
-                builder.Services.AddDataProtection()
-                    .SetApplicationName("Trader")
-                    .UseEphemeralDataProtectionProvider();
-            }
         }
 
         builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

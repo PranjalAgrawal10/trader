@@ -23,7 +23,6 @@ public static class DependencyInjection
         // Kite ApiKey/ApiSecret/RedirectUrl: environment variables (ZerodhaKite__*) and Development .env — not committed appsettings.
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
 
-        services.AddDataProtection();
         services.AddSingleton<IKiteOAuthStateCodec>(sp =>
         {
             var provider = sp.GetRequiredService<IDataProtectionProvider>();

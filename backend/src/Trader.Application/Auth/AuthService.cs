@@ -77,6 +77,9 @@ public sealed class AuthService : IAuthService
 
     public async Task<AuthResponse?> CompleteTwoFactorLoginAsync(TwoFactorLoginRequest request, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(request.TwoFactorToken) || string.IsNullOrWhiteSpace(request.Code))
+            return null;
+
         if (!_twoFactorLoginTicket.TryValidatePendingLoginTicket(request.TwoFactorToken.Trim(), out var userId))
             return null;
 

@@ -199,7 +199,7 @@ Add under the service (encrypt secrets in the control panel):
 | **`Cors__Origins__0`** | Your live site origin, e.g. **`https://your-app.ondigitalocean.app`** (no trailing slash). |
 | **`ZerodhaKite__*`** | If you use Kite: **secrets**; **`RedirectUrl`** must be the public **`https://…/api/v1/broker/kite/callback`**. |
 
-Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage** so broker encryption keys survive redeploys.
+Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage** so **2FA and** broker encryption keys survive redeploys.
 
 ### 5. Frontend (Static Site `trader-web`)
 
