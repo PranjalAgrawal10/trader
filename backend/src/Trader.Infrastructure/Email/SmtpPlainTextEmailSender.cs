@@ -23,7 +23,8 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         if (!_options.IsEnabled)
         {
             throw new InvalidOperationException(
-                "Email sending is disabled. Set `" + SmtpOptions.SectionName + ":IsEnabled` and SMTP credentials.");
+                "Email sending is disabled. Enable SMTP: appsettings/`" + SmtpOptions.SectionName + ":IsEnabled` "
+                + "or environment **`" + SmtpOptions.SectionName + "__IsEnabled=true`**, plus host/user/password/from.");
         }
 
         var fromEmail = (_options.FromEmail ?? _options.User)?.Trim()
