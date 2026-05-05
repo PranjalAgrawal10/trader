@@ -23,7 +23,12 @@ public sealed class KiteSessionExchange : IKiteSessionExchange
         var opt = _options.Value;
         if (string.IsNullOrWhiteSpace(opt.ApiKey) || string.IsNullOrWhiteSpace(opt.ApiSecret))
         {
-            return new KiteSessionExchangeResult(false, "Kite API credentials are not configured.", null, null, null);
+            return new KiteSessionExchangeResult(
+                false,
+                "Kite API credentials are not configured. Set ZerodhaKite__ApiKey and ZerodhaKite__ApiSecret (see README).",
+                null,
+                null,
+                null);
         }
 
         var checksum = ComputeChecksum(opt.ApiKey, requestToken, opt.ApiSecret);

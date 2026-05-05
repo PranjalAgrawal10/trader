@@ -147,8 +147,8 @@ Required for a real MySQL run: **`Database:Provider`**, then all of **`Database:
 #### Zerodha Kite Connect
 
 1. Create a Kite Connect app at [developers.kite.trade](https://developers.kite.trade/).
-2. Set the **Redirect URL** in the developer console to exactly the same value as **`ZerodhaKite:RedirectUrl`** (e.g. dev API: `http://localhost:5232/api/v1/broker/kite/callback`). Mismatches cause OAuth failures.
-3. In `.env.development` (or environment variables), set **`ZerodhaKite__ApiKey`**, **`ZerodhaKite__ApiSecret`**, and **`ZerodhaKite__RedirectUrl`**. Optionally override **`ZerodhaKite__PostLoginRedirectUrl`** if your SPA runs on a different origin than `http://localhost:5173/brokers`.
+2. Set the **Redirect URL** in the developer console to exactly the same value as **`ZerodhaKite__RedirectUrl`** (e.g. dev API: `http://localhost:5232/api/v1/broker/kite/callback`). Mismatches cause OAuth failures.
+3. Set **`ZerodhaKite__ApiKey`**, **`ZerodhaKite__ApiSecret`**, and **`ZerodhaKite__RedirectUrl`** as **environment variables** (Production/Staging) or in **`.env.development`** / **`.env.development.local`** when `ASPNETCORE_ENVIRONMENT=Development` (merged into configuration by `DotEnvBootstrap`). **Do not** put these values in committed **`appsettings*.json`**. Optionally override **`ZerodhaKite__PostLoginRedirectUrl`** if your SPA runs on a different origin than `http://localhost:5173/brokers`.
 4. Apply EF migrations so `Users` includes Kite token columns (**`Migrate()`** on API startup for MySQL, post-build when you **`dotnet build`** the API project directly, or `dotnet ef database update`).
 
 The API exchanges the `request_token` at Kite’s token endpoint and stores **encrypted** access (and refresh when present) tokens using ASP.NET Core Data Protection. **Do not commit API secrets**; keep them in local env files or a secrets manager.

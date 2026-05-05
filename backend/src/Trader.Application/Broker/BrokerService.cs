@@ -46,7 +46,7 @@ public sealed class BrokerService : IBrokerService
         if (string.IsNullOrWhiteSpace(opt.ApiKey) || string.IsNullOrWhiteSpace(opt.RedirectUrl))
         {
             throw new InvalidOperationException(
-                "Zerodha Kite is not configured. Set ZerodhaKite:ApiKey and ZerodhaKite:RedirectUrl (see README).");
+                "Zerodha Kite is not configured. Set environment variables ZerodhaKite__ApiKey and ZerodhaKite__RedirectUrl (or use .env.development in Development; see README).");
         }
 
         var state = _stateCodec.Encode(userId);
@@ -95,7 +95,8 @@ public sealed class BrokerService : IBrokerService
 
         var apiKey = _kiteOptions.Value.ApiKey;
         if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException("Zerodha Kite is not configured. Set ZerodhaKite:ApiKey.");
+            throw new InvalidOperationException(
+                "Zerodha Kite is not configured. Set environment variable ZerodhaKite__ApiKey (see README).");
 
         var nfo = await _kiteInstruments.FetchExchangeInstrumentsAsync("NFO", apiKey, accessToken, maxRows: null, ct);
         if (!nfo.Success)

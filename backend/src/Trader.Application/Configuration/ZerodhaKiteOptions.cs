@@ -1,5 +1,11 @@
 namespace Trader.Application.Configuration;
 
+/// <summary>
+/// Zerodha Kite Connect app settings. Supply values with environment variables
+/// (<c>ZerodhaKite__ApiKey</c>, <c>ZerodhaKite__ApiSecret</c>, <c>ZerodhaKite__RedirectUrl</c>, etc.)
+/// or, in Development only, the same keys in <c>.env.development</c> / <c>.env.development.local</c>
+/// (see <c>DotEnvBootstrap</c>). Do not put API secrets in committed <c>appsettings*.json</c>.
+/// </summary>
 public sealed class ZerodhaKiteOptions
 {
     public const string SectionName = "ZerodhaKite";
