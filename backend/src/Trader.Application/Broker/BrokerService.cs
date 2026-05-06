@@ -2,7 +2,9 @@ using System.Linq;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Configuration;
+using Trader.Domain.Entities;
 
 namespace Trader.Application.Broker;
 
@@ -18,10 +20,13 @@ public sealed class BrokerService : IBrokerService
     private const int KiteInstrumentSearchMaxMatchesMcx = 100;
     private const int KiteInstrumentSearchQueryMaxLength = 128;
 
+    private const int MaxKiteFavoriteInstrumentsPerUser = 400;
+
     private readonly IBrokerSetupGateway _brokerSetup;
     private readonly IKiteOAuthStateCodec _stateCodec;
     private readonly IKiteSessionExchange _kiteSessionExchange;
     private readonly IKiteInstrumentsClient _kiteInstruments;
+    private readonly IKiteFavoriteInstrumentRepository _kiteFavoriteInstruments;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
     private readonly IMemoryCache _memoryCache;
 
@@ -30,6 +35,7 @@ public sealed class BrokerService : IBrokerService
         IKiteOAuthStateCodec stateCodec,
         IKiteSessionExchange kiteSessionExchange,
         IKiteInstrumentsClient kiteInstruments,
+        IKiteFavoriteInstrumentRepository kiteFavoriteInstruments,
         IOptions<ZerodhaKiteOptions> kiteOptions,
         IMemoryCache memoryCache)
     {
@@ -37,6 +43,7 @@ public sealed class BrokerService : IBrokerService
         _stateCodec = stateCodec;
         _kiteSessionExchange = kiteSessionExchange;
         _kiteInstruments = kiteInstruments;
+        _kiteFavoriteInstruments = kiteFavoriteInstruments;
         _kiteOptions = kiteOptions;
         _memoryCache = memoryCache;
     }
@@ -234,6 +241,105 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(raw.ErrorMessage ?? "Could not load candles from Kite.");
 
         return new KiteHistoricalCandlesDto(raw.Candles, code, start, end);
+    }
+
+    public async Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+        var rows = await _kiteFavoriteInstruments.ListByUserAsync(userId, ct).ConfigureAwait(false);
+        var items = rows.Select(MapFavoriteToDto).ToList();
+        return new KiteFavoriteInstrumentsListDto(items);
+    }
+
+    public async Task AddKiteFavoriteInstrumentAsync(
+        Guid userId,
+        KiteInstrumentListItemDto item,
+        CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(item.InstrumentToken)
+            || !item.InstrumentToken.Trim().All(char.IsAsciiDigit))
+            throw new InvalidOperationException("A numeric instrument token from Kite is required.");
+
+        var token = item.InstrumentToken.Trim();
+        if (token.Length > 64)
+            throw new InvalidOperationException("Instrument token is too long.");
+
+        if (string.IsNullOrWhiteSpace(item.Tradingsymbol) || string.IsNullOrWhiteSpace(item.Exchange))
+            throw new InvalidOperationException("Tradingsymbol and exchange are required.");
+
+        var existing = await _kiteFavoriteInstruments.FindAsync(userId, token, ct).ConfigureAwait(false);
+        if (existing is not null)
+            return;
+
+        var count = await _kiteFavoriteInstruments.CountByUserAsync(userId, ct).ConfigureAwait(false);
+        if (count >= MaxKiteFavoriteInstrumentsPerUser)
+            throw new InvalidOperationException($"You can save at most {MaxKiteFavoriteInstrumentsPerUser} favorite instruments.");
+
+        var entity = new KiteFavoriteInstrument
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            InstrumentToken = token,
+            Tradingsymbol = item.Tradingsymbol.Trim(),
+            Exchange = item.Exchange.Trim(),
+            Name = NullableNorm(item.Name),
+            InstrumentType = NullableNorm(item.InstrumentType),
+            Segment = NullableNorm(item.Segment),
+            Expiry = NullableNorm(item.Expiry),
+            Strike = item.Strike,
+            LotSize = item.LotSize,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+        };
+
+        await _kiteFavoriteInstruments.AddAsync(entity, ct).ConfigureAwait(false);
+        await _kiteFavoriteInstruments.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task RemoveKiteFavoriteInstrumentAsync(Guid userId, string instrumentToken, CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+            return;
+
+        var token = instrumentToken.Trim();
+        var existing = await _kiteFavoriteInstruments.FindAsync(userId, token, ct).ConfigureAwait(false);
+        if (existing is null)
+            return;
+
+        _kiteFavoriteInstruments.Remove(existing);
+        await _kiteFavoriteInstruments.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task RequireUserExistsAsync(Guid userId, CancellationToken ct)
+    {
+        var snapshot = await _brokerSetup.GetSnapshotAsync(userId, ct).ConfigureAwait(false);
+        if (snapshot is null)
+            throw new InvalidOperationException("User not found.");
+    }
+
+    private static KiteInstrumentListItemDto MapFavoriteToDto(KiteFavoriteInstrument x) =>
+        new(
+            x.InstrumentToken,
+            x.Tradingsymbol,
+            x.Exchange,
+            x.Name,
+            x.InstrumentType,
+            x.Segment,
+            x.Expiry,
+            x.Strike,
+            x.LotSize);
+
+    private static string? NullableNorm(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var t = value.Trim();
+        return t.Length == 0 ? null : t;
     }
 
     private static string NormalizeUiChartInterval(string interval)

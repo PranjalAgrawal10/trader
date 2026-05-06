@@ -51,3 +51,6 @@ public sealed record KiteHistoricalCandlePointDto(
     decimal Low,
     decimal Close,
     long Volume);
+
+/// <summary>Saved Kite instruments for the signed-in user (F&amp;O / MCX).</summary>
+public sealed record KiteFavoriteInstrumentsListDto(IReadOnlyList<KiteInstrumentListItemDto> Items);

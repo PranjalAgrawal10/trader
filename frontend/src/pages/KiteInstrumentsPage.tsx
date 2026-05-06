@@ -16,12 +16,15 @@ import {
   Col,
   Form,
   InputGroup,
+  Nav,
   Row,
   Spinner,
   Table,
   ToggleButton,
 } from 'react-bootstrap'
 import {
+  Bar,
+  BarChart,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -78,10 +81,18 @@ interface HistoricalCandlesResponse {
   to: string
 }
 
+interface KiteFavoritesResponse {
+  items: KiteInstrumentRow[]
+}
+
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
 type ChartInterval = (typeof CHART_INTERVALS)[number]
 
-function instrumentRowKey(r: KiteInstrumentRow): string {
+type ChartGraphType = 'line' | 'bar'
+
+type MainTab = 'browse' | 'favorites'
+
+function favoriteRowKey(r: KiteInstrumentRow): string {
   return `${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`
 }
 
@@ -114,6 +125,9 @@ function InstrumentListPanel({
   searchSegment,
   selectedRowKey,
   onSelectRow,
+  enableKiteLiveSearch = true,
+  favoriteKeySet,
+  onToggleFavorite,
 }: {
   title: string
   rows: KiteInstrumentRow[]
@@ -123,6 +137,9 @@ function InstrumentListPanel({
   searchSegment: 'fno' | 'mcx'
   selectedRowKey: string | null
   onSelectRow: (row: KiteInstrumentRow) => void
+  enableKiteLiveSearch?: boolean
+  favoriteKeySet: Set<string>
+  onToggleFavorite: (row: KiteInstrumentRow) => void
 }) {
   const searchFieldId = useId()
   const [search, setSearch] = useState('')
@@ -174,6 +191,7 @@ function InstrumentListPanel({
   const totalFiltered = filtered.length
 
   const runLiveSearch = useCallback(async () => {
+    if (!enableKiteLiveSearch) return
     const q = search.trim()
     if (!q || loading || liveSearchLoading) return
     if (localHasMatchForTypedQuery) return
@@ -195,7 +213,7 @@ function InstrumentListPanel({
     } finally {
       setLiveSearchLoading(false)
     }
-  }, [search, loading, liveSearchLoading, localHasMatchForTypedQuery, searchSegment])
+  }, [search, loading, liveSearchLoading, localHasMatchForTypedQuery, searchSegment, enableKiteLiveSearch])
 
   const onSearchChange = (value: string) => {
     setSearch(value)
@@ -240,41 +258,53 @@ function InstrumentListPanel({
               aria-label={`Search ${title}`}
               autoComplete="off"
             />
-            <Button
-              type="submit"
-              variant="outline-secondary"
-              disabled={
-                combinedLoading || !search.trim() || localHasMatchForTypedQuery
-              }
-            >
-              {liveSearchLoading ? (
-                <>
-                  <Spinner animation="border" size="sm" className="me-1" />
-                  Kite…
-                </>
-              ) : (
-                'Search Kite'
-              )}
-            </Button>
+            {enableKiteLiveSearch ? (
+              <Button
+                type="submit"
+                variant="outline-secondary"
+                disabled={
+                  combinedLoading || !search.trim() || localHasMatchForTypedQuery
+                }
+              >
+                {liveSearchLoading ? (
+                  <>
+                    <Spinner animation="border" size="sm" className="me-1" />
+                    Kite…
+                  </>
+                ) : (
+                  'Search Kite'
+                )}
+              </Button>
+            ) : null}
           </InputGroup>
         </Form.Group>
       </Form>
       <p className="small text-secondary mb-2">
-        {combinedLoading && !liveSearchLoading
-          ? 'Loading…'
-          : liveSearchLoading
-            ? 'Searching full Kite instrument files…'
-            : rows.length === 0 && !serverMode
+        {!enableKiteLiveSearch
+          ? combinedLoading
+            ? 'Loading…'
+            : rows.length === 0
               ? emptyHint
-              : serverMode && totalFiltered === 0
-                ? 'No matches from Kite for this text.'
-                : totalFiltered === 0
-                  ? 'No matches in the preview list — press Enter or Search Kite to scan the full file.'
-                  : showing >= totalFiltered
-                    ? serverMode
-                      ? `Full Kite search: ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}.`
-                      : `Showing all ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${rows.length.toLocaleString()} in preview).`
-                    : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}. Scroll for 100 more.`}
+              : totalFiltered === 0
+                ? 'No matches — try a different search.'
+                : showing >= totalFiltered
+                  ? `Showing all ${totalFiltered.toLocaleString()} favorite${totalFiltered === 1 ? '' : 's'}.`
+                  : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} favorites. Scroll for more.`
+          : combinedLoading && !liveSearchLoading
+            ? 'Loading…'
+            : liveSearchLoading
+              ? 'Searching full Kite instrument files…'
+              : rows.length === 0 && !serverMode
+                ? emptyHint
+                : serverMode && totalFiltered === 0
+                  ? 'No matches from Kite for this text.'
+                  : totalFiltered === 0
+                    ? 'No matches in the preview list — press Enter or Search Kite to scan the full file.'
+                    : showing >= totalFiltered
+                      ? serverMode
+                        ? `Full Kite search: ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}.`
+                        : `Showing all ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${rows.length.toLocaleString()} in preview).`
+                      : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}. Scroll for 100 more.`}
       </p>
       {liveSearchError ? (
         <Alert variant="danger" className="py-2 small mb-2">
@@ -298,6 +328,9 @@ function InstrumentListPanel({
           <Table striped hover size="sm" className="mb-0 align-middle small">
             <thead className="table-dark sticky-top">
               <tr>
+                <th className="text-center" style={{ width: '2.5rem' }} title="Favorite">
+                  ★
+                </th>
                 <th>Symbol</th>
                 <th>Exch.</th>
                 <th>Type</th>
@@ -313,7 +346,7 @@ function InstrumentListPanel({
                   key={`${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`}
                   role="button"
                   tabIndex={0}
-                  className={instrumentRowKey(r) === selectedRowKey ? 'table-active' : undefined}
+                  className={favoriteRowKey(r) === selectedRowKey ? 'table-active' : undefined}
                   style={{ cursor: 'pointer' }}
                   onClick={() => onSelectRow(r)}
                   onKeyDown={(e) => {
@@ -323,6 +356,30 @@ function InstrumentListPanel({
                     }
                   }}
                 >
+                  <td
+                    className="text-center align-middle"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onToggleFavorite(r)
+                    }}
+                  >
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="p-0 text-warning text-decoration-none lh-1"
+                      aria-label={
+                        favoriteKeySet.has(favoriteRowKey(r))
+                          ? 'Remove from favorites'
+                          : 'Add to favorites'
+                      }
+                      aria-pressed={favoriteKeySet.has(favoriteRowKey(r))}
+                      tabIndex={0}
+                      style={{ fontSize: '1.1rem' }}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      {favoriteKeySet.has(favoriteRowKey(r)) ? '★' : '☆'}
+                    </Button>
+                  </td>
                   <td className="font-monospace">{r.tradingsymbol}</td>
                   <td>{r.exchange}</td>
                   <td>{r.instrumentType ?? '—'}</td>
@@ -352,15 +409,20 @@ function InstrumentChartCard({
   selection,
   interval,
   onIntervalChange,
+  isFavorite,
+  onToggleFavorite,
 }: {
   selection: KiteInstrumentRow | null
   interval: ChartInterval
   onIntervalChange: (v: ChartInterval) => void
+  isFavorite: boolean
+  onToggleFavorite?: () => void
 }) {
   const [series, setSeries] = useState<{ idx: number; t: string; close: number; ohlc: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rangeHint, setRangeHint] = useState<string | null>(null)
+  const [graphType, setGraphType] = useState<ChartGraphType>('line')
 
   useEffect(() => {
     if (!selection) {
@@ -404,6 +466,32 @@ function InstrumentChartCard({
     return () => ac.abort()
   }, [selection, interval])
 
+  const chartTooltip = ({
+    active,
+    payload,
+  }: {
+    active?: boolean
+    payload?: readonly { payload?: { t: string; close: number; ohlc: string } }[]
+  }) => {
+    if (!active || !payload?.length) return null
+    const p = payload[0].payload
+    if (!p) return null
+    return (
+      <div
+        className="rounded border border-secondary p-2 small"
+        style={{ background: '#212529', color: '#f8f9fa' }}
+      >
+        <div>{new Date(p.t).toLocaleString()}</div>
+        <div className="font-monospace mt-1">Close {p.close}</div>
+        <div className="mt-1 text-secondary" style={{ fontSize: '0.78rem' }}>
+          {p.ohlc}
+        </div>
+      </div>
+    )
+  }
+
+  const chartMargins = { top: 4, right: 8, left: 0, bottom: 0 }
+
   return (
     <Card className="border-secondary mt-4">
       <Card.Body>
@@ -414,9 +502,23 @@ function InstrumentChartCard({
           </p>
         ) : (
           <>
-            <p className="small text-secondary mb-2">
-              <span className="font-monospace">{selection.tradingsymbol}</span> · {selection.exchange}
-              {rangeHint ? <span className="d-block mt-1">{rangeHint}</span> : null}
+            <p className="small text-secondary mb-2 d-flex flex-wrap align-items-center gap-2">
+              <span className="font-monospace">{selection.tradingsymbol}</span>
+              <span>· {selection.exchange}</span>
+              {onToggleFavorite ? (
+                <Button
+                  type="button"
+                  variant="outline-warning"
+                  size="sm"
+                  className="py-0 px-2"
+                  aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                  aria-pressed={isFavorite}
+                  onClick={() => onToggleFavorite()}
+                >
+                  {isFavorite ? '★ Favorited' : '☆ Add to fav'}
+                </Button>
+              ) : null}
+              {rangeHint ? <span className="d-block w-100 mt-1">{rangeHint}</span> : null}
             </p>
             <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
               <span className="small text-secondary text-uppercase me-1">Interval</span>
@@ -437,6 +539,33 @@ function InstrumentChartCard({
                 ))}
               </ButtonGroup>
             </div>
+            <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
+              <span className="small text-secondary text-uppercase me-1">Graph</span>
+              <ButtonGroup size="sm">
+                <ToggleButton
+                  id="chart-graph-line"
+                  type="radio"
+                  variant="outline-secondary"
+                  name="chart-graph"
+                  value="line"
+                  checked={graphType === 'line'}
+                  onChange={() => setGraphType('line')}
+                >
+                  Line
+                </ToggleButton>
+                <ToggleButton
+                  id="chart-graph-bar"
+                  type="radio"
+                  variant="outline-secondary"
+                  name="chart-graph"
+                  value="bar"
+                  checked={graphType === 'bar'}
+                  onChange={() => setGraphType('bar')}
+                >
+                  Bar
+                </ToggleButton>
+              </ButtonGroup>
+            </div>
             {error ? (
               <Alert variant="danger" className="py-2 small mb-2">
                 {error}
@@ -452,29 +581,21 @@ function InstrumentChartCard({
                 <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                    <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
-                    <Tooltip
-                      content={({ active, payload }) => {
-                        if (!active || !payload?.length) return null
-                        const p = payload[0].payload as { t: string; close: number; ohlc: string }
-                        return (
-                          <div
-                            className="rounded border border-secondary p-2 small"
-                            style={{ background: '#212529', color: '#f8f9fa' }}
-                          >
-                            <div>{new Date(p.t).toLocaleString()}</div>
-                            <div className="font-monospace mt-1">Close {p.close}</div>
-                            <div className="mt-1 text-secondary" style={{ fontSize: '0.78rem' }}>
-                              {p.ohlc}
-                            </div>
-                          </div>
-                        )
-                      }}
-                    />
-                    <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
-                  </LineChart>
+                  {graphType === 'line' ? (
+                    <LineChart data={series} margin={chartMargins}>
+                      <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                      <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
+                      <Tooltip content={chartTooltip} />
+                      <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
+                    </LineChart>
+                  ) : (
+                    <BarChart data={series} margin={chartMargins}>
+                      <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                      <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
+                      <Tooltip content={chartTooltip} />
+                      <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  )}
                 </ResponsiveContainer>
               )}
             </div>
@@ -488,6 +609,42 @@ function InstrumentChartCard({
 const EMPTY_INSTRUMENTS: KiteInstrumentRow[] = []
 
 export function KiteInstrumentsPage() {
+  const [favorites, setFavorites] = useState<KiteInstrumentRow[]>([])
+  const [favoritesError, setFavoritesError] = useState<string | null>(null)
+
+  const loadFavorites = useCallback(async () => {
+    try {
+      const { data } = await api.get<KiteFavoritesResponse>('/broker/kite/favorites')
+      setFavorites(data.items)
+      setFavoritesError(null)
+    } catch (err) {
+      setFavorites([])
+      setFavoritesError(problemDetail(err))
+    }
+  }, [])
+
+  const favoriteKeySet = useMemo(() => new Set(favorites.map(favoriteRowKey)), [favorites])
+
+  const toggleFavorite = useCallback(
+    async (r: KiteInstrumentRow) => {
+      const key = favoriteRowKey(r)
+      const exists = favorites.some((x) => favoriteRowKey(x) === key)
+      setFavoritesError(null)
+      try {
+        if (exists) {
+          await api.delete('/broker/kite/favorites', { params: { instrumentToken: r.instrumentToken } })
+        } else {
+          await api.post('/broker/kite/favorites', r)
+        }
+        await loadFavorites()
+      } catch (err) {
+        setFavoritesError(problemDetail(err))
+      }
+    },
+    [favorites, loadFavorites],
+  )
+
+  const [mainTab, setMainTab] = useState<MainTab>('browse')
   const [provider, setProvider] = useState<string | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const [instruments, setInstruments] = useState<InstrumentsResponse | null>(null)
@@ -538,6 +695,15 @@ export function KiteInstrumentsPage() {
     void loadInstruments()
   }, [loadInstruments])
 
+  useEffect(() => {
+    if (!isZerodha) {
+      setFavorites([])
+      setFavoritesError(null)
+      return
+    }
+    void loadFavorites()
+  }, [isZerodha, loadFavorites])
+
   return (
     <Layout>
       <h1 className="h3 mb-1">F&O & commodities</h1>
@@ -566,7 +732,9 @@ export function KiteInstrumentsPage() {
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
                   <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
-                  server. <strong>Click a row</strong> to plot historical closes (interval buttons apply to the chart).
+                  server. Favorites are saved to <strong>your account on the server</strong> (not just this browser). Use the{' '}
+                  <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for a combined list.{' '}
+                  <strong>Click a row</strong> to plot historical closes.
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">
@@ -580,37 +748,83 @@ export function KiteInstrumentsPage() {
               </Col>
             </Row>
 
+            <Nav
+              variant="tabs"
+              className="mt-3 small"
+              activeKey={mainTab}
+              onSelect={(k) => k && setMainTab(k as MainTab)}
+            >
+              <Nav.Item>
+                <Nav.Link eventKey="browse">Browse</Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="favorites">All favorites ({favorites.length})</Nav.Link>
+              </Nav.Item>
+            </Nav>
+
+            {favoritesError ? (
+              <Alert variant="danger" className="mt-2 py-2 small mb-0">
+                Favorites: {favoritesError}
+              </Alert>
+            ) : null}
+
             {instrumentsError ? (
               <Alert variant="danger" className="mt-3 mb-0">
                 {instrumentsError}
               </Alert>
             ) : null}
 
-            <InstrumentListPanel
-              title="Futures & options (NFO / BFO)"
-              rows={instruments?.fno ?? EMPTY_INSTRUMENTS}
-              truncated={instruments?.fnoTruncated ?? false}
-              loading={instrumentsLoading}
-              emptyHint="No rows returned. Try Refresh or check your Kite session."
-              searchSegment="fno"
-              selectedRowKey={chartRow ? instrumentRowKey(chartRow) : null}
-              onSelectRow={setChartRow}
-            />
-            <InstrumentListPanel
-              title="Commodities (MCX)"
-              rows={instruments?.commodities ?? EMPTY_INSTRUMENTS}
-              truncated={instruments?.commoditiesTruncated ?? false}
-              loading={instrumentsLoading}
-              emptyHint="No rows returned. Try Refresh or check your Kite session."
-              searchSegment="mcx"
-              selectedRowKey={chartRow ? instrumentRowKey(chartRow) : null}
-              onSelectRow={setChartRow}
-            />
+            {mainTab === 'browse' ? (
+              <>
+                <InstrumentListPanel
+                  title="Futures & options (NFO / BFO)"
+                  rows={instruments?.fno ?? EMPTY_INSTRUMENTS}
+                  truncated={instruments?.fnoTruncated ?? false}
+                  loading={instrumentsLoading}
+                  emptyHint="No rows returned. Try Refresh or check your Kite session."
+                  searchSegment="fno"
+                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
+                  onSelectRow={setChartRow}
+                  favoriteKeySet={favoriteKeySet}
+                  onToggleFavorite={(r) => void toggleFavorite(r)}
+                />
+                <InstrumentListPanel
+                  title="Commodities (MCX)"
+                  rows={instruments?.commodities ?? EMPTY_INSTRUMENTS}
+                  truncated={instruments?.commoditiesTruncated ?? false}
+                  loading={instrumentsLoading}
+                  emptyHint="No rows returned. Try Refresh or check your Kite session."
+                  searchSegment="mcx"
+                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
+                  onSelectRow={setChartRow}
+                  favoriteKeySet={favoriteKeySet}
+                  onToggleFavorite={(r) => void toggleFavorite(r)}
+                />
+              </>
+            ) : (
+              <InstrumentListPanel
+                title="All favorites"
+                rows={favorites}
+                truncated={false}
+                loading={false}
+                emptyHint="No favorites yet. Open Browse and tap the star (☆) on any contract row."
+                searchSegment="fno"
+                enableKiteLiveSearch={false}
+                selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
+                onSelectRow={setChartRow}
+                favoriteKeySet={favoriteKeySet}
+                onToggleFavorite={(r) => void toggleFavorite(r)}
+              />
+            )}
 
             <InstrumentChartCard
               selection={chartRow}
               interval={chartInterval}
               onIntervalChange={setChartInterval}
+              isFavorite={chartRow ? favoriteKeySet.has(favoriteRowKey(chartRow)) : false}
+              onToggleFavorite={
+                chartRow ? () => void toggleFavorite(chartRow) : undefined
+              }
             />
           </Card.Body>
         </Card>

@@ -157,6 +157,70 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    /// <summary>Saved favorite Kite instruments for the current user (persisted in the database).</summary>
+    [Authorize]
+    [HttpGet("kite/favorites")]
+    public async Task<ActionResult<KiteFavoriteInstrumentsListDto>> KiteFavorites(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetKiteFavoriteInstrumentsAsync(User.GetUserId(), ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPost("kite/favorites")]
+    public async Task<IActionResult> AddKiteFavorite([FromBody] KiteInstrumentListItemDto? body, CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send a JSON instrument row (instrumentToken, tradingsymbol, exchange, …).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.AddKiteFavoriteInstrumentAsync(User.GetUserId(), body, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpDelete("kite/favorites")]
+    public async Task<IActionResult> RemoveKiteFavorite(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+        {
+            return Problem(
+                title: "Invalid instrument",
+                detail: "Provide instrumentToken.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.RemoveKiteFavoriteInstrumentAsync(User.GetUserId(), instrumentToken, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     [Authorize]
     [HttpGet("kite/login-url")]
     public async Task<ActionResult<KiteLoginUrlDto>> KiteLoginUrl(CancellationToken ct)

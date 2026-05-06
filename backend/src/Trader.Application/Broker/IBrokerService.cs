@@ -41,4 +41,10 @@ public interface IBrokerService
         DateTimeOffset? fromUtc,
         DateTimeOffset? toUtc,
         CancellationToken ct = default);
+
+    Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(Guid userId, CancellationToken ct = default);
+
+    Task AddKiteFavoriteInstrumentAsync(Guid userId, KiteInstrumentListItemDto item, CancellationToken ct = default);
+
+    Task RemoveKiteFavoriteInstrumentAsync(Guid userId, string instrumentToken, CancellationToken ct = default);
 }

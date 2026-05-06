@@ -58,4 +58,5 @@ public class User
 
     public ICollection<Strategy> Strategies { get; set; } = new List<Strategy>();
     public ICollection<Bot> Bots { get; set; } = new List<Bot>();
+    public ICollection<KiteFavoriteInstrument> KiteFavoriteInstruments { get; set; } = new List<KiteFavoriteInstrument>();
 }

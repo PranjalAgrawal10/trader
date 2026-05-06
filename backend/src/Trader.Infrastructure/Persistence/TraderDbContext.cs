@@ -13,6 +13,7 @@ public sealed class TraderDbContext : DbContext
     public DbSet<EmailOtpChallenge> EmailOtpChallenges => Set<EmailOtpChallenge>();
 
     public DbSet<User> Users => Set<User>();
+    public DbSet<KiteFavoriteInstrument> KiteFavoriteInstruments => Set<KiteFavoriteInstrument>();
     public DbSet<Strategy> Strategies => Set<Strategy>();
     public DbSet<Bot> Bots => Set<Bot>();
     public DbSet<Trade> Trades => Set<Trade>();
@@ -46,6 +47,21 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.PasswordResetTokenHash).HasMaxLength(64);
             e.HasIndex(x => x.EmailVerificationTokenHash).IsUnique();
             e.HasIndex(x => x.PasswordResetTokenHash).IsUnique();
+        });
+
+        modelBuilder.Entity<KiteFavoriteInstrument>(e =>
+        {
+            e.Property(x => x.InstrumentToken).HasMaxLength(64);
+            e.Property(x => x.Tradingsymbol).HasMaxLength(128);
+            e.Property(x => x.Exchange).HasMaxLength(16);
+            e.Property(x => x.Name).HasMaxLength(256);
+            e.Property(x => x.InstrumentType).HasMaxLength(32);
+            e.Property(x => x.Segment).HasMaxLength(32);
+            e.Property(x => x.Expiry).HasMaxLength(32);
+            e.Property(x => x.Strike).HasPrecision(28, 8);
+            e.HasIndex(x => new { x.UserId, x.InstrumentToken }).IsUnique();
+            e.HasOne(x => x.User).WithMany(u => u.KiteFavoriteInstruments).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Strategy>(e =>
