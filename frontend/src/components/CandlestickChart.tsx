@@ -200,6 +200,10 @@ export function CandlestickChart({
 
   const [hover, setHover] = useState<{ idx: number; tipX: number; tipY: number } | null>(null)
 
+  useLayoutEffect(() => {
+    setHover(null)
+  }, [data])
+
   if (data.length === 0) return null
 
   return (
@@ -226,28 +230,6 @@ export function CandlestickChart({
                 {Number.isFinite(tp) ? tp.toFixed(2) : ''}
               </text>
             </g>
-          ))}
-
-          <line
-            x1={PAD.left}
-            x2={w - PAD.right}
-            y1={layout.plotBottomY}
-            y2={layout.plotBottomY}
-            stroke={CANDLE.grid}
-            strokeWidth={1}
-          />
-          {layout.xTicks.map((xt) => (
-            <text
-              key={`xt-${xt.i}-${xt.label}`}
-              x={xt.cx}
-              y={layout.plotBottomY + 14}
-              fill={CANDLE.text}
-              fontSize={9}
-              textAnchor="middle"
-              style={{ userSelect: 'none' }}
-            >
-              {xt.label}
-            </text>
           ))}
 
           {data.map((c, i) => {
@@ -288,6 +270,7 @@ export function CandlestickChart({
               strokeWidth={1.5}
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ pointerEvents: 'none' }}
             />
           ) : null}
           {layout.pathEma9 && maLineVisibility.showEma9 ? (
@@ -298,6 +281,7 @@ export function CandlestickChart({
               strokeWidth={1.5}
               strokeLinecap="round"
               strokeLinejoin="round"
+              style={{ pointerEvents: 'none' }}
             />
           ) : null}
           {layout.pathSma && maLineVisibility.showSma20 ? (
@@ -311,6 +295,39 @@ export function CandlestickChart({
               style={{ pointerEvents: 'none' }}
             />
           ) : null}
+          {hover ? (
+            <line
+              x1={PAD.left + hover.idx * layout.slotW + layout.slotW / 2}
+              x2={PAD.left + hover.idx * layout.slotW + layout.slotW / 2}
+              y1={PAD.top}
+              y2={layout.plotBottomY}
+              stroke="rgba(248, 249, 250, 0.35)"
+              strokeWidth={1}
+              pointerEvents="none"
+            />
+          ) : null}
+          <line
+            x1={PAD.left}
+            x2={w - PAD.right}
+            y1={layout.plotBottomY}
+            y2={layout.plotBottomY}
+            stroke={CANDLE.grid}
+            strokeWidth={1}
+            pointerEvents="none"
+          />
+          {layout.xTicks.map((xt) => (
+            <text
+              key={`xt-${xt.i}-${xt.label}`}
+              x={xt.cx}
+              y={layout.plotBottomY + 14}
+              fill={CANDLE.text}
+              fontSize={9}
+              textAnchor="middle"
+              style={{ userSelect: 'none' }}
+            >
+              {xt.label}
+            </text>
+          ))}
           <rect
             x={PAD.left}
             y={PAD.top}
@@ -340,10 +357,54 @@ export function CandlestickChart({
           Resizing…
         </div>
       )}
+      {layout && hover ? (
+        <div
+          className="position-absolute rounded border border-secondary py-1 px-2 shadow-sm"
+          style={{
+            left: Math.min(Math.max(8, hover.tipX + 14), Math.max(8, w - 216)),
+            top: Math.max(8, hover.tipY - 8),
+            maxWidth: 208,
+            zIndex: 6,
+            background: '#212529',
+            color: '#f8f9fa',
+            fontSize: '0.72rem',
+            lineHeight: 1.35,
+            pointerEvents: 'none',
+          }}
+        >
+          {(() => {
+            const p = data[hover.idx]
+            return (
+              <>
+                <div className="text-white-50 small mb-1">{new Date(p.t).toLocaleString()}</div>
+                <div className="font-monospace">
+                  O {p.open} · H {p.high} · L {p.low} · C {p.close}
+                </div>
+                <div className="text-secondary small">Vol {p.volume}</div>
+                {maLineVisibility.showSma20 && p.sma20 != null ? (
+                  <div className="font-monospace mt-1" style={{ color: MA_LINE_COLORS.sma20 }}>
+                    SMA{MA_SMA_PERIOD} {p.sma20.toFixed(4)}
+                  </div>
+                ) : null}
+                {maLineVisibility.showEma9 && p.ema9 != null ? (
+                  <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema9 }}>
+                    EMA{MA_EMA_FAST_PERIOD} {p.ema9.toFixed(4)}
+                  </div>
+                ) : null}
+                {maLineVisibility.showEma21 && p.ema21 != null ? (
+                  <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema21 }}>
+                    EMA{MA_EMA_SLOW_PERIOD} {p.ema21.toFixed(4)}
+                  </div>
+                ) : null}
+              </>
+            )
+          })()}
+        </div>
+      ) : null}
       {layout ? (
         <div
           className="position-absolute small text-secondary"
-          style={{ right: 8, bottom: 2, fontSize: '0.65rem', pointerEvents: 'none' }}
+          style={{ right: 8, top: 4, fontSize: '0.65rem', pointerEvents: 'none' }}
         >
           {(() => {
             const items: { key: string; label: string; color: string }[] = []
