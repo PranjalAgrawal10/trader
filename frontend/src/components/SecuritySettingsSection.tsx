@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Card, Form, Spinner } from 'react-bootstrap'
 import QRCode from 'react-qr-code'
 import { useNavigate } from 'react-router-dom'
@@ -25,6 +25,8 @@ type Props = {
 
 export function SecuritySettingsSection({ setupRequired, onStatusUpdated }: Props) {
   const navigate = useNavigate()
+  const onStatusUpdatedRef = useRef(onStatusUpdated)
+  onStatusUpdatedRef.current = onStatusUpdated
 
   const [status, setStatus] = useState<TwoFactorStatus | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -43,11 +45,11 @@ export function SecuritySettingsSection({ setupRequired, onStatusUpdated }: Prop
     try {
       const { data } = await api.get<TwoFactorStatus>('/2fa/status')
       setStatus(data)
-      onStatusUpdated?.()
+      onStatusUpdatedRef.current?.()
     } catch {
       setLoadError('Could not load security settings.')
     }
-  }, [onStatusUpdated])
+  }, [])
 
   useEffect(() => {
     void refreshStatus()

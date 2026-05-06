@@ -32,6 +32,10 @@ export function ProfilePage() {
 
   const [twoFaEpoch, setTwoFaEpoch] = useState(0)
 
+  const onTwoFactorStatusUpdated = useCallback(() => {
+    setTwoFaEpoch((n) => n + 1)
+  }, [])
+
   const [profile, setProfile] = useState<ProfileMe | null>(null)
   const [profileError, setProfileError] = useState<string | null>(null)
   const [profileLoading, setProfileLoading] = useState(true)
@@ -108,10 +112,7 @@ export function ProfilePage() {
           </Card>
 
           <h2 className="h5 mb-3">Security</h2>
-          <SecuritySettingsSection
-            setupRequired={setupRequired}
-            onStatusUpdated={() => setTwoFaEpoch((n) => n + 1)}
-          />
+          <SecuritySettingsSection setupRequired={setupRequired} onStatusUpdated={onTwoFactorStatusUpdated} />
 
           <h2 className="h5 mt-4 mb-3">Broker connection</h2>
           <BrokerSettingsSection brokerSetupRequired={brokerSetupRequired} twoFaEpoch={twoFaEpoch} />
