@@ -23,21 +23,6 @@ public class User
 
     public DateTimeOffset? PasswordResetExpiresAtUtc { get; set; }
 
-    /// <summary>When set, the user completed broker onboarding.</summary>
-    public DateTimeOffset? BrokerConnectedAt { get; set; }
-
-    /// <summary>e.g. "Zerodha" when linked via Kite Connect.</summary>
-    public string? BrokerProvider { get; set; }
-
-    /// <summary>Data-protection encrypted Kite access_token.</summary>
-    public string? KiteAccessTokenProtected { get; set; }
-
-    /// <summary>Data-protection encrypted Kite refresh_token.</summary>
-    public string? KiteRefreshTokenProtected { get; set; }
-
-    /// <summary>Zerodha user id from Kite session.</summary>
-    public string? KiteUserId { get; set; }
-
     /// <summary>Saved Kite instruments page chart candle interval (e.g. <c>5m</c>).</summary>
     public string? KiteInstrumentsChartInterval { get; set; }
 
@@ -62,8 +47,7 @@ public class User
     /// <summary>Data-protection encrypted JSON of hashed one-time recovery codes when <see cref="TwoFactorEnabled"/>.</summary>
     public string? TotpRecoveryCodesProtected { get; set; }
 
-    public void MarkBrokerConnected(DateTimeOffset connectedAt) =>
-        BrokerConnectedAt = connectedAt;
+    public ICollection<BrokerAccount> BrokerAccounts { get; set; } = new List<BrokerAccount>();
 
     public ICollection<Strategy> Strategies { get; set; } = new List<Strategy>();
     public ICollection<Bot> Bots { get; set; } = new List<Bot>();

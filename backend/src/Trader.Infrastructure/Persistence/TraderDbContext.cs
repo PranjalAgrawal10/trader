@@ -13,6 +13,8 @@ public sealed class TraderDbContext : DbContext
     public DbSet<EmailOtpChallenge> EmailOtpChallenges => Set<EmailOtpChallenge>();
 
     public DbSet<User> Users => Set<User>();
+    public DbSet<BrokerAccount> BrokerAccounts => Set<BrokerAccount>();
+    public DbSet<HistoricalCandle> HistoricalCandles => Set<HistoricalCandle>();
     public DbSet<KiteFavoriteInstrument> KiteFavoriteInstruments => Set<KiteFavoriteInstrument>();
     public DbSet<Strategy> Strategies => Set<Strategy>();
     public DbSet<Bot> Bots => Set<Bot>();
@@ -34,14 +36,9 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.Email).HasMaxLength(320);
             e.Property(x => x.PasswordHash).HasMaxLength(200);
             e.Property(x => x.Role).HasMaxLength(64);
-            e.Property(x => x.BrokerConnectedAt).HasColumnType("datetime(6)");
-            e.Property(x => x.BrokerProvider).HasMaxLength(64);
-            e.Property(x => x.KiteUserId).HasMaxLength(64);
             e.Property(x => x.KiteInstrumentsChartInterval).HasMaxLength(16);
             e.Property(x => x.KiteInstrumentsChartRangePreset).HasMaxLength(32);
             e.Property(x => x.KiteInstrumentsChartGraphType).HasMaxLength(16);
-            e.Property(x => x.KiteAccessTokenProtected);
-            e.Property(x => x.KiteRefreshTokenProtected);
             e.Property(x => x.TotpSecretProtected);
             e.Property(x => x.TotpPendingSecretProtected);
             e.Property(x => x.TotpRecoveryCodesProtected);
@@ -50,6 +47,33 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.PasswordResetTokenHash).HasMaxLength(64);
             e.HasIndex(x => x.EmailVerificationTokenHash).IsUnique();
             e.HasIndex(x => x.PasswordResetTokenHash).IsUnique();
+        });
+
+        modelBuilder.Entity<BrokerAccount>(e =>
+        {
+            e.Property(x => x.BrokerName).HasMaxLength(64);
+            e.Property(x => x.ApiKey).HasMaxLength(64);
+            e.Property(x => x.ExternalUserId).HasMaxLength(64);
+            e.Property(x => x.AccessTokenProtected);
+            e.Property(x => x.RefreshTokenProtected);
+            e.Property(x => x.TokenExpiresAt).HasColumnType("datetime(6)");
+            e.Property(x => x.ConnectedAt).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.BrokerName }).IsUnique();
+            e.HasOne(x => x.User).WithMany(u => u.BrokerAccounts).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<HistoricalCandle>(e =>
+        {
+            e.Property(x => x.InstrumentToken).HasMaxLength(64);
+            e.Property(x => x.Timeframe).HasMaxLength(16);
+            e.Property(x => x.TimestampUtc).HasColumnType("datetime(6)");
+            e.Property(x => x.Open).HasPrecision(28, 8);
+            e.Property(x => x.High).HasPrecision(28, 8);
+            e.Property(x => x.Low).HasPrecision(28, 8);
+            e.Property(x => x.Close).HasPrecision(28, 8);
+            e.HasIndex(x => new { x.InstrumentToken, x.Timeframe, x.TimestampUtc }).IsUnique();
+            e.HasIndex(x => new { x.InstrumentToken, x.TimestampUtc });
         });
 
         modelBuilder.Entity<KiteFavoriteInstrument>(e =>

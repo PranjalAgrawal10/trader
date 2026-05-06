@@ -36,7 +36,11 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
+import { CandlestickChart } from '../components/CandlestickChart'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
+import type { MarketTickBatchItem } from '../services/marketHub'
+import type { ChartPointOhlc } from '../utils/liveCandleMerge'
+import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 
 interface BrokerStatusResponse {
   connected: boolean
@@ -169,7 +173,7 @@ function historicalRangeQueryParams(preset: ChartRangePreset): { from?: string; 
   return { from: from.toISOString(), to: to.toISOString() }
 }
 
-type ChartGraphType = 'line' | 'bar'
+type ChartGraphType = 'line' | 'bar' | 'candlestick'
 
 function coerceChartInterval(v: string | null | undefined): ChartInterval {
   if (v && (CHART_INTERVALS as readonly string[]).includes(v)) return v as ChartInterval
@@ -182,7 +186,7 @@ function coerceChartRangePreset(v: string | null | undefined): ChartRangePreset 
 }
 
 function coerceChartGraphType(v: string | null | undefined): ChartGraphType {
-  if (v === 'bar' || v === 'line') return v
+  if (v === 'bar' || v === 'line' || v === 'candlestick') return v
   return 'line'
 }
 
@@ -515,7 +519,7 @@ function problemDetail(err: unknown): string {
 
 const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
-type ChartPoint = { idx: number; t: string; close: number; ohlc: string }
+type ChartPoint = ChartPointOhlc
 
 /** Re-fetch OHLC while a chart is mounted (browser tab visible) to keep the series current. */
 const CHART_LIVE_POLL_MS = 30_000
@@ -524,7 +528,11 @@ function historicalCandlesToChartPoints(data: HistoricalCandlesResponse): ChartP
   return data.candles.map((c, idx) => ({
     idx: idx + 1,
     t: c.time,
+    open: Number(c.open),
+    high: Number(c.high),
+    low: Number(c.low),
     close: Number(c.close),
+    volume: Number(c.volume),
     ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
   }))
 }
@@ -577,10 +585,10 @@ function ChartTooltipContent({
       style={{ background: '#212529', color: '#f8f9fa' }}
     >
       <div>{new Date(p.t).toLocaleString()}</div>
-      <div className="font-monospace mt-1">Close {p.close}</div>
-      <div className="mt-1 text-secondary" style={{ fontSize: '0.78rem' }}>
-        {p.ohlc}
+      <div className="font-monospace mt-1">
+        O {p.open} · H {p.high} · L {p.low} · C {p.close}
       </div>
+      <div className="text-secondary small">Vol {p.volume}</div>
     </div>
   )
 }
@@ -674,6 +682,17 @@ function ChartSettingsToolbar({
           >
             Bar
           </ToggleButton>
+          <ToggleButton
+            id={`${idPrefix}-graph-candle`}
+            type="radio"
+            variant="outline-secondary"
+            name={`${idPrefix}-chart-graph`}
+            value="candlestick"
+            checked={graphType === 'candlestick'}
+            onChange={() => onGraphTypeChange('candlestick')}
+          >
+            Candles
+          </ToggleButton>
         </ButtonGroup>
       </div>
     </>
@@ -766,6 +785,10 @@ function CompactPriceChart({
           </div>
         ) : series.length === 0 ? (
           <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
+        ) : graphType === 'candlestick' ? (
+          <div className="w-100 h-100">
+            <CandlestickChart data={series} />
+          </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             {graphType === 'line' ? (
@@ -815,8 +838,8 @@ function FavoritesChartsGrid({
     <div className="mt-4">
       <h2 className="h6 mb-1">All charts</h2>
       <p className="small text-secondary mb-3">
-        Historical close for every favorite below. Interval and graph type apply to all tiles. Charts re-fetch about
-        every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is visible.
+        Historical OHLC (line, bar, or green/red candles) for every favorite below. Interval and chart type apply to all
+        tiles. Charts re-fetch about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is visible.
       </p>
       <ChartSettingsToolbar
         idPrefix="fav-all"
@@ -874,6 +897,7 @@ function InstrumentChartCard({
   isFavorite,
   onToggleFavorite,
   liveLastPrice,
+  liveLastTick,
 }: {
   selection: KiteInstrumentRow | null
   rangePreset: ChartRangePreset
@@ -885,6 +909,7 @@ function InstrumentChartCard({
   isFavorite: boolean
   onToggleFavorite?: () => void
   liveLastPrice?: number | null
+  liveLastTick?: MarketTickBatchItem | null
 }) {
   const [series, setSeries] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(false)
@@ -944,13 +969,19 @@ function InstrumentChartCard({
     }
   }, [selection, interval, rangePreset])
 
+  const displaySeries = useMemo(
+    () => mergeLiveTickIntoOhlc(series, liveLastTick ?? null, interval, graphType),
+    [series, liveLastTick, interval, graphType],
+  )
+
   return (
     <Card className="border-secondary mt-4">
       <Card.Body>
         <Card.Title className="h6 mb-2">Price chart</Card.Title>
         {!selection ? (
           <p className="text-secondary small mb-0">
-            Click a row in either list to plot closing prices from Kite (historical OHLCV).
+            Click a row in either list to plot prices from Kite (historical OHLCV). Choose <strong>Candles</strong> for
+            green/red candlesticks; live ticks update the current bar while subscribed.
           </p>
         ) : (
           <>
@@ -992,7 +1023,8 @@ function InstrumentChartCard({
             />
             <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
               Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
-              Live <strong>LTP</strong> uses SignalR + Kite WebSocket when a row is selected (market hours / session).
+              Live <strong>LTP</strong> and in-progress <strong>candle</strong> (Candles view) use SignalR + Kite WebSocket when
+              a row is selected (market hours / session).
             </p>
             {error ? (
               <Alert variant="danger" className="py-2 small mb-2">
@@ -1005,19 +1037,21 @@ function InstrumentChartCard({
                   <Spinner animation="border" size="sm" role="status" />
                   Loading candles…
                 </div>
-              ) : series.length === 0 ? (
+              ) : displaySeries.length === 0 ? (
                 <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
+              ) : graphType === 'candlestick' ? (
+                <CandlestickChart data={displaySeries} />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   {graphType === 'line' ? (
-                    <LineChart data={series} margin={CHART_MARGINS}>
+                    <LineChart data={displaySeries} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
                       <Tooltip content={ChartTooltipContent} />
                       <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
                     </LineChart>
                   ) : (
-                    <BarChart data={series} margin={CHART_MARGINS}>
+                    <BarChart data={displaySeries} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
                       <Tooltip content={ChartTooltipContent} />
@@ -1164,7 +1198,9 @@ export function KiteInstrumentsPage() {
 
   const isZerodha = provider?.toLowerCase() === 'zerodha'
 
-  const liveLtp = useLiveMarketTick(chartRow?.instrumentToken ?? null, isZerodha && mainTab === 'browse' && !!chartRow)
+  const liveMarket = useLiveMarketTick(chartRow?.instrumentToken ?? null, isZerodha && mainTab === 'browse' && !!chartRow)
+  const liveLtp = liveMarket.lastPrice
+  const liveLastTick = liveMarket.lastTick
 
   const loadInstruments = useCallback(async () => {
     if (!isZerodha) {
@@ -1231,8 +1267,9 @@ export function KiteInstrumentsPage() {
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
                   <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
-                  server. Favorites are saved to <strong>your account on the server</strong> (not just this browser). Chart
-                  range, interval, and line/bar use the <strong>same server account</strong>. Use the{' '}
+                  server. Favorites are saved to <strong>your account on the server</strong> (not just this browser).
+                  Chart range, interval, and chart style (line / bar / candles) use the <strong>same server account</strong>.
+                  Use the{' '}
                   <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for the list and a{' '}
                   <strong>chart per favorite</strong>. On <strong>Browse</strong>, <strong>click a row</strong> for the
                   detailed price chart below.
@@ -1344,6 +1381,7 @@ export function KiteInstrumentsPage() {
                   chartRow ? () => void toggleFavorite(chartRow) : undefined
                 }
                 liveLastPrice={liveLtp}
+                liveLastTick={liveLastTick}
               />
             ) : null}
           </Card.Body>

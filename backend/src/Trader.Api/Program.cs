@@ -55,7 +55,8 @@ public sealed class Program
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);
         builder.Services.AddSignalR();
-        builder.Services.AddSingleton<IMarketTickDispatcher, SignalRMarketTickDispatcher>();
+        builder.Services.AddSingleton<SignalRMarketTickDispatcher>();
+        builder.Services.AddSingleton<IMarketTickDispatcher, FanOutMarketTickDispatcher>();
 
         builder.Services.AddApiVersioning(options =>
         {

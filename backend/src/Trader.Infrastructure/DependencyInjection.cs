@@ -31,6 +31,7 @@ public static class DependencyInjection
         services.Configure<SmtpOptions>(configuration.GetSection(SmtpOptions.SectionName));
         // Kite ApiKey/ApiSecret/RedirectUrl: environment variables (ZerodhaKite__*) and Development .env — not committed appsettings.
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
+        services.Configure<LiveCandlesOptions>(configuration.GetSection(LiveCandlesOptions.SectionName));
 
         services.AddSingleton<IKiteOAuthStateCodec, KiteOAuthStateCodec>();
         services.AddSingleton<ITwoFactorTotpHelper>(sp =>
@@ -95,6 +96,8 @@ public static class DependencyInjection
         services.AddScoped<ITradeRepository, TradeRepository>();
         services.AddScoped<IBrokerSetupGateway, BrokerSetupGateway>();
         services.AddScoped<IKiteInstrumentsChartSettingsGateway, KiteInstrumentsChartSettingsGateway>();
+        services.AddScoped<IHistoricalCandleUpserter, HistoricalCandleUpserter>();
+        services.AddSingleton<LiveCandleTickSubscriber>();
         services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();

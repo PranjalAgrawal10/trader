@@ -57,8 +57,9 @@ public sealed class BrokerService : IBrokerService
         if (snapshot is null)
             throw new InvalidOperationException("User not found.");
 
+        var provider = snapshot.BrokerProvider;
         var at = snapshot.BrokerConnectedAt;
-        return new BrokerStatusDto(at.HasValue, at, snapshot.BrokerProvider);
+        return new BrokerStatusDto(!string.IsNullOrEmpty(provider), at, provider);
     }
 
     public Task CompleteSetupAsync(Guid userId, CancellationToken ct = default) =>
@@ -406,8 +407,8 @@ public sealed class BrokerService : IBrokerService
         var t = graphType.Trim().ToLowerInvariant();
         return t switch
         {
-            "line" or "bar" => t,
-            _ => throw new InvalidOperationException("graphType must be line or bar."),
+            "line" or "bar" or "candlestick" => t,
+            _ => throw new InvalidOperationException("graphType must be line, bar, or candlestick."),
         };
     }
 
