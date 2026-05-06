@@ -88,6 +88,80 @@ interface KiteFavoritesResponse {
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
 type ChartInterval = (typeof CHART_INTERVALS)[number]
 
+/** Lookback for historical request. Labels mirror candle-style shorthand (5m = last 5 minutes); `1mo` = last calendar month. `auto` = omit from/to (server default per interval). */
+const CHART_RANGE_PRESETS = [
+  'auto',
+  'last5m',
+  'last10m',
+  'last15m',
+  'last30m',
+  'last1h',
+  'last5h',
+  'last10h',
+  'last1d',
+  'last2d',
+  'last5d',
+  'last1mo',
+] as const
+type ChartRangePreset = (typeof CHART_RANGE_PRESETS)[number]
+
+const CHART_RANGE_LABEL: Record<ChartRangePreset, string> = {
+  auto: 'Auto',
+  last5m: '5m',
+  last10m: '10m',
+  last15m: '15m',
+  last30m: '30m',
+  last1h: '1h',
+  last5h: '5h',
+  last10h: '10h',
+  last1d: '1d',
+  last2d: '2d',
+  last5d: '5d',
+  last1mo: '1mo',
+}
+
+function historicalRangeQueryParams(preset: ChartRangePreset): { from?: string; to?: string } {
+  if (preset === 'auto') return {}
+  const to = new Date()
+  const from = new Date(to.getTime())
+  switch (preset) {
+    case 'last5m':
+      from.setUTCMinutes(from.getUTCMinutes() - 5)
+      break
+    case 'last10m':
+      from.setUTCMinutes(from.getUTCMinutes() - 10)
+      break
+    case 'last15m':
+      from.setUTCMinutes(from.getUTCMinutes() - 15)
+      break
+    case 'last30m':
+      from.setUTCMinutes(from.getUTCMinutes() - 30)
+      break
+    case 'last1h':
+      from.setUTCHours(from.getUTCHours() - 1)
+      break
+    case 'last5h':
+      from.setUTCHours(from.getUTCHours() - 5)
+      break
+    case 'last10h':
+      from.setUTCHours(from.getUTCHours() - 10)
+      break
+    case 'last1d':
+      from.setUTCDate(from.getUTCDate() - 1)
+      break
+    case 'last2d':
+      from.setUTCDate(from.getUTCDate() - 2)
+      break
+    case 'last5d':
+      from.setUTCDate(from.getUTCDate() - 5)
+      break
+    case 'last1mo':
+      from.setUTCMonth(from.getUTCMonth() - 1)
+      break
+  }
+  return { from: from.toISOString(), to: to.toISOString() }
+}
+
 type ChartGraphType = 'line' | 'bar'
 
 type MainTab = 'browse' | 'favorites'
@@ -409,6 +483,18 @@ const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
 type ChartPoint = { idx: number; t: string; close: number; ohlc: string }
 
+/** Re-fetch OHLC while a chart is mounted (browser tab visible) to keep the series current. */
+const CHART_LIVE_POLL_MS = 30_000
+
+function historicalCandlesToChartPoints(data: HistoricalCandlesResponse): ChartPoint[] {
+  return data.candles.map((c, idx) => ({
+    idx: idx + 1,
+    t: c.time,
+    close: Number(c.close),
+    ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
+  }))
+}
+
 type CandleRangeMeta = { interval: string; from: string; to: string }
 
 function HistoricalRangeCaption({
@@ -467,12 +553,16 @@ function ChartTooltipContent({
 
 function ChartSettingsToolbar({
   idPrefix,
+  rangePreset,
+  onRangePresetChange,
   interval,
   onIntervalChange,
   graphType,
   onGraphTypeChange,
 }: {
   idPrefix: string
+  rangePreset: ChartRangePreset
+  onRangePresetChange: (v: ChartRangePreset) => void
   interval: ChartInterval
   onIntervalChange: (v: ChartInterval) => void
   graphType: ChartGraphType
@@ -480,6 +570,32 @@ function ChartSettingsToolbar({
 }) {
   return (
     <>
+      <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
+        <span className="small text-secondary text-uppercase me-1">Range</span>
+        <ButtonGroup size="sm" className="flex-wrap">
+          {CHART_RANGE_PRESETS.map((id) => (
+            <ToggleButton
+              key={id}
+              id={`${idPrefix}-range-${id}`}
+              type="radio"
+              variant="outline-secondary"
+              name={`${idPrefix}-chart-range`}
+              value={id}
+              checked={rangePreset === id}
+              onChange={() => onRangePresetChange(id)}
+              title={
+                id === 'auto'
+                  ? 'Server default window per candle size'
+                  : id === 'last1mo'
+                    ? 'Last calendar month (UTC)'
+                    : 'From / to sent as UTC to the API'
+              }
+            >
+              {CHART_RANGE_LABEL[id]}
+            </ToggleButton>
+          ))}
+        </ButtonGroup>
+      </div>
       <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
         <span className="small text-secondary text-uppercase me-1">Interval</span>
         <ButtonGroup size="sm" className="flex-wrap">
@@ -532,11 +648,13 @@ function ChartSettingsToolbar({
 
 function CompactPriceChart({
   row,
+  rangePreset,
   interval,
   graphType,
   heightPx,
 }: {
   row: KiteInstrumentRow
+  rangePreset: ChartRangePreset
   interval: ChartInterval
   graphType: ChartGraphType
   heightPx: number
@@ -552,32 +670,45 @@ function CompactPriceChart({
     setError(null)
     setCandleRange(null)
 
-    ;(async () => {
+    const fetchOnce = async (initial: boolean) => {
+      const params = {
+        instrumentToken: row.instrumentToken,
+        interval,
+        ...historicalRangeQueryParams(rangePreset),
+      }
       try {
         const { data } = await api.get<HistoricalCandlesResponse>('/broker/kite/historical-candles', {
-          params: { instrumentToken: row.instrumentToken, interval },
+          params,
           signal: ac.signal,
         })
-        const pts = data.candles.map((c, idx) => ({
-          idx: idx + 1,
-          t: c.time,
-          close: Number(c.close),
-          ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
-        }))
+        const pts = historicalCandlesToChartPoints(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
+        if (initial) setError(null)
       } catch (err: unknown) {
         if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
-        setSeries([])
-        setCandleRange(null)
-        setError(problemDetail(err))
+        if (initial) {
+          setSeries([])
+          setCandleRange(null)
+          setError(problemDetail(err))
+        }
       } finally {
-        if (!ac.signal.aborted) setLoading(false)
+        if (initial && !ac.signal.aborted) setLoading(false)
       }
-    })()
+    }
 
-    return () => ac.abort()
-  }, [row.instrumentToken, interval])
+    void fetchOnce(true)
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void fetchOnce(false)
+    }, CHART_LIVE_POLL_MS)
+
+    return () => {
+      window.clearInterval(timer)
+      ac.abort()
+    }
+  }, [row.instrumentToken, interval, rangePreset])
 
   return (
     <>
@@ -627,6 +758,8 @@ function CompactPriceChart({
 
 function FavoritesChartsGrid({
   favorites,
+  rangePreset,
+  onRangePresetChange,
   interval,
   onIntervalChange,
   graphType,
@@ -634,6 +767,8 @@ function FavoritesChartsGrid({
   onToggleFavorite,
 }: {
   favorites: KiteInstrumentRow[]
+  rangePreset: ChartRangePreset
+  onRangePresetChange: (v: ChartRangePreset) => void
   interval: ChartInterval
   onIntervalChange: (v: ChartInterval) => void
   graphType: ChartGraphType
@@ -646,10 +781,13 @@ function FavoritesChartsGrid({
     <div className="mt-4">
       <h2 className="h6 mb-1">All charts</h2>
       <p className="small text-secondary mb-3">
-        Historical close for every favorite below. Interval and graph type apply to all tiles (each calls Kite separately).
+        Historical close for every favorite below. Interval and graph type apply to all tiles. Charts re-fetch about
+        every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is visible.
       </p>
       <ChartSettingsToolbar
         idPrefix="fav-all"
+        rangePreset={rangePreset}
+        onRangePresetChange={onRangePresetChange}
         interval={interval}
         onIntervalChange={onIntervalChange}
         graphType={graphType}
@@ -675,7 +813,13 @@ function FavoritesChartsGrid({
                     ★ Remove
                   </Button>
                 </div>
-                <CompactPriceChart row={row} interval={interval} graphType={graphType} heightPx={220} />
+                <CompactPriceChart
+                  row={row}
+                  rangePreset={rangePreset}
+                  interval={interval}
+                  graphType={graphType}
+                  heightPx={220}
+                />
               </Card.Body>
             </Card>
           </Col>
@@ -687,6 +831,8 @@ function FavoritesChartsGrid({
 
 function InstrumentChartCard({
   selection,
+  rangePreset,
+  onRangePresetChange,
   interval,
   onIntervalChange,
   graphType,
@@ -695,6 +841,8 @@ function InstrumentChartCard({
   onToggleFavorite,
 }: {
   selection: KiteInstrumentRow | null
+  rangePreset: ChartRangePreset
+  onRangePresetChange: (v: ChartRangePreset) => void
   interval: ChartInterval
   onIntervalChange: (v: ChartInterval) => void
   graphType: ChartGraphType
@@ -720,32 +868,45 @@ function InstrumentChartCard({
     setLoading(true)
     setError(null)
 
-    ;(async () => {
+    const fetchOnce = async (initial: boolean) => {
+      const params = {
+        instrumentToken: selection.instrumentToken,
+        interval,
+        ...historicalRangeQueryParams(rangePreset),
+      }
       try {
         const { data } = await api.get<HistoricalCandlesResponse>('/broker/kite/historical-candles', {
-          params: { instrumentToken: selection.instrumentToken, interval },
+          params,
           signal: ac.signal,
         })
-        const pts = data.candles.map((c, idx) => ({
-          idx: idx + 1,
-          t: c.time,
-          close: Number(c.close),
-          ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
-        }))
+        const pts = historicalCandlesToChartPoints(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
+        if (initial) setError(null)
       } catch (err: unknown) {
         if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
-        setSeries([])
-        setCandleRange(null)
-        setError(problemDetail(err))
+        if (initial) {
+          setSeries([])
+          setCandleRange(null)
+          setError(problemDetail(err))
+        }
       } finally {
-        if (!ac.signal.aborted) setLoading(false)
+        if (initial && !ac.signal.aborted) setLoading(false)
       }
-    })()
+    }
 
-    return () => ac.abort()
-  }, [selection, interval])
+    void fetchOnce(true)
+
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      void fetchOnce(false)
+    }, CHART_LIVE_POLL_MS)
+
+    return () => {
+      window.clearInterval(timer)
+      ac.abort()
+    }
+  }, [selection, interval, rangePreset])
 
   return (
     <Card className="border-secondary mt-4">
@@ -783,11 +944,16 @@ function InstrumentChartCard({
             ) : null}
             <ChartSettingsToolbar
               idPrefix="browse-detail"
+              rangePreset={rangePreset}
+              onRangePresetChange={onRangePresetChange}
               interval={interval}
               onIntervalChange={onIntervalChange}
               graphType={graphType}
               onGraphTypeChange={onGraphTypeChange}
             />
+            <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
+              Data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
+            </p>
             {error ? (
               <Alert variant="danger" className="py-2 small mb-2">
                 {error}
@@ -874,6 +1040,7 @@ export function KiteInstrumentsPage() {
   const [instrumentsError, setInstrumentsError] = useState<string | null>(null)
   const [chartRow, setChartRow] = useState<KiteInstrumentRow | null>(null)
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
+  const [chartRangePreset, setChartRangePreset] = useState<ChartRangePreset>('auto')
   const [chartGraphType, setChartGraphType] = useState<ChartGraphType>('line')
 
   const loadStatus = useCallback(async () => {
@@ -1042,6 +1209,8 @@ export function KiteInstrumentsPage() {
                 />
                 <FavoritesChartsGrid
                   favorites={favorites}
+                  rangePreset={chartRangePreset}
+                  onRangePresetChange={setChartRangePreset}
                   interval={chartInterval}
                   onIntervalChange={setChartInterval}
                   graphType={chartGraphType}
@@ -1054,6 +1223,8 @@ export function KiteInstrumentsPage() {
             {mainTab === 'browse' ? (
               <InstrumentChartCard
                 selection={chartRow}
+                rangePreset={chartRangePreset}
+                onRangePresetChange={setChartRangePreset}
                 interval={chartInterval}
                 onIntervalChange={setChartInterval}
                 graphType={chartGraphType}
