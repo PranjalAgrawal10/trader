@@ -221,6 +221,47 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    /// <summary>Persisted Kite instruments page chart toolbar (interval, range, line/bar). Requires Bearer auth.</summary>
+    [Authorize]
+    [HttpGet("kite/instruments/chart-settings")]
+    public async Task<ActionResult<KiteInstrumentsChartSettingsDto>> GetKiteInstrumentsChartSettings(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetKiteInstrumentsChartSettingsAsync(User.GetUserId(), ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPut("kite/instruments/chart-settings")]
+    public async Task<IActionResult> PutKiteInstrumentsChartSettings(
+        [FromBody] KiteInstrumentsChartSettingsDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with interval, rangePreset, and graphType.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.SaveKiteInstrumentsChartSettingsAsync(User.GetUserId(), body, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     [Authorize]
     [HttpGet("kite/login-url")]
     public async Task<ActionResult<KiteLoginUrlDto>> KiteLoginUrl(CancellationToken ct)

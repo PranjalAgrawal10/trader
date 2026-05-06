@@ -27,6 +27,7 @@ public sealed class BrokerService : IBrokerService
     private readonly IKiteSessionExchange _kiteSessionExchange;
     private readonly IKiteInstrumentsClient _kiteInstruments;
     private readonly IKiteFavoriteInstrumentRepository _kiteFavoriteInstruments;
+    private readonly IKiteInstrumentsChartSettingsGateway _kiteChartSettings;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
     private readonly IMemoryCache _memoryCache;
 
@@ -36,6 +37,7 @@ public sealed class BrokerService : IBrokerService
         IKiteSessionExchange kiteSessionExchange,
         IKiteInstrumentsClient kiteInstruments,
         IKiteFavoriteInstrumentRepository kiteFavoriteInstruments,
+        IKiteInstrumentsChartSettingsGateway kiteChartSettings,
         IOptions<ZerodhaKiteOptions> kiteOptions,
         IMemoryCache memoryCache)
     {
@@ -44,6 +46,7 @@ public sealed class BrokerService : IBrokerService
         _kiteSessionExchange = kiteSessionExchange;
         _kiteInstruments = kiteInstruments;
         _kiteFavoriteInstruments = kiteFavoriteInstruments;
+        _kiteChartSettings = kiteChartSettings;
         _kiteOptions = kiteOptions;
         _memoryCache = memoryCache;
     }
@@ -315,6 +318,39 @@ public sealed class BrokerService : IBrokerService
         await _kiteFavoriteInstruments.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<KiteInstrumentsChartSettingsDto> GetKiteInstrumentsChartSettingsAsync(
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        var row = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false);
+        if (row is null)
+            throw new InvalidOperationException("User not found.");
+
+        return new KiteInstrumentsChartSettingsDto(row.Interval, row.RangePreset, row.GraphType);
+    }
+
+    public async Task SaveKiteInstrumentsChartSettingsAsync(
+        Guid userId,
+        KiteInstrumentsChartSettingsDto settings,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (string.IsNullOrWhiteSpace(settings.Interval)
+            || string.IsNullOrWhiteSpace(settings.RangePreset)
+            || string.IsNullOrWhiteSpace(settings.GraphType))
+            throw new InvalidOperationException("interval, rangePreset, and graphType are required.");
+
+        var interval = NormalizeUiChartInterval(settings.Interval);
+        var range = NormalizeChartRangePreset(settings.RangePreset);
+        var graph = NormalizeChartGraphType(settings.GraphType);
+
+        await _kiteChartSettings.SaveAsync(
+                userId,
+                new KiteInstrumentsChartSettingsState(interval, range, graph),
+                ct)
+            .ConfigureAwait(false);
+    }
+
     private async Task RequireUserExistsAsync(Guid userId, CancellationToken ct)
     {
         var snapshot = await _brokerSetup.GetSnapshotAsync(userId, ct).ConfigureAwait(false);
@@ -350,6 +386,28 @@ public sealed class BrokerService : IBrokerService
             "1m" or "2m" or "3m" or "4m" or "5m" or "10m" or "15m" or "30m" or "1h" or "1d" => t,
             _ => throw new InvalidOperationException(
                 "Interval must be one of: 1m, 2m, 3m, 4m, 5m, 10m, 15m, 30m, 1h, 1d."),
+        };
+    }
+
+    private static string NormalizeChartRangePreset(string preset)
+    {
+        var t = preset.Trim().ToLowerInvariant();
+        return t switch
+        {
+            "auto" or "last5m" or "last10m" or "last15m" or "last30m" or "last1h" or "last5h" or "last10h"
+                or "last1d" or "last2d" or "last5d" or "last1mo" => t,
+            _ => throw new InvalidOperationException(
+                "rangePreset must be one of: auto, last5m, last10m, last15m, last30m, last1h, last5h, last10h, last1d, last2d, last5d, last1mo."),
+        };
+    }
+
+    private static string NormalizeChartGraphType(string graphType)
+    {
+        var t = graphType.Trim().ToLowerInvariant();
+        return t switch
+        {
+            "line" or "bar" => t,
+            _ => throw new InvalidOperationException("graphType must be line or bar."),
         };
     }
 

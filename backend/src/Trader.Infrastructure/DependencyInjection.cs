@@ -94,6 +94,7 @@ public static class DependencyInjection
         services.AddScoped<IBotRepository, BotRepository>();
         services.AddScoped<ITradeRepository, TradeRepository>();
         services.AddScoped<IBrokerSetupGateway, BrokerSetupGateway>();
+        services.AddScoped<IKiteInstrumentsChartSettingsGateway, KiteInstrumentsChartSettingsGateway>();
         services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();

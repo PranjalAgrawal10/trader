@@ -37,6 +37,9 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.BrokerConnectedAt).HasColumnType("datetime(6)");
             e.Property(x => x.BrokerProvider).HasMaxLength(64);
             e.Property(x => x.KiteUserId).HasMaxLength(64);
+            e.Property(x => x.KiteInstrumentsChartInterval).HasMaxLength(16);
+            e.Property(x => x.KiteInstrumentsChartRangePreset).HasMaxLength(32);
+            e.Property(x => x.KiteInstrumentsChartGraphType).HasMaxLength(16);
             e.Property(x => x.KiteAccessTokenProtected);
             e.Property(x => x.KiteRefreshTokenProtected);
             e.Property(x => x.TotpSecretProtected);

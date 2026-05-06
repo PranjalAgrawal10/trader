@@ -38,6 +38,15 @@ public class User
     /// <summary>Zerodha user id from Kite session.</summary>
     public string? KiteUserId { get; set; }
 
+    /// <summary>Saved Kite instruments page chart candle interval (e.g. <c>5m</c>).</summary>
+    public string? KiteInstrumentsChartInterval { get; set; }
+
+    /// <summary>Saved chart range preset (e.g. <c>auto</c>, <c>last1d</c>).</summary>
+    public string? KiteInstrumentsChartRangePreset { get; set; }
+
+    /// <summary>Saved chart style: <c>line</c> or <c>bar</c>.</summary>
+    public string? KiteInstrumentsChartGraphType { get; set; }
+
     /// <summary>Authenticator (TOTP) enabled for this account.</summary>
     public bool TwoFactorEnabled { get; set; }
 

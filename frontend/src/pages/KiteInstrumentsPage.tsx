@@ -86,6 +86,12 @@ interface KiteFavoritesResponse {
   items: KiteInstrumentRow[]
 }
 
+interface KiteInstrumentsChartSettingsDto {
+  interval: string | null
+  rangePreset: string | null
+  graphType: string | null
+}
+
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
 type ChartInterval = (typeof CHART_INTERVALS)[number]
 
@@ -164,6 +170,21 @@ function historicalRangeQueryParams(preset: ChartRangePreset): { from?: string; 
 }
 
 type ChartGraphType = 'line' | 'bar'
+
+function coerceChartInterval(v: string | null | undefined): ChartInterval {
+  if (v && (CHART_INTERVALS as readonly string[]).includes(v)) return v as ChartInterval
+  return '5m'
+}
+
+function coerceChartRangePreset(v: string | null | undefined): ChartRangePreset {
+  if (v && (CHART_RANGE_PRESETS as readonly string[]).includes(v)) return v as ChartRangePreset
+  return 'auto'
+}
+
+function coerceChartGraphType(v: string | null | undefined): ChartGraphType {
+  if (v === 'bar' || v === 'line') return v
+  return 'line'
+}
 
 type MainTab = 'browse' | 'favorites'
 
@@ -1094,6 +1115,40 @@ export function KiteInstrumentsPage() {
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
   const [chartRangePreset, setChartRangePreset] = useState<ChartRangePreset>('auto')
   const [chartGraphType, setChartGraphType] = useState<ChartGraphType>('line')
+  const [chartPrefsHydrated, setChartPrefsHydrated] = useState(false)
+
+  const loadChartSettings = useCallback(async () => {
+    try {
+      const { data } = await api.get<KiteInstrumentsChartSettingsDto>('/broker/kite/instruments/chart-settings')
+      setChartInterval(coerceChartInterval(data.interval))
+      setChartRangePreset(coerceChartRangePreset(data.rangePreset))
+      setChartGraphType(coerceChartGraphType(data.graphType))
+    } catch {
+      // keep defaults
+    } finally {
+      setChartPrefsHydrated(true)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadChartSettings()
+  }, [loadChartSettings])
+
+  useEffect(() => {
+    if (!chartPrefsHydrated) return
+    const t = window.setTimeout(() => {
+      void api
+        .put('/broker/kite/instruments/chart-settings', {
+          interval: chartInterval,
+          rangePreset: chartRangePreset,
+          graphType: chartGraphType,
+        })
+        .catch(() => {
+          /* non-fatal */
+        })
+    }, 400)
+    return () => window.clearTimeout(t)
+  }, [chartInterval, chartRangePreset, chartGraphType, chartPrefsHydrated])
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
@@ -1176,7 +1231,8 @@ export function KiteInstrumentsPage() {
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
                   <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
-                  server. Favorites are saved to <strong>your account on the server</strong> (not just this browser). Use the{' '}
+                  server. Favorites are saved to <strong>your account on the server</strong> (not just this browser). Chart
+                  range, interval, and line/bar use the <strong>same server account</strong>. Use the{' '}
                   <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for the list and a{' '}
                   <strong>chart per favorite</strong>. On <strong>Browse</strong>, <strong>click a row</strong> for the
                   detailed price chart below.

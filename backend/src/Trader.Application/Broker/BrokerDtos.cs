@@ -54,3 +54,6 @@ public sealed record KiteHistoricalCandlePointDto(
 
 /// <summary>Saved Kite instruments for the signed-in user (F&amp;O / MCX).</summary>
 public sealed record KiteFavoriteInstrumentsListDto(IReadOnlyList<KiteInstrumentListItemDto> Items);
+
+/// <summary>Persisted Kite instruments page chart controls (interval, range preset, line vs bar).</summary>
+public sealed record KiteInstrumentsChartSettingsDto(string? Interval, string? RangePreset, string? GraphType);
