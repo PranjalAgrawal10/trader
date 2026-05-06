@@ -405,24 +405,261 @@ function problemDetail(err: unknown): string {
   return 'Request failed.'
 }
 
+const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
+
+type ChartPoint = { idx: number; t: string; close: number; ohlc: string }
+
+function ChartTooltipContent({
+  active,
+  payload,
+}: {
+  active?: boolean
+  payload?: readonly { payload?: ChartPoint }[]
+}) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  if (!p) return null
+  return (
+    <div
+      className="rounded border border-secondary p-2 small"
+      style={{ background: '#212529', color: '#f8f9fa' }}
+    >
+      <div>{new Date(p.t).toLocaleString()}</div>
+      <div className="font-monospace mt-1">Close {p.close}</div>
+      <div className="mt-1 text-secondary" style={{ fontSize: '0.78rem' }}>
+        {p.ohlc}
+      </div>
+    </div>
+  )
+}
+
+function ChartSettingsToolbar({
+  idPrefix,
+  interval,
+  onIntervalChange,
+  graphType,
+  onGraphTypeChange,
+}: {
+  idPrefix: string
+  interval: ChartInterval
+  onIntervalChange: (v: ChartInterval) => void
+  graphType: ChartGraphType
+  onGraphTypeChange: (v: ChartGraphType) => void
+}) {
+  return (
+    <>
+      <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
+        <span className="small text-secondary text-uppercase me-1">Interval</span>
+        <ButtonGroup size="sm" className="flex-wrap">
+          {CHART_INTERVALS.map((iv) => (
+            <ToggleButton
+              key={iv}
+              id={`${idPrefix}-iv-${iv}`}
+              type="radio"
+              variant="outline-secondary"
+              name={`${idPrefix}-chart-interval`}
+              value={iv}
+              checked={interval === iv}
+              onChange={() => onIntervalChange(iv)}
+            >
+              {iv}
+            </ToggleButton>
+          ))}
+        </ButtonGroup>
+      </div>
+      <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
+        <span className="small text-secondary text-uppercase me-1">Graph</span>
+        <ButtonGroup size="sm">
+          <ToggleButton
+            id={`${idPrefix}-graph-line`}
+            type="radio"
+            variant="outline-secondary"
+            name={`${idPrefix}-chart-graph`}
+            value="line"
+            checked={graphType === 'line'}
+            onChange={() => onGraphTypeChange('line')}
+          >
+            Line
+          </ToggleButton>
+          <ToggleButton
+            id={`${idPrefix}-graph-bar`}
+            type="radio"
+            variant="outline-secondary"
+            name={`${idPrefix}-chart-graph`}
+            value="bar"
+            checked={graphType === 'bar'}
+            onChange={() => onGraphTypeChange('bar')}
+          >
+            Bar
+          </ToggleButton>
+        </ButtonGroup>
+      </div>
+    </>
+  )
+}
+
+function CompactPriceChart({
+  row,
+  interval,
+  graphType,
+  heightPx,
+}: {
+  row: KiteInstrumentRow
+  interval: ChartInterval
+  graphType: ChartGraphType
+  heightPx: number
+}) {
+  const [series, setSeries] = useState<ChartPoint[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const ac = new AbortController()
+    setLoading(true)
+    setError(null)
+
+    ;(async () => {
+      try {
+        const { data } = await api.get<HistoricalCandlesResponse>('/broker/kite/historical-candles', {
+          params: { instrumentToken: row.instrumentToken, interval },
+          signal: ac.signal,
+        })
+        const pts = data.candles.map((c, idx) => ({
+          idx: idx + 1,
+          t: c.time,
+          close: Number(c.close),
+          ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
+        }))
+        setSeries(pts)
+      } catch (err: unknown) {
+        if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
+        setSeries([])
+        setError(problemDetail(err))
+      } finally {
+        if (!ac.signal.aborted) setLoading(false)
+      }
+    })()
+
+    return () => ac.abort()
+  }, [row.instrumentToken, interval])
+
+  return (
+    <div style={{ height: heightPx }}>
+      {error ? (
+        <Alert variant="danger" className="py-1 small mb-0">
+          {error}
+        </Alert>
+      ) : loading ? (
+        <div className="d-flex align-items-center justify-content-center gap-2 text-secondary small h-100">
+          <Spinner animation="border" size="sm" role="status" />
+          Loading…
+        </div>
+      ) : series.length === 0 ? (
+        <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
+      ) : (
+        <ResponsiveContainer width="100%" height="100%">
+          {graphType === 'line' ? (
+            <LineChart data={series} margin={CHART_MARGINS}>
+              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+              <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
+              <Tooltip content={ChartTooltipContent} />
+              <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
+            </LineChart>
+          ) : (
+            <BarChart data={series} margin={CHART_MARGINS}>
+              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+              <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
+              <Tooltip content={ChartTooltipContent} />
+              <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} />
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
+function FavoritesChartsGrid({
+  favorites,
+  interval,
+  onIntervalChange,
+  graphType,
+  onGraphTypeChange,
+  onToggleFavorite,
+}: {
+  favorites: KiteInstrumentRow[]
+  interval: ChartInterval
+  onIntervalChange: (v: ChartInterval) => void
+  graphType: ChartGraphType
+  onGraphTypeChange: (v: ChartGraphType) => void
+  onToggleFavorite: (r: KiteInstrumentRow) => void
+}) {
+  if (favorites.length === 0) return null
+
+  return (
+    <div className="mt-4">
+      <h2 className="h6 mb-1">All charts</h2>
+      <p className="small text-secondary mb-3">
+        Historical close for every favorite below. Interval and graph type apply to all tiles (each calls Kite separately).
+      </p>
+      <ChartSettingsToolbar
+        idPrefix="fav-all"
+        interval={interval}
+        onIntervalChange={onIntervalChange}
+        graphType={graphType}
+        onGraphTypeChange={onGraphTypeChange}
+      />
+      <Row className="g-3">
+        {favorites.map((row) => (
+          <Col key={favoriteRowKey(row)} xs={12} lg={6} xl={4}>
+            <Card className="border-secondary h-100">
+              <Card.Body className="d-flex flex-column small py-3">
+                <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                  <div className="text-truncate">
+                    <span className="font-monospace fw-semibold">{row.tradingsymbol}</span>
+                    <span className="text-secondary ms-1">{row.exchange}</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline-warning"
+                    size="sm"
+                    className="py-0 px-2 text-nowrap"
+                    onClick={() => onToggleFavorite(row)}
+                  >
+                    ★ Remove
+                  </Button>
+                </div>
+                <CompactPriceChart row={row} interval={interval} graphType={graphType} heightPx={220} />
+              </Card.Body>
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    </div>
+  )
+}
+
 function InstrumentChartCard({
   selection,
   interval,
   onIntervalChange,
+  graphType,
+  onGraphTypeChange,
   isFavorite,
   onToggleFavorite,
 }: {
   selection: KiteInstrumentRow | null
   interval: ChartInterval
   onIntervalChange: (v: ChartInterval) => void
+  graphType: ChartGraphType
+  onGraphTypeChange: (v: ChartGraphType) => void
   isFavorite: boolean
   onToggleFavorite?: () => void
 }) {
-  const [series, setSeries] = useState<{ idx: number; t: string; close: number; ohlc: string }[]>([])
+  const [series, setSeries] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rangeHint, setRangeHint] = useState<string | null>(null)
-  const [graphType, setGraphType] = useState<ChartGraphType>('line')
 
   useEffect(() => {
     if (!selection) {
@@ -466,32 +703,6 @@ function InstrumentChartCard({
     return () => ac.abort()
   }, [selection, interval])
 
-  const chartTooltip = ({
-    active,
-    payload,
-  }: {
-    active?: boolean
-    payload?: readonly { payload?: { t: string; close: number; ohlc: string } }[]
-  }) => {
-    if (!active || !payload?.length) return null
-    const p = payload[0].payload
-    if (!p) return null
-    return (
-      <div
-        className="rounded border border-secondary p-2 small"
-        style={{ background: '#212529', color: '#f8f9fa' }}
-      >
-        <div>{new Date(p.t).toLocaleString()}</div>
-        <div className="font-monospace mt-1">Close {p.close}</div>
-        <div className="mt-1 text-secondary" style={{ fontSize: '0.78rem' }}>
-          {p.ohlc}
-        </div>
-      </div>
-    )
-  }
-
-  const chartMargins = { top: 4, right: 8, left: 0, bottom: 0 }
-
   return (
     <Card className="border-secondary mt-4">
       <Card.Body>
@@ -520,52 +731,13 @@ function InstrumentChartCard({
               ) : null}
               {rangeHint ? <span className="d-block w-100 mt-1">{rangeHint}</span> : null}
             </p>
-            <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
-              <span className="small text-secondary text-uppercase me-1">Interval</span>
-              <ButtonGroup size="sm" className="flex-wrap">
-                {CHART_INTERVALS.map((iv) => (
-                  <ToggleButton
-                    key={iv}
-                    id={`chart-iv-${iv}`}
-                    type="radio"
-                    variant="outline-secondary"
-                    name="chart-interval"
-                    value={iv}
-                    checked={interval === iv}
-                    onChange={() => onIntervalChange(iv)}
-                  >
-                    {iv}
-                  </ToggleButton>
-                ))}
-              </ButtonGroup>
-            </div>
-            <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
-              <span className="small text-secondary text-uppercase me-1">Graph</span>
-              <ButtonGroup size="sm">
-                <ToggleButton
-                  id="chart-graph-line"
-                  type="radio"
-                  variant="outline-secondary"
-                  name="chart-graph"
-                  value="line"
-                  checked={graphType === 'line'}
-                  onChange={() => setGraphType('line')}
-                >
-                  Line
-                </ToggleButton>
-                <ToggleButton
-                  id="chart-graph-bar"
-                  type="radio"
-                  variant="outline-secondary"
-                  name="chart-graph"
-                  value="bar"
-                  checked={graphType === 'bar'}
-                  onChange={() => setGraphType('bar')}
-                >
-                  Bar
-                </ToggleButton>
-              </ButtonGroup>
-            </div>
+            <ChartSettingsToolbar
+              idPrefix="browse-detail"
+              interval={interval}
+              onIntervalChange={onIntervalChange}
+              graphType={graphType}
+              onGraphTypeChange={onGraphTypeChange}
+            />
             {error ? (
               <Alert variant="danger" className="py-2 small mb-2">
                 {error}
@@ -582,17 +754,17 @@ function InstrumentChartCard({
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   {graphType === 'line' ? (
-                    <LineChart data={series} margin={chartMargins}>
+                    <LineChart data={series} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
-                      <Tooltip content={chartTooltip} />
+                      <Tooltip content={ChartTooltipContent} />
                       <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
                     </LineChart>
                   ) : (
-                    <BarChart data={series} margin={chartMargins}>
+                    <BarChart data={series} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
-                      <Tooltip content={chartTooltip} />
+                      <Tooltip content={ChartTooltipContent} />
                       <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} />
                     </BarChart>
                   )}
@@ -652,6 +824,7 @@ export function KiteInstrumentsPage() {
   const [instrumentsError, setInstrumentsError] = useState<string | null>(null)
   const [chartRow, setChartRow] = useState<KiteInstrumentRow | null>(null)
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
+  const [chartGraphType, setChartGraphType] = useState<ChartGraphType>('line')
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
@@ -733,8 +906,9 @@ export function KiteInstrumentsPage() {
                   Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
                   <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
                   server. Favorites are saved to <strong>your account on the server</strong> (not just this browser). Use the{' '}
-                  <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for a combined list.{' '}
-                  <strong>Click a row</strong> to plot historical closes.
+                  <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for the list and a{' '}
+                  <strong>chart per favorite</strong>. On <strong>Browse</strong>, <strong>click a row</strong> for the
+                  detailed price chart below.
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">
@@ -802,30 +976,44 @@ export function KiteInstrumentsPage() {
                 />
               </>
             ) : (
-              <InstrumentListPanel
-                title="All favorites"
-                rows={favorites}
-                truncated={false}
-                loading={false}
-                emptyHint="No favorites yet. Open Browse and tap the star (☆) on any contract row."
-                searchSegment="fno"
-                enableKiteLiveSearch={false}
-                selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
-                onSelectRow={setChartRow}
-                favoriteKeySet={favoriteKeySet}
-                onToggleFavorite={(r) => void toggleFavorite(r)}
-              />
+              <>
+                <InstrumentListPanel
+                  title="All favorites"
+                  rows={favorites}
+                  truncated={false}
+                  loading={false}
+                  emptyHint="No favorites yet. Open Browse and tap the star (☆) on any contract row."
+                  searchSegment="fno"
+                  enableKiteLiveSearch={false}
+                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
+                  onSelectRow={setChartRow}
+                  favoriteKeySet={favoriteKeySet}
+                  onToggleFavorite={(r) => void toggleFavorite(r)}
+                />
+                <FavoritesChartsGrid
+                  favorites={favorites}
+                  interval={chartInterval}
+                  onIntervalChange={setChartInterval}
+                  graphType={chartGraphType}
+                  onGraphTypeChange={setChartGraphType}
+                  onToggleFavorite={(r) => void toggleFavorite(r)}
+                />
+              </>
             )}
 
-            <InstrumentChartCard
-              selection={chartRow}
-              interval={chartInterval}
-              onIntervalChange={setChartInterval}
-              isFavorite={chartRow ? favoriteKeySet.has(favoriteRowKey(chartRow)) : false}
-              onToggleFavorite={
-                chartRow ? () => void toggleFavorite(chartRow) : undefined
-              }
-            />
+            {mainTab === 'browse' ? (
+              <InstrumentChartCard
+                selection={chartRow}
+                interval={chartInterval}
+                onIntervalChange={setChartInterval}
+                graphType={chartGraphType}
+                onGraphTypeChange={setChartGraphType}
+                isFavorite={chartRow ? favoriteKeySet.has(favoriteRowKey(chartRow)) : false}
+                onToggleFavorite={
+                  chartRow ? () => void toggleFavorite(chartRow) : undefined
+                }
+              />
+            ) : null}
           </Card.Body>
         </Card>
       ) : null}
