@@ -11,10 +11,12 @@ using Trader.Application.Streaming;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
+using Trader.Application.Prediction;
 using Trader.Infrastructure.Broker;
 using Trader.Infrastructure.Email;
 using Trader.Infrastructure.Persistence;
 using Trader.Infrastructure.Persistence.Repositories;
+using Trader.Infrastructure.Prediction;
 using Trader.Infrastructure.Security;
 using Trader.Infrastructure.Streaming;
 
@@ -102,6 +104,7 @@ public static class DependencyInjection
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
 
+        services.AddSingleton<IPriceDirectionPredictionEngine, MlNetPriceDirectionPredictionEngine>();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Trader.Application.Auth;
 using Trader.Application.Bots;
 using Trader.Application.Broker;
+using Trader.Application.Prediction;
 using Trader.Application.Strategies;
 using Trader.Application.Trades;
 
@@ -18,6 +19,7 @@ public static class DependencyInjection
         services.AddScoped<IBotService, BotService>();
         services.AddScoped<ITradeService, TradeService>();
         services.AddScoped<IEmailOtpService, EmailOtpService>();
+        services.AddScoped<IPriceDirectionPredictionService, PriceDirectionPredictionService>();
         return services;
     }
 }

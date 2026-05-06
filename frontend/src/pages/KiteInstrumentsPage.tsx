@@ -24,7 +24,7 @@ import {
 } from 'react-bootstrap'
 import {
   Bar,
-  BarChart,
+  ComposedChart,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -41,6 +41,14 @@ import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import type { MarketTickBatchItem } from '../services/marketHub'
 import type { ChartPointOhlc } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
+import {
+  attachMovingAverages,
+  MA_EMA_FAST_PERIOD,
+  MA_EMA_SLOW_PERIOD,
+  MA_LINE_COLORS,
+  MA_SMA_PERIOD,
+  type ChartPointWithMa,
+} from '../utils/movingAverages'
 
 interface BrokerStatusResponse {
   connected: boolean
@@ -84,6 +92,14 @@ interface HistoricalCandlesResponse {
   interval: string
   from: string
   to: string
+}
+
+/** GET /api/v1/predictions/price-direction */
+interface PriceDirectionApiResponse {
+  direction: 'up' | 'down' | 'neutral'
+  confidence: number
+  modelId: string
+  detail: string
 }
 
 interface KiteFavoritesResponse {
@@ -519,6 +535,41 @@ function problemDetail(err: unknown): string {
 
 const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
+/** SMA + EMA overlays for Recharts (same colors as candlestick chart). */
+function MovingAverageOverlays() {
+  return (
+    <>
+      <Line
+        type="monotone"
+        dataKey="sma20"
+        stroke={MA_LINE_COLORS.sma20}
+        dot={false}
+        strokeWidth={1.5}
+        connectNulls
+        name={`SMA ${MA_SMA_PERIOD}`}
+      />
+      <Line
+        type="monotone"
+        dataKey="ema9"
+        stroke={MA_LINE_COLORS.ema9}
+        dot={false}
+        strokeWidth={1.5}
+        connectNulls
+        name={`EMA ${MA_EMA_FAST_PERIOD}`}
+      />
+      <Line
+        type="monotone"
+        dataKey="ema21"
+        stroke={MA_LINE_COLORS.ema21}
+        dot={false}
+        strokeWidth={1.5}
+        connectNulls
+        name={`EMA ${MA_EMA_SLOW_PERIOD}`}
+      />
+    </>
+  )
+}
+
 type ChartPoint = ChartPointOhlc
 
 /** Re-fetch OHLC while a chart is mounted (browser tab visible) to keep the series current. */
@@ -574,7 +625,7 @@ function ChartTooltipContent({
   payload,
 }: {
   active?: boolean
-  payload?: readonly { payload?: ChartPoint }[]
+  payload?: readonly { payload?: ChartPointWithMa }[]
 }) {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
@@ -589,6 +640,21 @@ function ChartTooltipContent({
         O {p.open} · H {p.high} · L {p.low} · C {p.close}
       </div>
       <div className="text-secondary small">Vol {p.volume}</div>
+      {p.sma20 != null ? (
+        <div className="font-monospace mt-1" style={{ color: MA_LINE_COLORS.sma20 }}>
+          SMA{MA_SMA_PERIOD} {p.sma20.toFixed(4)}
+        </div>
+      ) : null}
+      {p.ema9 != null ? (
+        <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema9 }}>
+          EMA{MA_EMA_FAST_PERIOD} {p.ema9.toFixed(4)}
+        </div>
+      ) : null}
+      {p.ema21 != null ? (
+        <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema21 }}>
+          EMA{MA_EMA_SLOW_PERIOD} {p.ema21.toFixed(4)}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -763,6 +829,8 @@ function CompactPriceChart({
     }
   }, [row.instrumentToken, interval, rangePreset])
 
+  const seriesWithMa = useMemo(() => attachMovingAverages(series), [series])
+
   return (
     <>
       {candleRange && !loading && !error ? (
@@ -787,24 +855,26 @@ function CompactPriceChart({
           <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
         ) : graphType === 'candlestick' ? (
           <div className="w-100 h-100">
-            <CandlestickChart data={series} />
+            <CandlestickChart data={seriesWithMa} />
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
             {graphType === 'line' ? (
-              <LineChart data={series} margin={CHART_MARGINS}>
+              <LineChart data={seriesWithMa} margin={CHART_MARGINS}>
                 <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
                 <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
                 <Tooltip content={ChartTooltipContent} />
-                <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
+                <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                <MovingAverageOverlays />
               </LineChart>
             ) : (
-              <BarChart data={series} margin={CHART_MARGINS}>
+              <ComposedChart data={seriesWithMa} margin={CHART_MARGINS}>
                 <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
                 <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
                 <Tooltip content={ChartTooltipContent} />
-                <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} />
-              </BarChart>
+                <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
+                <MovingAverageOverlays />
+              </ComposedChart>
             )}
           </ResponsiveContainer>
         )}
@@ -838,8 +908,10 @@ function FavoritesChartsGrid({
     <div className="mt-4">
       <h2 className="h6 mb-1">All charts</h2>
       <p className="small text-secondary mb-3">
-        Historical OHLC (line, bar, or green/red candles) for every favorite below. Interval and chart type apply to all
-        tiles. Charts re-fetch about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is visible.
+        Historical OHLC (line, bar, or green/red candles) for every favorite below. Each chart shows{' '}
+        <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong> on closes. Interval and chart type
+        apply to all tiles. Charts re-fetch about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is
+        visible.
       </p>
       <ChartSettingsToolbar
         idPrefix="fav-all"
@@ -915,6 +987,9 @@ function InstrumentChartCard({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
+  const [mlPred, setMlPred] = useState<PriceDirectionApiResponse | null>(null)
+  const [mlLoading, setMlLoading] = useState(false)
+  const [mlError, setMlError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!selection) {
@@ -922,6 +997,8 @@ function InstrumentChartCard({
       setCandleRange(null)
       setError(null)
       setLoading(false)
+      setMlPred(null)
+      setMlError(null)
       return
     }
 
@@ -969,10 +1046,34 @@ function InstrumentChartCard({
     }
   }, [selection, interval, rangePreset])
 
+  useEffect(() => {
+    setMlPred(null)
+    setMlError(null)
+  }, [selection?.instrumentToken, interval])
+
+  const fetchMlBias = useCallback(async () => {
+    if (!selection) return
+    setMlLoading(true)
+    setMlError(null)
+    try {
+      const { data } = await api.get<PriceDirectionApiResponse>('/predictions/price-direction', {
+        params: { instrumentToken: selection.instrumentToken, interval },
+      })
+      setMlPred(data)
+    } catch (err) {
+      setMlPred(null)
+      setMlError(problemDetail(err))
+    } finally {
+      setMlLoading(false)
+    }
+  }, [selection, interval])
+
   const displaySeries = useMemo(
     () => mergeLiveTickIntoOhlc(series, liveLastTick ?? null, interval, graphType),
     [series, liveLastTick, interval, graphType],
   )
+
+  const displayWithMa = useMemo(() => attachMovingAverages(displaySeries), [displaySeries])
 
   return (
     <Card className="border-secondary mt-4">
@@ -981,7 +1082,8 @@ function InstrumentChartCard({
         {!selection ? (
           <p className="text-secondary small mb-0">
             Click a row in either list to plot prices from Kite (historical OHLCV). Choose <strong>Candles</strong> for
-            green/red candlesticks; live ticks update the current bar while subscribed.
+            green/red candlesticks with <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong>; live
+            ticks update the current bar while subscribed.
           </p>
         ) : (
           <>
@@ -1021,10 +1123,56 @@ function InstrumentChartCard({
               graphType={graphType}
               onGraphTypeChange={onGraphTypeChange}
             />
+            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <Button
+                type="button"
+                variant="outline-info"
+                size="sm"
+                className="py-0 px-2"
+                disabled={mlLoading}
+                onClick={() => void fetchMlBias()}
+              >
+                {mlLoading ? (
+                  <>
+                    <Spinner animation="border" size="sm" className="me-1" />
+                    ML…
+                  </>
+                ) : (
+                  'ML next-bar bias'
+                )}
+              </Button>
+              {mlPred ? (
+                <span
+                  className={`small font-monospace fw-semibold ${
+                    mlPred.direction === 'up'
+                      ? 'text-success'
+                      : mlPred.direction === 'down'
+                        ? 'text-danger'
+                        : 'text-secondary'
+                  }`}
+                >
+                  {mlPred.direction.toUpperCase()} · {mlPred.confidence}% ·{' '}
+                  <span className="fw-normal text-muted">{mlPred.modelId}</span>
+                </span>
+              ) : null}
+            </div>
+            {mlError ? (
+              <Alert variant="warning" className="py-1 small mb-2">
+                {mlError}
+              </Alert>
+            ) : null}
+            {mlPred ? (
+              <p className="small text-muted mb-2" style={{ fontSize: '0.75rem' }}>
+                {mlPred.detail}
+              </p>
+            ) : null}
             <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
               Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
-              Live <strong>LTP</strong> and in-progress <strong>candle</strong> (Candles view) use SignalR + Kite WebSocket when
-              a row is selected (market hours / session).
+              Charts include <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong> on line, bar, and
+              candle views. Live <strong>LTP</strong> and in-progress <strong>candle</strong> (Candles view) use SignalR + Kite
+              WebSocket when a row is selected (market hours / session). <strong>ML next-bar bias</strong> calls{' '}
+              <span className="font-monospace">/api/v1/predictions/price-direction</span> (ML.NET on the server — not
+              financial advice).
             </p>
             {error ? (
               <Alert variant="danger" className="py-2 small mb-2">
@@ -1037,26 +1185,28 @@ function InstrumentChartCard({
                   <Spinner animation="border" size="sm" role="status" />
                   Loading candles…
                 </div>
-              ) : displaySeries.length === 0 ? (
+              ) : displayWithMa.length === 0 ? (
                 <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
               ) : graphType === 'candlestick' ? (
-                <CandlestickChart data={displaySeries} />
+                <CandlestickChart data={displayWithMa} />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   {graphType === 'line' ? (
-                    <LineChart data={displaySeries} margin={CHART_MARGINS}>
+                    <LineChart data={displayWithMa} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
                       <Tooltip content={ChartTooltipContent} />
-                      <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
+                      <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                      <MovingAverageOverlays />
                     </LineChart>
                   ) : (
-                    <BarChart data={displaySeries} margin={CHART_MARGINS}>
+                    <ComposedChart data={displayWithMa} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
                       <Tooltip content={ChartTooltipContent} />
-                      <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} />
-                    </BarChart>
+                      <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
+                      <MovingAverageOverlays />
+                    </ComposedChart>
                   )}
                 </ResponsiveContainer>
               )}
@@ -1268,8 +1418,8 @@ export function KiteInstrumentsPage() {
                   Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
                   <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
                   server. Favorites are saved to <strong>your account on the server</strong> (not just this browser).
-                  Chart range, interval, and chart style (line / bar / candles) use the <strong>same server account</strong>.
-                  Use the{' '}
+                  Chart range, interval, and chart style (line / bar / candles) use the <strong>same server account</strong>;
+                  all charts overlay <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong>. Use the{' '}
                   <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for the list and a{' '}
                   <strong>chart per favorite</strong>. On <strong>Browse</strong>, <strong>click a row</strong> for the
                   detailed price chart below.
