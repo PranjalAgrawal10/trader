@@ -814,6 +814,95 @@ function ChartSettingsToolbar({
   )
 }
 
+/** ML next-bar direction (same API as browse detail chart); `compact` tightens spacing for favorite tiles. */
+function MlNextBarBiasBar({
+  instrumentToken,
+  interval,
+  compact,
+}: {
+  instrumentToken: string
+  interval: ChartInterval
+  compact?: boolean
+}) {
+  const [mlPred, setMlPred] = useState<PriceDirectionApiResponse | null>(null)
+  const [mlLoading, setMlLoading] = useState(false)
+  const [mlError, setMlError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setMlPred(null)
+    setMlError(null)
+  }, [instrumentToken, interval])
+
+  const fetchMlBias = useCallback(async () => {
+    setMlLoading(true)
+    setMlError(null)
+    try {
+      const { data } = await api.get<PriceDirectionApiResponse>('/predictions/price-direction', {
+        params: { instrumentToken, interval },
+      })
+      setMlPred(data)
+    } catch (err) {
+      setMlPred(null)
+      setMlError(problemDetail(err))
+    } finally {
+      setMlLoading(false)
+    }
+  }, [instrumentToken, interval])
+
+  const gapClass = compact ? 'mb-1' : 'mb-2'
+
+  return (
+    <>
+      <div className={`d-flex flex-wrap align-items-center gap-2 ${gapClass}`}>
+        <Button
+          type="button"
+          variant="outline-info"
+          size="sm"
+          className="py-0 px-2"
+          disabled={mlLoading}
+          onClick={() => void fetchMlBias()}
+        >
+          {mlLoading ? (
+            <>
+              <Spinner animation="border" size="sm" className="me-1" />
+              ML…
+            </>
+          ) : (
+            'ML next-bar bias'
+          )}
+        </Button>
+        {mlPred ? (
+          <span
+            className={`small font-monospace fw-semibold ${
+              mlPred.direction === 'up'
+                ? 'text-success'
+                : mlPred.direction === 'down'
+                  ? 'text-danger'
+                  : 'text-secondary'
+            }`}
+          >
+            {mlPred.direction.toUpperCase()} · {mlPred.confidence}% ·{' '}
+            <span className="fw-normal text-muted">{mlPred.modelId}</span>
+          </span>
+        ) : null}
+      </div>
+      {mlError ? (
+        <Alert variant="warning" className={`py-1 small ${gapClass}`}>
+          {mlError}
+        </Alert>
+      ) : null}
+      {mlPred ? (
+        <p
+          className={`small text-muted ${gapClass}`}
+          style={{ fontSize: compact ? '0.72rem' : '0.75rem' }}
+        >
+          {mlPred.detail}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
 function CompactPriceChart({
   row,
   rangePreset,
@@ -892,6 +981,7 @@ function CompactPriceChart({
           toIso={candleRange.to}
         />
       ) : null}
+      <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact />
       <div style={{ height: heightPx }}>
         {error ? (
           <Alert variant="danger" className="py-1 small mb-0">
@@ -980,8 +1070,9 @@ function FavoritesChartsGrid({
       <h2 className="h6 mb-1">All charts</h2>
       <p className="small text-secondary mb-3">
         Historical OHLC (line, bar, or green/red candles) for every favorite below. Each chart shows{' '}
-        <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong> on closes. Interval and chart type
-        apply to all tiles. Charts re-fetch about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is
+        <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong> on closes. Use{' '}
+        <strong>ML next-bar bias</strong> per tile for the same prediction as on Browse. Interval and chart type apply to
+        all tiles. Charts re-fetch about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is
         visible.
       </p>
       <ChartSettingsToolbar
@@ -1065,9 +1156,6 @@ function InstrumentChartCard({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
-  const [mlPred, setMlPred] = useState<PriceDirectionApiResponse | null>(null)
-  const [mlLoading, setMlLoading] = useState(false)
-  const [mlError, setMlError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!selection) {
@@ -1075,8 +1163,6 @@ function InstrumentChartCard({
       setCandleRange(null)
       setError(null)
       setLoading(false)
-      setMlPred(null)
-      setMlError(null)
       return
     }
 
@@ -1123,28 +1209,6 @@ function InstrumentChartCard({
       ac.abort()
     }
   }, [selection, interval, rangePreset])
-
-  useEffect(() => {
-    setMlPred(null)
-    setMlError(null)
-  }, [selection?.instrumentToken, interval])
-
-  const fetchMlBias = useCallback(async () => {
-    if (!selection) return
-    setMlLoading(true)
-    setMlError(null)
-    try {
-      const { data } = await api.get<PriceDirectionApiResponse>('/predictions/price-direction', {
-        params: { instrumentToken: selection.instrumentToken, interval },
-      })
-      setMlPred(data)
-    } catch (err) {
-      setMlPred(null)
-      setMlError(problemDetail(err))
-    } finally {
-      setMlLoading(false)
-    }
-  }, [selection, interval])
 
   const displaySeries = useMemo(
     () => mergeLiveTickIntoOhlc(series, liveLastTick ?? null, interval, graphType),
@@ -1203,49 +1267,7 @@ function InstrumentChartCard({
               maLineVisibility={maLineVisibility}
               onMaLineVisibilityChange={onMaLineVisibilityChange}
             />
-            <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <Button
-                type="button"
-                variant="outline-info"
-                size="sm"
-                className="py-0 px-2"
-                disabled={mlLoading}
-                onClick={() => void fetchMlBias()}
-              >
-                {mlLoading ? (
-                  <>
-                    <Spinner animation="border" size="sm" className="me-1" />
-                    ML…
-                  </>
-                ) : (
-                  'ML next-bar bias'
-                )}
-              </Button>
-              {mlPred ? (
-                <span
-                  className={`small font-monospace fw-semibold ${
-                    mlPred.direction === 'up'
-                      ? 'text-success'
-                      : mlPred.direction === 'down'
-                        ? 'text-danger'
-                        : 'text-secondary'
-                  }`}
-                >
-                  {mlPred.direction.toUpperCase()} · {mlPred.confidence}% ·{' '}
-                  <span className="fw-normal text-muted">{mlPred.modelId}</span>
-                </span>
-              ) : null}
-            </div>
-            {mlError ? (
-              <Alert variant="warning" className="py-1 small mb-2">
-                {mlError}
-              </Alert>
-            ) : null}
-            {mlPred ? (
-              <p className="small text-muted mb-2" style={{ fontSize: '0.75rem' }}>
-                {mlPred.detail}
-              </p>
-            ) : null}
+            <MlNextBarBiasBar instrumentToken={selection.instrumentToken} interval={interval} />
             <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
               Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
               Charts include <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong> on line, bar, and
