@@ -29,4 +29,16 @@ public interface IBrokerService
         string query,
         KiteInstrumentSearchSegment segment,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Historical OHLCV from Kite for an instrument token. <paramref name="interval"/> is a UI code (<c>1m</c>, <c>2m</c>, … <c>1d</c>).
+    /// Optional <paramref name="fromUtc"/> / <paramref name="toUtc"/> bound the range; when omitted, a default lookback is used.
+    /// </summary>
+    Task<KiteHistoricalCandlesDto> GetKiteHistoricalCandlesAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        CancellationToken ct = default);
 }

@@ -22,6 +22,17 @@ public interface IKiteInstrumentsClient
         string query,
         int maxMatches,
         CancellationToken ct = default);
+
+    /// <summary>Kite <c>GET /instruments/historical/{token}/{interval}</c> — <paramref name="fromUtc"/> / <paramref name="toUtc"/> are converted to IST in the query string.</summary>
+    Task<KiteHistoricalFetchResult> FetchHistoricalCandlesAsync(
+        string instrumentToken,
+        string kiteInterval,
+        string apiKey,
+        string accessToken,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        bool continuous,
+        CancellationToken ct = default);
 }
 
 public sealed record KiteInstrumentsFetchResult(
@@ -29,3 +40,8 @@ public sealed record KiteInstrumentsFetchResult(
     string? ErrorMessage,
     IReadOnlyList<KiteInstrumentListItemDto> Items,
     bool Truncated);
+
+public sealed record KiteHistoricalFetchResult(
+    bool Success,
+    string? ErrorMessage,
+    IReadOnlyList<KiteHistoricalCandlePointDto> Candles);

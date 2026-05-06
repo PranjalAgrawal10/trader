@@ -36,3 +36,18 @@ public enum KiteInstrumentSearchSegment
 public sealed record KiteInstrumentSearchDto(
     IReadOnlyList<KiteInstrumentListItemDto> Items,
     bool ScanTruncated);
+
+/// <summary>OHLCV series from Kite historical API (possibly after server-side resampling for 2m / 4m).</summary>
+public sealed record KiteHistoricalCandlesDto(
+    IReadOnlyList<KiteHistoricalCandlePointDto> Candles,
+    string Interval,
+    DateTimeOffset From,
+    DateTimeOffset To);
+
+public sealed record KiteHistoricalCandlePointDto(
+    DateTimeOffset Time,
+    decimal Open,
+    decimal High,
+    decimal Low,
+    decimal Close,
+    long Volume);

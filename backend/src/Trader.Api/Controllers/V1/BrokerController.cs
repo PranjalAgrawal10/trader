@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using Trader.Api.Extensions;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
@@ -83,6 +84,77 @@ public sealed class BrokerController : ControllerBase
 
         var dto = await _broker.SearchKiteInstrumentsAsync(User.GetUserId(), q, segment, ct);
         return Ok(dto);
+    }
+
+    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1d</c> (see SPA). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply.</summary>
+    [Authorize]
+    [HttpGet("kite/historical-candles")]
+    public async Task<ActionResult<KiteHistoricalCandlesDto>> KiteHistoricalCandles(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        [FromQuery] string? interval,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+        {
+            return Problem(
+                title: "Invalid instrument",
+                detail: "Provide instrumentToken from the Kite instrument list.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (string.IsNullOrWhiteSpace(interval))
+        {
+            return Problem(
+                title: "Invalid interval",
+                detail: "Provide interval (e.g. 5m, 1d).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        DateTimeOffset? fromUtc = null;
+        DateTimeOffset? toUtc = null;
+        if (!string.IsNullOrWhiteSpace(from))
+        {
+            if (!DateTimeOffset.TryParse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var f))
+            {
+                return Problem(
+                    title: "Invalid from",
+                    detail: "Use an ISO 8601 instant for from.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            fromUtc = f;
+        }
+
+        if (!string.IsNullOrWhiteSpace(to))
+        {
+            if (!DateTimeOffset.TryParse(to, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var t))
+            {
+                return Problem(
+                    title: "Invalid to",
+                    detail: "Use an ISO 8601 instant for to.",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            toUtc = t;
+        }
+
+        try
+        {
+            var dto = await _broker.GetKiteHistoricalCandlesAsync(
+                User.GetUserId(),
+                instrumentToken,
+                interval,
+                fromUtc,
+                toUtc,
+                ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     [Authorize]

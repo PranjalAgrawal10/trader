@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -189,6 +190,145 @@ public sealed class BrokerService : IBrokerService
 
             return new KiteInstrumentSearchDto(mcx.Items, mcx.Truncated);
         }
+    }
+
+    public async Task<KiteHistoricalCandlesDto> GetKiteHistoricalCandlesAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken) || !instrumentToken.Trim().All(char.IsAsciiDigit))
+            throw new InvalidOperationException("A numeric instrument token from Kite is required.");
+
+        var code = NormalizeUiChartInterval(interval);
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+
+        var end = toUtc ?? DateTimeOffset.UtcNow;
+        var start = fromUtc ?? end - DefaultChartLookback(code);
+        if (start >= end)
+            throw new InvalidOperationException("Start time must be before end time.");
+
+        var token = instrumentToken.Trim();
+
+        if (code is "2m" or "4m")
+        {
+            var period = code == "2m" ? 2 : 4;
+            var fetch = await _kiteInstruments
+                .FetchHistoricalCandlesAsync(token, "minute", apiKey, accessToken, start, end, continuous: false, ct)
+                .ConfigureAwait(false);
+            if (!fetch.Success)
+                throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load candles from Kite.");
+
+            var merged = MergeMinuteCandles(fetch.Candles, period);
+            return new KiteHistoricalCandlesDto(merged, code, start, end);
+        }
+
+        var kiteInterval = MapUiIntervalToKite(code);
+        var raw = await _kiteInstruments
+            .FetchHistoricalCandlesAsync(token, kiteInterval, apiKey, accessToken, start, end, continuous: false, ct)
+            .ConfigureAwait(false);
+        if (!raw.Success)
+            throw new InvalidOperationException(raw.ErrorMessage ?? "Could not load candles from Kite.");
+
+        return new KiteHistoricalCandlesDto(raw.Candles, code, start, end);
+    }
+
+    private static string NormalizeUiChartInterval(string interval)
+    {
+        var t = interval.Trim().ToLowerInvariant();
+        return t switch
+        {
+            "1m" or "2m" or "3m" or "4m" or "5m" or "10m" or "15m" or "30m" or "1h" or "1d" => t,
+            _ => throw new InvalidOperationException(
+                "Interval must be one of: 1m, 2m, 3m, 4m, 5m, 10m, 15m, 30m, 1h, 1d."),
+        };
+    }
+
+    private static TimeSpan DefaultChartLookback(string code) =>
+        code switch
+        {
+            "1m" or "2m" or "4m" => TimeSpan.FromDays(5),
+            "3m" => TimeSpan.FromDays(30),
+            "5m" => TimeSpan.FromDays(60),
+            "10m" => TimeSpan.FromDays(90),
+            "15m" => TimeSpan.FromDays(120),
+            "30m" => TimeSpan.FromDays(180),
+            "1h" => TimeSpan.FromDays(365),
+            "1d" => TimeSpan.FromDays(730),
+            _ => TimeSpan.FromDays(5),
+        };
+
+    private static string MapUiIntervalToKite(string code) =>
+        code switch
+        {
+            "1m" => "minute",
+            "3m" => "3minute",
+            "5m" => "5minute",
+            "10m" => "10minute",
+            "15m" => "15minute",
+            "30m" => "30minute",
+            "1h" => "60minute",
+            "1d" => "day",
+            _ => throw new InvalidOperationException("Unsupported interval."),
+        };
+
+    private static IReadOnlyList<KiteHistoricalCandlePointDto> MergeMinuteCandles(
+        IReadOnlyList<KiteHistoricalCandlePointDto> minutes,
+        int periodMinutes)
+    {
+        if (minutes.Count == 0 || periodMinutes <= 1)
+            return minutes;
+
+        var ordered = minutes.OrderBy(c => c.Time).ToList();
+        var merged = new List<KiteHistoricalCandlePointDto>();
+        long? bucketKey = null;
+        decimal open = 0, high = 0, low = 0, close = 0;
+        long volume = 0;
+        var haveOpen = false;
+
+        void Flush()
+        {
+            if (!haveOpen || bucketKey is null)
+                return;
+
+            merged.Add(new KiteHistoricalCandlePointDto(
+                DateTimeOffset.FromUnixTimeSeconds(bucketKey.Value),
+                open,
+                high,
+                low,
+                close,
+                volume));
+        }
+
+        foreach (var c in ordered)
+        {
+            var secs = c.Time.ToUnixTimeSeconds();
+            var key = secs - secs % (periodMinutes * 60L);
+            if (bucketKey != key)
+            {
+                Flush();
+                bucketKey = key;
+                open = c.Open;
+                high = c.High;
+                low = c.Low;
+                close = c.Close;
+                volume = c.Volume;
+                haveOpen = true;
+            }
+            else
+            {
+                high = Math.Max(high, c.High);
+                low = Math.Min(low, c.Low);
+                close = c.Close;
+                volume += c.Volume;
+            }
+        }
+
+        Flush();
+        return merged;
     }
 
     private async Task<(string ApiKey, string AccessToken)> RequireKiteInstrumentSessionAsync(

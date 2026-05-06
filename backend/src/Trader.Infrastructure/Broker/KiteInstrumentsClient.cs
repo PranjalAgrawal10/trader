@@ -7,9 +7,92 @@ namespace Trader.Infrastructure.Broker;
 
 public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
 {
+    private static readonly TimeZoneInfo IndiaTz = ResolveIndiaTimeZone();
+
     private readonly HttpClient _http;
 
     public KiteInstrumentsClient(HttpClient http) => _http = http;
+
+    public async Task<KiteHistoricalFetchResult> FetchHistoricalCandlesAsync(
+        string instrumentToken,
+        string kiteInterval,
+        string apiKey,
+        string accessToken,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        bool continuous,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+            return new KiteHistoricalFetchResult(false, "instrument token is required.", Array.Empty<KiteHistoricalCandlePointDto>());
+
+        var token = instrumentToken.Trim();
+        var interval = kiteInterval.Trim();
+        var fromIst = TimeZoneInfo.ConvertTimeFromUtc(fromUtc.UtcDateTime, IndiaTz);
+        var toIst = TimeZoneInfo.ConvertTimeFromUtc(toUtc.UtcDateTime, IndiaTz);
+        var fromQ = Uri.EscapeDataString(fromIst.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+        var toQ = Uri.EscapeDataString(toIst.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+        var cont = continuous ? "1" : "0";
+        var path =
+            $"instruments/historical/{Uri.EscapeDataString(token)}/{Uri.EscapeDataString(interval)}?from={fromQ}&to={toQ}&continuous={cont}&oi=0";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+
+        using var response = await _http.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for historical data.";
+            return new KiteHistoricalFetchResult(false, msg, Array.Empty<KiteHistoricalCandlePointDto>());
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("status", out var st) || !string.Equals(st.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+            {
+                var msg = TryParseKiteMessage(body) ?? "Unexpected historical response from Kite.";
+                return new KiteHistoricalFetchResult(false, msg, Array.Empty<KiteHistoricalCandlePointDto>());
+            }
+
+            if (!doc.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("candles", out var candlesEl)
+                || candlesEl.ValueKind != JsonValueKind.Array)
+            {
+                return new KiteHistoricalFetchResult(true, null, Array.Empty<KiteHistoricalCandlePointDto>());
+            }
+
+            var list = new List<KiteHistoricalCandlePointDto>();
+            foreach (var row in candlesEl.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Array || row.GetArrayLength() < 5)
+                    continue;
+
+                var ts = row[0].GetString();
+                if (string.IsNullOrEmpty(ts) || !DateTimeOffset.TryParse(ts, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var time))
+                    continue;
+
+                var o = row[1].GetDecimal();
+                var h = row[2].GetDecimal();
+                var l = row[3].GetDecimal();
+                var c = row[4].GetDecimal();
+                long volume = row.GetArrayLength() > 5 && row[5].ValueKind == JsonValueKind.Number
+                    ? row[5].TryGetInt64(out var v) ? v : (long)row[5].GetDouble()
+                    : 0L;
+
+                list.Add(new KiteHistoricalCandlePointDto(time, o, h, l, c, volume));
+            }
+
+            return new KiteHistoricalFetchResult(true, null, list);
+        }
+        catch (JsonException)
+        {
+            return new KiteHistoricalFetchResult(false, "Could not parse Kite historical response.", Array.Empty<KiteHistoricalCandlePointDto>());
+        }
+    }
 
     public async Task<KiteInstrumentsFetchResult> FetchExchangeInstrumentsAsync(
         string exchange,
@@ -188,6 +271,25 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
             expiry,
             strike,
             lot);
+    }
+
+    private static TimeZoneInfo ResolveIndiaTimeZone()
+    {
+        foreach (var id in new[] { "Asia/Kolkata", "India Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 
     private static string? NullableTrim(string value)

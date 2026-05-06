@@ -11,6 +11,7 @@ import {
 import {
   Alert,
   Button,
+  ButtonGroup,
   Card,
   Col,
   Form,
@@ -18,7 +19,16 @@ import {
   Row,
   Spinner,
   Table,
+  ToggleButton,
 } from 'react-bootstrap'
+import {
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
@@ -54,6 +64,27 @@ interface InstrumentSearchResponse {
   scanTruncated: boolean
 }
 
+interface HistoricalCandlesResponse {
+  candles: {
+    time: string
+    open: number
+    high: number
+    low: number
+    close: number
+    volume: number
+  }[]
+  interval: string
+  from: string
+  to: string
+}
+
+const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
+type ChartInterval = (typeof CHART_INTERVALS)[number]
+
+function instrumentRowKey(r: KiteInstrumentRow): string {
+  return `${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`
+}
+
 const INSTRUMENT_PAGE_SIZE = 100
 const SCROLL_LOAD_THRESHOLD_PX = 96
 
@@ -81,6 +112,8 @@ function InstrumentListPanel({
   loading,
   emptyHint,
   searchSegment,
+  selectedRowKey,
+  onSelectRow,
 }: {
   title: string
   rows: KiteInstrumentRow[]
@@ -88,6 +121,8 @@ function InstrumentListPanel({
   loading: boolean
   emptyHint: string
   searchSegment: 'fno' | 'mcx'
+  selectedRowKey: string | null
+  onSelectRow: (row: KiteInstrumentRow) => void
 }) {
   const searchFieldId = useId()
   const [search, setSearch] = useState('')
@@ -274,7 +309,20 @@ function InstrumentListPanel({
             </thead>
             <tbody>
               {displayed.map((r) => (
-                <tr key={`${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`}>
+                <tr
+                  key={`${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`}
+                  role="button"
+                  tabIndex={0}
+                  className={instrumentRowKey(r) === selectedRowKey ? 'table-active' : undefined}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onSelectRow(r)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onSelectRow(r)
+                    }
+                  }}
+                >
                   <td className="font-monospace">{r.tradingsymbol}</td>
                   <td>{r.exchange}</td>
                   <td>{r.instrumentType ?? '—'}</td>
@@ -300,6 +348,143 @@ function problemDetail(err: unknown): string {
   return 'Request failed.'
 }
 
+function InstrumentChartCard({
+  selection,
+  interval,
+  onIntervalChange,
+}: {
+  selection: KiteInstrumentRow | null
+  interval: ChartInterval
+  onIntervalChange: (v: ChartInterval) => void
+}) {
+  const [series, setSeries] = useState<{ idx: number; t: string; close: number; ohlc: string }[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [rangeHint, setRangeHint] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!selection) {
+      setSeries([])
+      setRangeHint(null)
+      setError(null)
+      setLoading(false)
+      return
+    }
+
+    const ac = new AbortController()
+    setLoading(true)
+    setError(null)
+
+    ;(async () => {
+      try {
+        const { data } = await api.get<HistoricalCandlesResponse>('/broker/kite/historical-candles', {
+          params: { instrumentToken: selection.instrumentToken, interval },
+          signal: ac.signal,
+        })
+        const pts = data.candles.map((c, idx) => ({
+          idx: idx + 1,
+          t: c.time,
+          close: Number(c.close),
+          ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
+        }))
+        setSeries(pts)
+        setRangeHint(
+          `${data.interval} · ${new Date(data.from).toLocaleString()} → ${new Date(data.to).toLocaleString()}`,
+        )
+      } catch (err: unknown) {
+        if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
+        setSeries([])
+        setRangeHint(null)
+        setError(problemDetail(err))
+      } finally {
+        if (!ac.signal.aborted) setLoading(false)
+      }
+    })()
+
+    return () => ac.abort()
+  }, [selection, interval])
+
+  return (
+    <Card className="border-secondary mt-4">
+      <Card.Body>
+        <Card.Title className="h6 mb-2">Price chart</Card.Title>
+        {!selection ? (
+          <p className="text-secondary small mb-0">
+            Click a row in either list to plot closing prices from Kite (historical OHLCV).
+          </p>
+        ) : (
+          <>
+            <p className="small text-secondary mb-2">
+              <span className="font-monospace">{selection.tradingsymbol}</span> · {selection.exchange}
+              {rangeHint ? <span className="d-block mt-1">{rangeHint}</span> : null}
+            </p>
+            <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
+              <span className="small text-secondary text-uppercase me-1">Interval</span>
+              <ButtonGroup size="sm" className="flex-wrap">
+                {CHART_INTERVALS.map((iv) => (
+                  <ToggleButton
+                    key={iv}
+                    id={`chart-iv-${iv}`}
+                    type="radio"
+                    variant="outline-secondary"
+                    name="chart-interval"
+                    value={iv}
+                    checked={interval === iv}
+                    onChange={() => onIntervalChange(iv)}
+                  >
+                    {iv}
+                  </ToggleButton>
+                ))}
+              </ButtonGroup>
+            </div>
+            {error ? (
+              <Alert variant="danger" className="py-2 small mb-2">
+                {error}
+              </Alert>
+            ) : null}
+            <div style={{ height: '18rem' }}>
+              {loading ? (
+                <div className="d-flex align-items-center gap-2 text-secondary small py-5 justify-content-center">
+                  <Spinner animation="border" size="sm" role="status" />
+                  Loading candles…
+                </div>
+              ) : series.length === 0 ? (
+                <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={series} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                    <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                    <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null
+                        const p = payload[0].payload as { t: string; close: number; ohlc: string }
+                        return (
+                          <div
+                            className="rounded border border-secondary p-2 small"
+                            style={{ background: '#212529', color: '#f8f9fa' }}
+                          >
+                            <div>{new Date(p.t).toLocaleString()}</div>
+                            <div className="font-monospace mt-1">Close {p.close}</div>
+                            <div className="mt-1 text-secondary" style={{ fontSize: '0.78rem' }}>
+                              {p.ohlc}
+                            </div>
+                          </div>
+                        )
+                      }}
+                    />
+                    <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </>
+        )}
+      </Card.Body>
+    </Card>
+  )
+}
+
 const EMPTY_INSTRUMENTS: KiteInstrumentRow[] = []
 
 export function KiteInstrumentsPage() {
@@ -308,6 +493,8 @@ export function KiteInstrumentsPage() {
   const [instruments, setInstruments] = useState<InstrumentsResponse | null>(null)
   const [instrumentsLoading, setInstrumentsLoading] = useState(false)
   const [instrumentsError, setInstrumentsError] = useState<string | null>(null)
+  const [chartRow, setChartRow] = useState<KiteInstrumentRow | null>(null)
+  const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
@@ -379,7 +566,7 @@ export function KiteInstrumentsPage() {
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
                   <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
-                  server.
+                  server. <strong>Click a row</strong> to plot historical closes (interval buttons apply to the chart).
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">
@@ -406,6 +593,8 @@ export function KiteInstrumentsPage() {
               loading={instrumentsLoading}
               emptyHint="No rows returned. Try Refresh or check your Kite session."
               searchSegment="fno"
+              selectedRowKey={chartRow ? instrumentRowKey(chartRow) : null}
+              onSelectRow={setChartRow}
             />
             <InstrumentListPanel
               title="Commodities (MCX)"
@@ -414,6 +603,14 @@ export function KiteInstrumentsPage() {
               loading={instrumentsLoading}
               emptyHint="No rows returned. Try Refresh or check your Kite session."
               searchSegment="mcx"
+              selectedRowKey={chartRow ? instrumentRowKey(chartRow) : null}
+              onSelectRow={setChartRow}
+            />
+
+            <InstrumentChartCard
+              selection={chartRow}
+              interval={chartInterval}
+              onIntervalChange={setChartInterval}
             />
           </Card.Body>
         </Card>
