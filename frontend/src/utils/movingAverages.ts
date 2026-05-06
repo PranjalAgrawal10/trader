@@ -18,6 +18,19 @@ export const MA_LINE_COLORS = {
   ema21: '#38bdf8',
 } as const
 
+/** Toggles for SMA / EMA overlays on line, bar, and candle charts. */
+export type MaLineVisibility = {
+  showSma20: boolean
+  showEma9: boolean
+  showEma21: boolean
+}
+
+export const DEFAULT_MA_LINE_VISIBILITY: MaLineVisibility = {
+  showSma20: true,
+  showEma9: true,
+  showEma21: true,
+}
+
 export function computeSma(values: readonly number[], period: number): (number | null)[] {
   const out: (number | null)[] = values.map(() => null)
   if (period < 1 || values.length < period) return out

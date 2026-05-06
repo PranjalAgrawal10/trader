@@ -1,6 +1,12 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChartPointWithMa } from '../utils/movingAverages'
-import { MA_EMA_FAST_PERIOD, MA_EMA_SLOW_PERIOD, MA_LINE_COLORS, MA_SMA_PERIOD } from '../utils/movingAverages'
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ChartPointWithMa, MaLineVisibility } from '../utils/movingAverages'
+import {
+  DEFAULT_MA_LINE_VISIBILITY,
+  MA_EMA_FAST_PERIOD,
+  MA_EMA_SLOW_PERIOD,
+  MA_LINE_COLORS,
+  MA_SMA_PERIOD,
+} from '../utils/movingAverages'
 
 const PAD = { top: 6, right: 8, bottom: 22, left: 52 }
 
@@ -53,7 +59,13 @@ function useContainerPixelSize<T extends HTMLElement>() {
   return { ref, ...size }
 }
 
-export function CandlestickChart({ data }: { data: ChartPointWithMa[] }) {
+export function CandlestickChart({
+  data,
+  maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
+}: {
+  data: ChartPointWithMa[]
+  maLineVisibility?: MaLineVisibility
+}) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
   const layout = useMemo(() => {
@@ -68,8 +80,24 @@ export function CandlestickChart({ data }: { data: ChartPointWithMa[] }) {
     for (const c of data) {
       min = Math.min(min, c.low)
       max = Math.max(max, c.high)
-      for (const key of ['sma20', 'ema9', 'ema21'] as const) {
-        const v = c[key]
+    }
+    for (const c of data) {
+      if (maLineVisibility.showSma20) {
+        const v = c.sma20
+        if (v != null && Number.isFinite(v)) {
+          min = Math.min(min, v)
+          max = Math.max(max, v)
+        }
+      }
+      if (maLineVisibility.showEma9) {
+        const v = c.ema9
+        if (v != null && Number.isFinite(v)) {
+          min = Math.min(min, v)
+          max = Math.max(max, v)
+        }
+      }
+      if (maLineVisibility.showEma21) {
+        const v = c.ema21
         if (v != null && Number.isFinite(v)) {
           min = Math.min(min, v)
           max = Math.max(max, v)
@@ -93,7 +121,7 @@ export function CandlestickChart({ data }: { data: ChartPointWithMa[] }) {
     const pathEma21 = buildMaPath('ema21', data, slotW, yPrice)
 
     return { plotW, plotH, min, max, yPrice, n, slotW, bodyW, pathSma, pathEma9, pathEma21 }
-  }, [data, w, h])
+  }, [data, w, h, maLineVisibility])
 
   const yTicks = useMemo(() => {
     if (!layout) return []
@@ -160,7 +188,7 @@ export function CandlestickChart({ data }: { data: ChartPointWithMa[] }) {
             )
           })}
 
-          {layout.pathEma21 ? (
+          {layout.pathEma21 && maLineVisibility.showEma21 ? (
             <path
               d={layout.pathEma21}
               fill="none"
@@ -170,7 +198,7 @@ export function CandlestickChart({ data }: { data: ChartPointWithMa[] }) {
               strokeLinejoin="round"
             />
           ) : null}
-          {layout.pathEma9 ? (
+          {layout.pathEma9 && maLineVisibility.showEma9 ? (
             <path
               d={layout.pathEma9}
               fill="none"
@@ -180,7 +208,7 @@ export function CandlestickChart({ data }: { data: ChartPointWithMa[] }) {
               strokeLinejoin="round"
             />
           ) : null}
-          {layout.pathSma ? (
+          {layout.pathSma && maLineVisibility.showSma20 ? (
             <path
               d={layout.pathSma}
               fill="none"
@@ -201,11 +229,21 @@ export function CandlestickChart({ data }: { data: ChartPointWithMa[] }) {
           className="position-absolute small text-secondary"
           style={{ right: 8, bottom: 2, fontSize: '0.65rem', pointerEvents: 'none' }}
         >
-          <span style={{ color: MA_LINE_COLORS.sma20 }}>SMA{MA_SMA_PERIOD}</span>
-          {' · '}
-          <span style={{ color: MA_LINE_COLORS.ema9 }}>EMA{MA_EMA_FAST_PERIOD}</span>
-          {' · '}
-          <span style={{ color: MA_LINE_COLORS.ema21 }}>EMA{MA_EMA_SLOW_PERIOD}</span>
+          {(() => {
+            const items: { key: string; label: string; color: string }[] = []
+            if (maLineVisibility.showSma20)
+              items.push({ key: 'sma', label: `SMA${MA_SMA_PERIOD}`, color: MA_LINE_COLORS.sma20 })
+            if (maLineVisibility.showEma9)
+              items.push({ key: 'e9', label: `EMA${MA_EMA_FAST_PERIOD}`, color: MA_LINE_COLORS.ema9 })
+            if (maLineVisibility.showEma21)
+              items.push({ key: 'e21', label: `EMA${MA_EMA_SLOW_PERIOD}`, color: MA_LINE_COLORS.ema21 })
+            return items.map((item, i) => (
+              <Fragment key={item.key}>
+                {i > 0 ? <span className="text-muted"> · </span> : null}
+                <span style={{ color: item.color }}>{item.label}</span>
+              </Fragment>
+            ))
+          })()}
         </div>
       ) : null}
     </div>

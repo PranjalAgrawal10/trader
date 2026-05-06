@@ -92,7 +92,7 @@ npm run dev
 
 - Dev server uses `.env.development` (`VITE_*` variables).
 - Set `VITE_API_BASE_URL` to your API origin (e.g. `http://localhost:5232`). The client calls `{VITE_API_BASE_URL}/api/v1`.
-- On **Kite instruments** at **`/instruments`**, the chart toolbar includes **Candles**: green/red OHLC candlesticks; overlays **SMA 20** (amber), **EMA 9** (violet), **EMA 21** (sky) on line, bar, and candle plots. With Zerodha connected and a row selected on **Browse**, SignalR ticks update the **in-progress** bar for the chosen interval.
+- On **Kite instruments** at **`/instruments`**, the chart toolbar includes **Candles**: green/red OHLC candlesticks; overlays **SMA 20** (amber), **EMA 9** (violet), **EMA 21** (sky) on line, bar, and candle plots, each toggled under **Indicators** (local UI only). With Zerodha connected and a row selected on **Browse**, SignalR ticks update the **in-progress** bar for the chosen interval.
 
 Production build:
 

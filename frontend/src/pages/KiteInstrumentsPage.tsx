@@ -43,11 +43,13 @@ import type { ChartPointOhlc } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
   attachMovingAverages,
+  DEFAULT_MA_LINE_VISIBILITY,
   MA_EMA_FAST_PERIOD,
   MA_EMA_SLOW_PERIOD,
   MA_LINE_COLORS,
   MA_SMA_PERIOD,
   type ChartPointWithMa,
+  type MaLineVisibility,
 } from '../utils/movingAverages'
 
 interface BrokerStatusResponse {
@@ -536,36 +538,42 @@ function problemDetail(err: unknown): string {
 const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
 /** SMA + EMA overlays for Recharts (same colors as candlestick chart). */
-function MovingAverageOverlays() {
+function MovingAverageOverlays({ visibility }: { visibility: MaLineVisibility }) {
   return (
     <>
-      <Line
-        type="monotone"
-        dataKey="sma20"
-        stroke={MA_LINE_COLORS.sma20}
-        dot={false}
-        strokeWidth={1.5}
-        connectNulls
-        name={`SMA ${MA_SMA_PERIOD}`}
-      />
-      <Line
-        type="monotone"
-        dataKey="ema9"
-        stroke={MA_LINE_COLORS.ema9}
-        dot={false}
-        strokeWidth={1.5}
-        connectNulls
-        name={`EMA ${MA_EMA_FAST_PERIOD}`}
-      />
-      <Line
-        type="monotone"
-        dataKey="ema21"
-        stroke={MA_LINE_COLORS.ema21}
-        dot={false}
-        strokeWidth={1.5}
-        connectNulls
-        name={`EMA ${MA_EMA_SLOW_PERIOD}`}
-      />
+      {visibility.showSma20 ? (
+        <Line
+          type="monotone"
+          dataKey="sma20"
+          stroke={MA_LINE_COLORS.sma20}
+          dot={false}
+          strokeWidth={1.5}
+          connectNulls
+          name={`SMA ${MA_SMA_PERIOD}`}
+        />
+      ) : null}
+      {visibility.showEma9 ? (
+        <Line
+          type="monotone"
+          dataKey="ema9"
+          stroke={MA_LINE_COLORS.ema9}
+          dot={false}
+          strokeWidth={1.5}
+          connectNulls
+          name={`EMA ${MA_EMA_FAST_PERIOD}`}
+        />
+      ) : null}
+      {visibility.showEma21 ? (
+        <Line
+          type="monotone"
+          dataKey="ema21"
+          stroke={MA_LINE_COLORS.ema21}
+          dot={false}
+          strokeWidth={1.5}
+          connectNulls
+          name={`EMA ${MA_EMA_SLOW_PERIOD}`}
+        />
+      ) : null}
     </>
   )
 }
@@ -623,9 +631,11 @@ function HistoricalRangeCaption({
 function ChartTooltipContent({
   active,
   payload,
+  maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
 }: {
   active?: boolean
   payload?: readonly { payload?: ChartPointWithMa }[]
+  maLineVisibility?: MaLineVisibility
 }) {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
@@ -640,17 +650,17 @@ function ChartTooltipContent({
         O {p.open} · H {p.high} · L {p.low} · C {p.close}
       </div>
       <div className="text-secondary small">Vol {p.volume}</div>
-      {p.sma20 != null ? (
+      {maLineVisibility.showSma20 && p.sma20 != null ? (
         <div className="font-monospace mt-1" style={{ color: MA_LINE_COLORS.sma20 }}>
           SMA{MA_SMA_PERIOD} {p.sma20.toFixed(4)}
         </div>
       ) : null}
-      {p.ema9 != null ? (
+      {maLineVisibility.showEma9 && p.ema9 != null ? (
         <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema9 }}>
           EMA{MA_EMA_FAST_PERIOD} {p.ema9.toFixed(4)}
         </div>
       ) : null}
-      {p.ema21 != null ? (
+      {maLineVisibility.showEma21 && p.ema21 != null ? (
         <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema21 }}>
           EMA{MA_EMA_SLOW_PERIOD} {p.ema21.toFixed(4)}
         </div>
@@ -667,6 +677,8 @@ function ChartSettingsToolbar({
   onIntervalChange,
   graphType,
   onGraphTypeChange,
+  maLineVisibility,
+  onMaLineVisibilityChange,
 }: {
   idPrefix: string
   rangePreset: ChartRangePreset
@@ -675,6 +687,8 @@ function ChartSettingsToolbar({
   onIntervalChange: (v: ChartInterval) => void
   graphType: ChartGraphType
   onGraphTypeChange: (v: ChartGraphType) => void
+  maLineVisibility: MaLineVisibility
+  onMaLineVisibilityChange: (patch: Partial<MaLineVisibility>) => void
 }) {
   return (
     <>
@@ -761,6 +775,41 @@ function ChartSettingsToolbar({
           </ToggleButton>
         </ButtonGroup>
       </div>
+      <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
+        <span className="small text-secondary text-uppercase me-1">Indicators</span>
+        <ButtonGroup size="sm">
+          <ToggleButton
+            id={`${idPrefix}-ind-sma`}
+            type="checkbox"
+            variant={maLineVisibility.showSma20 ? 'secondary' : 'outline-secondary'}
+            value="sma20"
+            checked={maLineVisibility.showSma20}
+            onChange={(e) => onMaLineVisibilityChange({ showSma20: e.currentTarget.checked })}
+          >
+            SMA {MA_SMA_PERIOD}
+          </ToggleButton>
+          <ToggleButton
+            id={`${idPrefix}-ind-ema9`}
+            type="checkbox"
+            variant={maLineVisibility.showEma9 ? 'secondary' : 'outline-secondary'}
+            value="ema9"
+            checked={maLineVisibility.showEma9}
+            onChange={(e) => onMaLineVisibilityChange({ showEma9: e.currentTarget.checked })}
+          >
+            EMA {MA_EMA_FAST_PERIOD}
+          </ToggleButton>
+          <ToggleButton
+            id={`${idPrefix}-ind-ema21`}
+            type="checkbox"
+            variant={maLineVisibility.showEma21 ? 'secondary' : 'outline-secondary'}
+            value="ema21"
+            checked={maLineVisibility.showEma21}
+            onChange={(e) => onMaLineVisibilityChange({ showEma21: e.currentTarget.checked })}
+          >
+            EMA {MA_EMA_SLOW_PERIOD}
+          </ToggleButton>
+        </ButtonGroup>
+      </div>
     </>
   )
 }
@@ -771,12 +820,14 @@ function CompactPriceChart({
   interval,
   graphType,
   heightPx,
+  maLineVisibility,
 }: {
   row: KiteInstrumentRow
   rangePreset: ChartRangePreset
   interval: ChartInterval
   graphType: ChartGraphType
   heightPx: number
+  maLineVisibility: MaLineVisibility
 }) {
   const [series, setSeries] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(true)
@@ -855,7 +906,7 @@ function CompactPriceChart({
           <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
         ) : graphType === 'candlestick' ? (
           <div className="w-100 h-100">
-            <CandlestickChart data={seriesWithMa} />
+            <CandlestickChart data={seriesWithMa} maLineVisibility={maLineVisibility} />
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -863,17 +914,33 @@ function CompactPriceChart({
               <LineChart data={seriesWithMa} margin={CHART_MARGINS}>
                 <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
                 <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
-                <Tooltip content={ChartTooltipContent} />
+                <Tooltip
+                  content={(props) => (
+                    <ChartTooltipContent
+                      active={props.active}
+                      payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                      maLineVisibility={maLineVisibility}
+                    />
+                  )}
+                />
                 <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
-                <MovingAverageOverlays />
+                <MovingAverageOverlays visibility={maLineVisibility} />
               </LineChart>
             ) : (
               <ComposedChart data={seriesWithMa} margin={CHART_MARGINS}>
                 <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
                 <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
-                <Tooltip content={ChartTooltipContent} />
+                <Tooltip
+                  content={(props) => (
+                    <ChartTooltipContent
+                      active={props.active}
+                      payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                      maLineVisibility={maLineVisibility}
+                    />
+                  )}
+                />
                 <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
-                <MovingAverageOverlays />
+                <MovingAverageOverlays visibility={maLineVisibility} />
               </ComposedChart>
             )}
           </ResponsiveContainer>
@@ -891,6 +958,8 @@ function FavoritesChartsGrid({
   onIntervalChange,
   graphType,
   onGraphTypeChange,
+  maLineVisibility,
+  onMaLineVisibilityChange,
   onToggleFavorite,
 }: {
   favorites: KiteInstrumentRow[]
@@ -900,6 +969,8 @@ function FavoritesChartsGrid({
   onIntervalChange: (v: ChartInterval) => void
   graphType: ChartGraphType
   onGraphTypeChange: (v: ChartGraphType) => void
+  maLineVisibility: MaLineVisibility
+  onMaLineVisibilityChange: (patch: Partial<MaLineVisibility>) => void
   onToggleFavorite: (r: KiteInstrumentRow) => void
 }) {
   if (favorites.length === 0) return null
@@ -921,6 +992,8 @@ function FavoritesChartsGrid({
         onIntervalChange={onIntervalChange}
         graphType={graphType}
         onGraphTypeChange={onGraphTypeChange}
+        maLineVisibility={maLineVisibility}
+        onMaLineVisibilityChange={onMaLineVisibilityChange}
       />
       <Row className="g-3">
         {favorites.map((row) => (
@@ -948,6 +1021,7 @@ function FavoritesChartsGrid({
                   interval={interval}
                   graphType={graphType}
                   heightPx={220}
+                  maLineVisibility={maLineVisibility}
                 />
               </Card.Body>
             </Card>
@@ -966,6 +1040,8 @@ function InstrumentChartCard({
   onIntervalChange,
   graphType,
   onGraphTypeChange,
+  maLineVisibility,
+  onMaLineVisibilityChange,
   isFavorite,
   onToggleFavorite,
   liveLastPrice,
@@ -978,6 +1054,8 @@ function InstrumentChartCard({
   onIntervalChange: (v: ChartInterval) => void
   graphType: ChartGraphType
   onGraphTypeChange: (v: ChartGraphType) => void
+  maLineVisibility: MaLineVisibility
+  onMaLineVisibilityChange: (patch: Partial<MaLineVisibility>) => void
   isFavorite: boolean
   onToggleFavorite?: () => void
   liveLastPrice?: number | null
@@ -1122,6 +1200,8 @@ function InstrumentChartCard({
               onIntervalChange={onIntervalChange}
               graphType={graphType}
               onGraphTypeChange={onGraphTypeChange}
+              maLineVisibility={maLineVisibility}
+              onMaLineVisibilityChange={onMaLineVisibilityChange}
             />
             <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
               <Button
@@ -1188,24 +1268,40 @@ function InstrumentChartCard({
               ) : displayWithMa.length === 0 ? (
                 <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
               ) : graphType === 'candlestick' ? (
-                <CandlestickChart data={displayWithMa} />
+                <CandlestickChart data={displayWithMa} maLineVisibility={maLineVisibility} />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   {graphType === 'line' ? (
                     <LineChart data={displayWithMa} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
-                      <Tooltip content={ChartTooltipContent} />
+                      <Tooltip
+                        content={(props) => (
+                          <ChartTooltipContent
+                            active={props.active}
+                            payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                            maLineVisibility={maLineVisibility}
+                          />
+                        )}
+                      />
                       <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
-                      <MovingAverageOverlays />
+                      <MovingAverageOverlays visibility={maLineVisibility} />
                     </LineChart>
                   ) : (
                     <ComposedChart data={displayWithMa} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
                       <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
-                      <Tooltip content={ChartTooltipContent} />
+                      <Tooltip
+                        content={(props) => (
+                          <ChartTooltipContent
+                            active={props.active}
+                            payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                            maLineVisibility={maLineVisibility}
+                          />
+                        )}
+                      />
                       <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
-                      <MovingAverageOverlays />
+                      <MovingAverageOverlays visibility={maLineVisibility} />
                     </ComposedChart>
                   )}
                 </ResponsiveContainer>
@@ -1299,6 +1395,12 @@ export function KiteInstrumentsPage() {
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
   const [chartRangePreset, setChartRangePreset] = useState<ChartRangePreset>('auto')
   const [chartGraphType, setChartGraphType] = useState<ChartGraphType>('line')
+  const [maLineVisibility, setMaLineVisibility] = useState<MaLineVisibility>(() => ({
+    ...DEFAULT_MA_LINE_VISIBILITY,
+  }))
+  const patchMaLineVisibility = useCallback((patch: Partial<MaLineVisibility>) => {
+    setMaLineVisibility((p) => ({ ...p, ...patch }))
+  }, [])
   const [chartPrefsHydrated, setChartPrefsHydrated] = useState(false)
 
   const loadChartSettings = useCallback(async () => {
@@ -1512,6 +1614,8 @@ export function KiteInstrumentsPage() {
                   onIntervalChange={setChartInterval}
                   graphType={chartGraphType}
                   onGraphTypeChange={setChartGraphType}
+                  maLineVisibility={maLineVisibility}
+                  onMaLineVisibilityChange={patchMaLineVisibility}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
                 />
               </>
@@ -1526,6 +1630,8 @@ export function KiteInstrumentsPage() {
                 onIntervalChange={setChartInterval}
                 graphType={chartGraphType}
                 onGraphTypeChange={setChartGraphType}
+                maLineVisibility={maLineVisibility}
+                onMaLineVisibilityChange={patchMaLineVisibility}
                 isFavorite={chartRow ? favoriteKeySet.has(favoriteRowKey(chartRow)) : false}
                 onToggleFavorite={
                   chartRow ? () => void toggleFavorite(chartRow) : undefined
