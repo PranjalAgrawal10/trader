@@ -11,8 +11,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Trader.Api.Filters;
 using Trader.Api.Hosting;
+using Trader.Api.Hubs;
+using Trader.Api.Streaming;
 using Trader.Application;
 using Trader.Application.Configuration;
+using Trader.Application.Streaming;
 using Trader.Infrastructure;
 using Trader.Infrastructure.Persistence;
 
@@ -51,6 +54,8 @@ public sealed class Program
 
         builder.Services.AddApplication();
         builder.Services.AddInfrastructure(builder.Configuration);
+        builder.Services.AddSignalR();
+        builder.Services.AddSingleton<IMarketTickDispatcher, SignalRMarketTickDispatcher>();
 
         builder.Services.AddApiVersioning(options =>
         {
@@ -141,6 +146,17 @@ public sealed class Program
                 };
                 options.Events = new JwtBearerEvents
                 {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        if (!string.IsNullOrEmpty(accessToken)
+                            && context.Request.Path.StartsWithSegments("/hubs"))
+                        {
+                            context.Token = accessToken;
+                        }
+
+                        return Task.CompletedTask;
+                    },
                     OnAuthenticationFailed = context =>
                     {
                         var logger = context.HttpContext.RequestServices
@@ -233,6 +249,7 @@ public sealed class Program
             }))
             .AllowAnonymous();
 
+        app.MapHub<MarketHub>(MarketHub.Path);
         app.MapControllers();
 
         await app.RunAsync();

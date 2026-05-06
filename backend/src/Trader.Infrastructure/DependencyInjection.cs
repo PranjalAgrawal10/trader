@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Pomelo.EntityFrameworkCore.MySql;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
+using Trader.Application.Streaming;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
@@ -15,6 +16,7 @@ using Trader.Infrastructure.Email;
 using Trader.Infrastructure.Persistence;
 using Trader.Infrastructure.Persistence.Repositories;
 using Trader.Infrastructure.Security;
+using Trader.Infrastructure.Streaming;
 
 namespace Trader.Infrastructure;
 
@@ -92,6 +94,7 @@ public static class DependencyInjection
         services.AddScoped<IBotRepository, BotRepository>();
         services.AddScoped<ITradeRepository, TradeRepository>();
         services.AddScoped<IBrokerSetupGateway, BrokerSetupGateway>();
+        services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
 

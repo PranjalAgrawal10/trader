@@ -36,6 +36,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
+import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 
 interface BrokerStatusResponse {
   connected: boolean
@@ -839,6 +840,7 @@ function InstrumentChartCard({
   onGraphTypeChange,
   isFavorite,
   onToggleFavorite,
+  liveLastPrice,
 }: {
   selection: KiteInstrumentRow | null
   rangePreset: ChartRangePreset
@@ -849,6 +851,7 @@ function InstrumentChartCard({
   onGraphTypeChange: (v: ChartGraphType) => void
   isFavorite: boolean
   onToggleFavorite?: () => void
+  liveLastPrice?: number | null
 }) {
   const [series, setSeries] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(false)
@@ -921,6 +924,9 @@ function InstrumentChartCard({
             <p className="small text-secondary mb-2 d-flex flex-wrap align-items-center gap-2">
               <span className="font-monospace">{selection.tradingsymbol}</span>
               <span>· {selection.exchange}</span>
+              {liveLastPrice != null ? (
+                <span className="font-monospace text-success">LTP {liveLastPrice}</span>
+              ) : null}
               {onToggleFavorite ? (
                 <Button
                   type="button"
@@ -952,7 +958,8 @@ function InstrumentChartCard({
               onGraphTypeChange={onGraphTypeChange}
             />
             <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
-              Data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
+              Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
+              Live <strong>LTP</strong> uses SignalR + Kite WebSocket when a row is selected (market hours / session).
             </p>
             {error ? (
               <Alert variant="danger" className="py-2 small mb-2">
@@ -1056,6 +1063,8 @@ export function KiteInstrumentsPage() {
   }, [])
 
   const isZerodha = provider?.toLowerCase() === 'zerodha'
+
+  const liveLtp = useLiveMarketTick(chartRow?.instrumentToken ?? null, isZerodha && mainTab === 'browse' && !!chartRow)
 
   const loadInstruments = useCallback(async () => {
     if (!isZerodha) {
@@ -1233,6 +1242,7 @@ export function KiteInstrumentsPage() {
                 onToggleFavorite={
                   chartRow ? () => void toggleFavorite(chartRow) : undefined
                 }
+                liveLastPrice={liveLtp}
               />
             ) : null}
           </Card.Body>

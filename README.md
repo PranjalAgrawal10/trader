@@ -73,6 +73,7 @@ dotnet run --project src/Trader.Api
 - Swagger (Development): `/swagger`.
 - Health: `GET /health`.
 - API routes are versioned (e.g. `GET /api/v1/...`).
+- **Realtime:** SignalR hub **`/hubs/market`** (same origin as the API). Authenticate with the SPA JWT via the **`access_token`** query parameter (the JS client uses `accessTokenFactory`). Hub methods: **`SubscribeInstrument`** / **`UnsubscribeInstrument`** (numeric Kite `instrument_token`). Server pushes batched **`ticks`** events: `[{ i, p, v, t? }]` (LTP mode). Requires **Zerodha** connected and a valid Kite session; the server opens one **Kite WebSocket** per user with active subscriptions (`Tech.Zerodha.KiteConnect` **4.3.0**).
 
 **Authentication:** **`POST /api/v1/auth/register`** responds **`{ "email_verification_required": true }`** and emails a verification link (**`Smtp__*`**, **`PublicWeb__FrontendBaseUrl`** — see **`.env.example`**). **`POST /api/v1/auth/verify-email`** **`{ "token" }`** returns a JWT. **`POST /api/v1/auth/login`** returns **`{ "requires_email_verification": true }`** when the password is correct but email is not confirmed yet. Once verified, normal login returns a JWT or **`{ "requires_2fa": true, "temp_token": "…", "second_factor": "authenticator" | "email_otp" }`** when a second factor is enabled; complete with **`POST /api/v1/2fa/verify-login`**. Use **`POST /api/v1/auth/resend-login-otp`** for **`email_otp`**. **`GET /api/v1/auth/me`** includes **`email_verified`**. **Password reset:** **`POST /api/v1/auth/forgot-password`**, **`POST /api/v1/auth/reset-password`**. **`POST /api/v1/2fa/enable-email-sign-in`** (Bearer) turns on email codes; **`GET /api/v1/2fa/status`** includes **`second_factor_method`**.
 **Verify-login `otp`** is a TOTP or recovery code when **`second_factor`** is **`authenticator`**, and the emailed six-digit code when **`email_otp`**. Repeated failures lock the step (**`Auth:MaxFailedTotpAttemptsPerScope`**, **`Auth:TotpAttemptLockoutMinutes`**). Bearer **Enrollment** routes: **`2fa/setup`**, **`verify-setup`** (issues **`recovery_codes`** once), **`cancel-setup`**, **`disable`** (password and/or OTP/recovery for authenticator mode; password-only to disable email OTP). Managed MySQL should run migrations including **`EmailOtpChallenges`**, **`AddUserEmailVerificationAndSecondFactor`**, and **`AddKiteFavoriteInstruments`**. Demo-only: **`POST /api/v1/auth/email-otp/*`**.
@@ -116,7 +117,7 @@ docker compose up --build
 | **mysql** | **localhost:3307** → container `3306` | Change if **3307** is taken. API inside Compose still uses `mysql:3306`. |
 | **redis** | **localhost:6379** | Reserved for future use. |
 
-CORS in Compose allows **`http://localhost:8080`** (Docker UI) and **`http://localhost:5173`** (optional local `npm run dev`).
+CORS in Compose allows **`http://localhost:8080`** (Docker UI) and **`http://localhost:5173`** (optional local `npm run dev`). **SignalR** (`/hubs/market`) uses WebSockets; ensure any **reverse proxy** in front of the API allows **upgrade** and long-lived connections for that path.
 
 To use a different API port or hostname, rebuild **`web`** with another build-arg, e.g. in `docker-compose.yml`: `VITE_API_BASE_URL: http://localhost:YOUR_PORT`.
 
