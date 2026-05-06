@@ -32,7 +32,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
@@ -166,6 +166,18 @@ function historicalRangeQueryParams(preset: ChartRangePreset): { from?: string; 
 type ChartGraphType = 'line' | 'bar'
 
 type MainTab = 'browse' | 'favorites'
+
+/** Deep-link: <code>?tab=favorites</code>, <code>?tab=fav</code>, <code>?fav=1</code>, or <code>?fav=true</code>. */
+function favoritesTabFromSearchParams(params: URLSearchParams): boolean {
+  const tab = params.get('tab')
+  const fav = params.get('fav')
+  return (
+    tab === 'favorites' ||
+    tab === 'fav' ||
+    fav === '1' ||
+    (fav != null && fav.toLowerCase() === 'true')
+  )
+}
 
 function favoriteRowKey(r: KiteInstrumentRow): string {
   return `${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`
@@ -1004,6 +1016,7 @@ function InstrumentChartCard({
 const EMPTY_INSTRUMENTS: KiteInstrumentRow[] = []
 
 export function KiteInstrumentsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [favorites, setFavorites] = useState<KiteInstrumentRow[]>([])
   const [favoritesError, setFavoritesError] = useState<string | null>(null)
 
@@ -1039,7 +1052,39 @@ export function KiteInstrumentsPage() {
     [favorites, loadFavorites],
   )
 
-  const [mainTab, setMainTab] = useState<MainTab>('browse')
+  const [mainTab, setMainTab] = useState<MainTab>(() =>
+    typeof window !== 'undefined' && favoritesTabFromSearchParams(new URLSearchParams(window.location.search))
+      ? 'favorites'
+      : 'browse',
+  )
+
+  useEffect(() => {
+    setMainTab(favoritesTabFromSearchParams(searchParams) ? 'favorites' : 'browse')
+  }, [searchParams])
+
+  const onMainTabSelect = useCallback(
+    (k: string | null) => {
+      if (!k) return
+      const next = k as MainTab
+      setMainTab(next)
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev)
+          if (next === 'favorites') {
+            p.set('tab', 'favorites')
+            p.delete('fav')
+          } else {
+            p.delete('tab')
+            p.delete('fav')
+          }
+          return p
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
   const [provider, setProvider] = useState<string | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const [instruments, setInstruments] = useState<InstrumentsResponse | null>(null)
@@ -1152,7 +1197,7 @@ export function KiteInstrumentsPage() {
               variant="tabs"
               className="mt-3 small"
               activeKey={mainTab}
-              onSelect={(k) => k && setMainTab(k as MainTab)}
+              onSelect={(k) => k && onMainTabSelect(k)}
             >
               <Nav.Item>
                 <Nav.Link eventKey="browse">Browse</Nav.Link>

@@ -54,6 +54,18 @@ export default function App() {
         }
       />
       <Route
+        path="/instruments/fav"
+        element={
+          <Protected>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <Navigate to="/instruments?tab=favorites" replace />
+              </RequiresBroker>
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
         path="/instruments"
         element={
           <Protected>

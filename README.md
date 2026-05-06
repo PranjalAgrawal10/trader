@@ -175,6 +175,8 @@ The API exchanges the `request_token` at Kite’s token endpoint and stores **en
 
 ### Web (`frontend/`)
 
+SPA paths: **`/instruments?tab=favorites`** (or **`?tab=fav`**, **`?fav=1`**, **`?fav=true`**) opens the **All favorites** tab; **`/instruments/fav`** redirects there (same auth gates as **`/instruments`**). Switching tabs updates the query with **`replace`** so links stay shareable.
+
 | File | Purpose |
 |------|---------|
 | `.env.development` | `VITE_API_BASE_URL`, optional `VITE_DEV_SERVER_PORT`, `VITE_API_PROXY_TARGET` |
