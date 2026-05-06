@@ -409,6 +409,38 @@ const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
 type ChartPoint = { idx: number; t: string; close: number; ohlc: string }
 
+type CandleRangeMeta = { interval: string; from: string; to: string }
+
+function HistoricalRangeCaption({
+  candleInterval,
+  fromIso,
+  toIso,
+  compact,
+}: {
+  candleInterval: string
+  fromIso: string
+  toIso: string
+  compact?: boolean
+}) {
+  const from = new Date(fromIso).toLocaleString()
+  const to = new Date(toIso).toLocaleString()
+  return (
+    <div className={compact ? 'small text-secondary mb-2' : 'small text-secondary mb-3'}>
+      <div className={compact ? 'mb-0' : 'mb-1'}>
+        <strong className="text-body-secondary">From</strong>{' '}
+        <span className="font-monospace">{from}</span>
+      </div>
+      <div className={compact ? 'mb-0' : 'mb-1'}>
+        <strong className="text-body-secondary">To</strong>{' '}
+        <span className="font-monospace">{to}</span>
+      </div>
+      <div className="text-muted" style={{ fontSize: compact ? '0.72rem' : '0.78rem' }}>
+        Candle interval: {candleInterval}
+      </div>
+    </div>
+  )
+}
+
 function ChartTooltipContent({
   active,
   payload,
@@ -512,11 +544,13 @@ function CompactPriceChart({
   const [series, setSeries] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
 
   useEffect(() => {
     const ac = new AbortController()
     setLoading(true)
     setError(null)
+    setCandleRange(null)
 
     ;(async () => {
       try {
@@ -531,9 +565,11 @@ function CompactPriceChart({
           ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
         }))
         setSeries(pts)
+        setCandleRange({ interval: data.interval, from: data.from, to: data.to })
       } catch (err: unknown) {
         if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
         setSeries([])
+        setCandleRange(null)
         setError(problemDetail(err))
       } finally {
         if (!ac.signal.aborted) setLoading(false)
@@ -544,38 +580,48 @@ function CompactPriceChart({
   }, [row.instrumentToken, interval])
 
   return (
-    <div style={{ height: heightPx }}>
-      {error ? (
-        <Alert variant="danger" className="py-1 small mb-0">
-          {error}
-        </Alert>
-      ) : loading ? (
-        <div className="d-flex align-items-center justify-content-center gap-2 text-secondary small h-100">
-          <Spinner animation="border" size="sm" role="status" />
-          Loading…
-        </div>
-      ) : series.length === 0 ? (
-        <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
-      ) : (
-        <ResponsiveContainer width="100%" height="100%">
-          {graphType === 'line' ? (
-            <LineChart data={series} margin={CHART_MARGINS}>
-              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-              <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
-              <Tooltip content={ChartTooltipContent} />
-              <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
-            </LineChart>
-          ) : (
-            <BarChart data={series} margin={CHART_MARGINS}>
-              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-              <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
-              <Tooltip content={ChartTooltipContent} />
-              <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} />
-            </BarChart>
-          )}
-        </ResponsiveContainer>
-      )}
-    </div>
+    <>
+      {candleRange && !loading && !error ? (
+        <HistoricalRangeCaption
+          compact
+          candleInterval={candleRange.interval}
+          fromIso={candleRange.from}
+          toIso={candleRange.to}
+        />
+      ) : null}
+      <div style={{ height: heightPx }}>
+        {error ? (
+          <Alert variant="danger" className="py-1 small mb-0">
+            {error}
+          </Alert>
+        ) : loading ? (
+          <div className="d-flex align-items-center justify-content-center gap-2 text-secondary small h-100">
+            <Spinner animation="border" size="sm" role="status" />
+            Loading…
+          </div>
+        ) : series.length === 0 ? (
+          <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%">
+            {graphType === 'line' ? (
+              <LineChart data={series} margin={CHART_MARGINS}>
+                <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+                <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
+                <Tooltip content={ChartTooltipContent} />
+                <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} />
+              </LineChart>
+            ) : (
+              <BarChart data={series} margin={CHART_MARGINS}>
+                <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+                <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
+                <Tooltip content={ChartTooltipContent} />
+                <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} />
+              </BarChart>
+            )}
+          </ResponsiveContainer>
+        )}
+      </div>
+    </>
   )
 }
 
@@ -659,12 +705,12 @@ function InstrumentChartCard({
   const [series, setSeries] = useState<ChartPoint[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [rangeHint, setRangeHint] = useState<string | null>(null)
+  const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
 
   useEffect(() => {
     if (!selection) {
       setSeries([])
-      setRangeHint(null)
+      setCandleRange(null)
       setError(null)
       setLoading(false)
       return
@@ -687,13 +733,11 @@ function InstrumentChartCard({
           ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
         }))
         setSeries(pts)
-        setRangeHint(
-          `${data.interval} · ${new Date(data.from).toLocaleString()} → ${new Date(data.to).toLocaleString()}`,
-        )
+        setCandleRange({ interval: data.interval, from: data.from, to: data.to })
       } catch (err: unknown) {
         if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
         setSeries([])
-        setRangeHint(null)
+        setCandleRange(null)
         setError(problemDetail(err))
       } finally {
         if (!ac.signal.aborted) setLoading(false)
@@ -729,8 +773,14 @@ function InstrumentChartCard({
                   {isFavorite ? '★ Favorited' : '☆ Add to fav'}
                 </Button>
               ) : null}
-              {rangeHint ? <span className="d-block w-100 mt-1">{rangeHint}</span> : null}
             </p>
+            {candleRange && !loading && !error ? (
+              <HistoricalRangeCaption
+                candleInterval={candleRange.interval}
+                fromIso={candleRange.from}
+                toIso={candleRange.to}
+              />
+            ) : null}
             <ChartSettingsToolbar
               idPrefix="browse-detail"
               interval={interval}
