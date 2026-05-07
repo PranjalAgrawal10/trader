@@ -24,7 +24,7 @@ export type ChartPointOhlc = {
   ohlc: string
 }
 
-type ChartGraph = 'line' | 'bar' | 'candlestick' | 'trend'
+type ChartGraph = 'line' | 'bar' | 'candlestick'
 
 function formatOhlc(o: number, h: number, l: number, c: number, v: number): string {
   return `O ${o}  H ${h}  L ${l}  C ${c}  V ${v}`

@@ -40,6 +40,8 @@ export type MaLineVisibility = {
   showEma21: boolean
   showCustomEma: boolean
   showSupportResistance: boolean
+  /** Least-squares regression on close prices over visible bars (candlestick chart only). */
+  showLinearCloseTrend: boolean
 }
 
 export const DEFAULT_MA_LINE_VISIBILITY: MaLineVisibility = {
@@ -48,6 +50,7 @@ export const DEFAULT_MA_LINE_VISIBILITY: MaLineVisibility = {
   showEma21: true,
   showCustomEma: false,
   showSupportResistance: true,
+  showLinearCloseTrend: false,
 }
 
 export const CUSTOM_EMA_PERIOD_MIN = 2

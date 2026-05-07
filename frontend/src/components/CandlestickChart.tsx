@@ -1,4 +1,6 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { ChartPointWithMaAndTrend } from '../utils/closeLinearTrend'
+import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import type { ChartPointWithMa, MaLineVisibility } from '../utils/movingAverages'
 import {
@@ -27,6 +29,23 @@ type MaKey = keyof Pick<
   ChartPointWithMa,
   'sma20' | 'ema9' | 'ema21' | 'emaCustom' | 'srSupport' | 'srResistance'
 >
+
+function buildTrendPath(points: ChartPointWithMaAndTrend[], slotW: number, yPrice: (p: number) => number): string {
+  let d = ''
+  let penUp = true
+  for (let i = 0; i < points.length; i++) {
+    const v = points[i].trendLine
+    if (v == null || !Number.isFinite(v)) {
+      penUp = true
+      continue
+    }
+    const cx = PAD.left + i * slotW + slotW / 2
+    const cy = yPrice(v)
+    d += penUp ? `M ${cx} ${cy}` : ` L ${cx} ${cy}`
+    penUp = false
+  }
+  return d
+}
 
 function buildMaPath(key: MaKey, data: ChartPointWithMa[], slotW: number, yPrice: (p: number) => number): string {
   let d = ''
@@ -120,6 +139,11 @@ export function CandlestickChart({
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
+  const trendSeries = useMemo(
+    () => (maLineVisibility.showLinearCloseTrend ? attachLinearTrendToChartPoints(data) : null),
+    [data, maLineVisibility.showLinearCloseTrend],
+  )
+
   const layout = useMemo(() => {
     if (data.length === 0 || w < 40 || h < 40) return null
 
@@ -132,6 +156,15 @@ export function CandlestickChart({
     for (const c of data) {
       min = Math.min(min, c.low)
       max = Math.max(max, c.high)
+    }
+    if (maLineVisibility.showLinearCloseTrend && trendSeries && trendSeries.length > 0) {
+      for (const c of trendSeries) {
+        const t = c.trendLine
+        if (t != null && Number.isFinite(t)) {
+          min = Math.min(min, t)
+          max = Math.max(max, t)
+        }
+      }
     }
     for (const c of data) {
       if (maLineVisibility.showSma20) {
@@ -194,6 +227,11 @@ export function CandlestickChart({
     const pathSrSupport = buildMaPath('srSupport', data, slotW, yPrice)
     const pathSrResistance = buildMaPath('srResistance', data, slotW, yPrice)
 
+    const pathTrend =
+      maLineVisibility.showLinearCloseTrend && trendSeries && trendSeries.length > 0
+        ? buildTrendPath(trendSeries, slotW, yPrice)
+        : ''
+
     const shortDay = isIntradayRange(data)
     const targetXTicks = Math.min(6, Math.max(2, Math.floor(plotW / 72)))
     const xTickIndices = computeXTickIndices(n, targetXTicks)
@@ -220,10 +258,11 @@ export function CandlestickChart({
       pathEmaCustom,
       pathSrSupport,
       pathSrResistance,
+      pathTrend,
       xTicks,
       plotBottomY,
     }
-  }, [data, w, h, maLineVisibility, customEmaPeriod])
+  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod])
 
   const yTicks = useMemo(() => {
     if (!layout) return []
@@ -243,7 +282,7 @@ export function CandlestickChart({
   return (
     <div ref={ref} className="w-100 h-100 position-relative">
       {layout ? (
-        <svg width={w} height={h} className="d-block" role="img" aria-label="OHLC candlestick chart with MA and EMA">
+        <svg width={w} height={h} className="d-block" role="img" aria-label="OHLC candlestick chart with MA, EMA, and optional linear close trend">
           {yTicks.map((tp) => (
             <g key={tp}>
               <line
@@ -360,6 +399,18 @@ export function CandlestickChart({
               fill="none"
               stroke={MA_LINE_COLORS.emaCustom}
               strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ pointerEvents: 'none' }}
+            />
+          ) : null}
+          {layout.pathTrend && maLineVisibility.showLinearCloseTrend ? (
+            <path
+              d={layout.pathTrend}
+              fill="none"
+              stroke={LINEAR_CLOSE_TREND_COLOR}
+              strokeWidth={2}
+              strokeDasharray="6 4"
               strokeLinecap="round"
               strokeLinejoin="round"
               style={{ pointerEvents: 'none' }}
@@ -484,6 +535,11 @@ export function CandlestickChart({
                     Res{SR_SWING_PERIOD} {p.srResistance.toFixed(4)}
                   </div>
                 ) : null}
+                {maLineVisibility.showLinearCloseTrend && trendSeries && trendSeries[hover.idx]?.trendLine != null ? (
+                  <div className="font-monospace mt-1" style={{ color: LINEAR_CLOSE_TREND_COLOR }}>
+                    Trend LR {Number(trendSeries[hover.idx].trendLine).toFixed(4)}
+                  </div>
+                ) : null}
               </>
             )
           })()}
@@ -496,6 +552,8 @@ export function CandlestickChart({
         >
           {(() => {
             const items: { key: string; label: string; color: string }[] = []
+            if (maLineVisibility.showLinearCloseTrend)
+              items.push({ key: 'tlr', label: 'Trend LR', color: LINEAR_CLOSE_TREND_COLOR })
             if (maLineVisibility.showSma20)
               items.push({ key: 'sma', label: `SMA${MA_SMA_PERIOD}`, color: MA_LINE_COLORS.sma20 })
             if (maLineVisibility.showEma9)
