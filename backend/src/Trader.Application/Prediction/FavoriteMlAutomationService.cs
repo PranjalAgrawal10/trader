@@ -64,22 +64,22 @@ public sealed class FavoriteMlAutomationService
         foreach (var userId in userIds)
         {
             ct.ThrowIfCancellationRequested();
+            var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
+            if (user is null)
+                continue;
+
             try
             {
-                await ProcessUserPredictionsAsync(userId, ct).ConfigureAwait(false);
+                await ProcessUserPredictionsAsync(user, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Favorite ML automation skipped for user {UserId}", userId);
             }
-        }
 
-        foreach (var userId in userIds)
-        {
-            ct.ThrowIfCancellationRequested();
             try
             {
-                await MaybeSendEodReportAsync(userId, ct).ConfigureAwait(false);
+                await MaybeSendEodReportAsync(user, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -88,10 +88,10 @@ public sealed class FavoriteMlAutomationService
         }
     }
 
-    private async Task ProcessUserPredictionsAsync(Guid userId, CancellationToken ct)
+    private async Task ProcessUserPredictionsAsync(User user, CancellationToken ct)
     {
-        var acct = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
-        if (acct is null || !acct.FavoriteMlAutomationEnabled)
+        var userId = user.Id;
+        if (!user.FavoriteMlAutomationEnabled)
             return;
 
         var interval = await ResolveIntervalAsync(userId, ct).ConfigureAwait(false);
@@ -178,13 +178,13 @@ public sealed class FavoriteMlAutomationService
         return raw;
     }
 
-    private async Task MaybeSendEodReportAsync(Guid userId, CancellationToken ct)
+    private async Task MaybeSendEodReportAsync(User user, CancellationToken ct)
     {
         if (!_smtp.IsEnabled)
             return;
 
-        var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
-        if (user is null || string.IsNullOrWhiteSpace(user.Email) || !user.FavoriteMlAutomationEnabled)
+        var userId = user.Id;
+        if (string.IsNullOrWhiteSpace(user.Email) || !user.FavoriteMlAutomationEnabled)
             return;
 
         var tz = ResolveReportTimeZone(_opts.ReportTimeZoneId);
