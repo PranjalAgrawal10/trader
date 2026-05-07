@@ -66,23 +66,141 @@ public sealed class FavoriteMlAutomationService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Sends a one-off email with one outcome pie PNG per registered engine (automation rows only for the local calendar day)
+    /// plus one combined-engine pie and a CSV. Does not gate on <see cref="User.FavoriteMlAutomationEnabled"/> or log to <c>MlFavoriteEodReportsSent</c>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">SMTP off, missing email, or no automation rows for the day.</exception>
+    public async Task<FavoriteMlManualAutomationEmailReportResult> SendManualAutomationEmailReportAsync(
+        Guid userId,
+        DateOnly? reportLocalDayOptional,
+        CancellationToken ct)
+    {
+        if (!_smtp.IsEnabled)
+        {
+            throw new InvalidOperationException(
+                "Server email is not enabled. Set SMTP options (Smtp:IsEnabled and host/credentials).");
+        }
+
+        var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
+        if (user is null)
+            throw new InvalidOperationException("Account not found.");
+
+        var recipient = user.Email?.Trim();
+        if (string.IsNullOrWhiteSpace(recipient))
+        {
+            throw new InvalidOperationException(
+                "Your account has no primary email. Add one under Profile before sending a report.");
+        }
+
+        var tz = ResolveReportTimeZone(_opts.ReportTimeZoneId);
+        var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+        var todayLocal = DateOnly.FromDateTime(nowLocal.Date);
+        var reportDay = reportLocalDayOptional ?? todayLocal;
+
+        var localMidnight = reportDay.ToDateTime(TimeOnly.MinValue);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(
+            DateTime.SpecifyKind(localMidnight, DateTimeKind.Unspecified),
+            tz);
+        var startDto = new DateTimeOffset(DateTime.SpecifyKind(startUtc, DateTimeKind.Utc));
+        var endDto = startDto.AddDays(1);
+
+        var legacyAll = await _predictions.ListPredictedBetweenAsync(userId, startDto, endDto, ct).ConfigureAwait(false);
+        var gbmAll = await _lightGbmPredictions.ListPredictedBetweenAsync(userId, startDto, endDto, ct)
+            .ConfigureAwait(false);
+
+        var legacyFiltered = legacyAll.Where(IsAutomationSource).ToList();
+        var gbmFiltered = gbmAll.Where(IsAutomationSource).ToList();
+        var rows = CombineReportRows(legacyFiltered, gbmFiltered);
+        if (rows.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"No automation-source predictions stored for local date {reportDay:yyyy-MM-dd} ({tz.Id}). Pick another calendar day or run automation first.");
+        }
+
+        var favs = await _favorites.ListByUserAsync(userId, ct).ConfigureAwait(false);
+        var symbolByToken = favs.ToDictionary(
+            x => x.InstrumentToken.Trim(),
+            x => (x.Tradingsymbol, x.Exchange),
+            StringComparer.Ordinal);
+
+        var correctAll = rows.Count(r => string.Equals(r.Outcome, "correct", StringComparison.OrdinalIgnoreCase));
+        var wrongAll = rows.Count(r => string.Equals(r.Outcome, "wrong", StringComparison.OrdinalIgnoreCase));
+        var pendingAll = rows.Count(r => string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase));
+
+        var ymd = reportDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var engineIdsForPies = OrderedRegistryEngineIdsForManualReport(rows);
+        var attachments = new List<EmailAttachment>
+        {
+            new(
+                $"ml-automation-all-engines-{ymd}.png",
+                "image/png",
+                _pieRenderer.Render(correctAll, wrongAll, pendingAll, $"Automation outcomes — all engines ({ymd})")),
+        };
+
+        foreach (var engineId in engineIdsForPies)
+        {
+            var scoped = rows.Where(r => EffectiveEngineKey(r).Equals(engineId, StringComparison.OrdinalIgnoreCase)).ToList();
+            var c = scoped.Count(r => string.Equals(r.Outcome, "correct", StringComparison.OrdinalIgnoreCase));
+            var w = scoped.Count(r => string.Equals(r.Outcome, "wrong", StringComparison.OrdinalIgnoreCase));
+            var p = scoped.Count(r => string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase));
+            attachments.Add(
+                new EmailAttachment(
+                    $"ml-auto-{SanitizeFilenameToken(engineId)}-{ymd}.png",
+                    "image/png",
+                    _pieRenderer.Render(c, w, p, $"Automation outcomes — {engineId} ({ymd})")));
+        }
+
+        var csvBody = BuildCsv(rows, symbolByToken);
+        attachments.Add(
+            new EmailAttachment($"ml-automation-{ymd}.csv", "text/csv", Encoding.UTF8.GetBytes(csvBody)));
+
+        var subject =
+            $"Trader ML automation — manual report {ymd} (rows={rows.Count}; SMTP; all engines)";
+        var bodyLines = new[]
+        {
+            $"Manual automation report for local calendar day {ymd} ({tz.Id}).",
+            $"Rows (Source=automation only): {rows.Count} (correct {correctAll}, wrong {wrongAll}, pending {pendingAll}).",
+            "Attachments: one PNG for all engines combined, one PNG per registered engine (may show empty slices), and CSV.",
+            "This send is not throttled against the nightly EOD job.",
+        };
+        await _email
+            .SendPlainTextAsync(recipient, subject, string.Join("\r\n", bodyLines), attachments, ct)
+            .ConfigureAwait(false);
+
+        var pieCharts = 1 + engineIdsForPies.Count;
+        _logger.LogInformation(
+            "Manual automation email report sent to user {UserId} for local {Day}; rows={Count}; pieCharts={Pies}; totalAttachments={Attachments}",
+            userId,
+            ymd,
+            rows.Count,
+            pieCharts,
+            attachments.Count);
+
+        return new FavoriteMlManualAutomationEmailReportResult(rows.Count, ymd, pieCharts, attachments.Count);
+    }
+
     public async Task RunCycleAsync(CancellationToken ct)
     {
+        var pausePredictions =
+            FavoriteMlAutomationQuietHours.IsAutomationPaused(_opts, DateTime.UtcNow);
+
         var userIds = await _favorites.ListDistinctUserIdsWithFavoritesAsync(ct).ConfigureAwait(false);
-        foreach (var userId in userIds)
+        foreach (var uid in userIds)
         {
             ct.ThrowIfCancellationRequested();
-            var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
+            var user = await _users.GetByIdAsync(uid, ct).ConfigureAwait(false);
             if (user is null)
                 continue;
 
             try
             {
-                await ProcessUserPredictionsAsync(user, ct).ConfigureAwait(false);
+                if (!pausePredictions)
+                    await ProcessUserPredictionsAsync(user, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Favorite ML automation skipped for user {UserId}", userId);
+                _logger.LogDebug(ex, "Favorite ML automation skipped for user {UserId}", uid);
             }
 
             try
@@ -91,9 +209,52 @@ public sealed class FavoriteMlAutomationService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "EOD ML report failed for user {UserId}", userId);
+                _logger.LogWarning(ex, "EOD ML report failed for user {UserId}", uid);
             }
         }
+    }
+
+    /// <summary>Registry order then any extra <see cref="MlEodReportRow.EngineModelId"/> / ModelId keys present in automation rows.</summary>
+    private IReadOnlyList<string> OrderedRegistryEngineIdsForManualReport(IReadOnlyList<MlEodReportRow> rowsFromDay)
+    {
+        var fromRegistry = _engineRegistry
+            .ListModels()
+            .Select(static m => m.Id.Trim())
+            .Where(static s => s.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var seen = new HashSet<string>(fromRegistry, StringComparer.OrdinalIgnoreCase);
+        var extras = new List<string>();
+        foreach (var r in rowsFromDay)
+        {
+            var k = EffectiveEngineKey(r);
+            if (k.Length > 0 && seen.Add(k))
+                extras.Add(k);
+        }
+
+        extras.Sort(StringComparer.OrdinalIgnoreCase);
+        return fromRegistry.Concat(extras).ToList();
+    }
+
+    private static string EffectiveEngineKey(MlEodReportRow r) =>
+        (string.IsNullOrWhiteSpace(r.EngineModelId) ? r.ModelId : r.EngineModelId).Trim();
+
+    private static bool IsAutomationSource(MlPriceDirectionPrediction entity) =>
+        string.Equals(entity.Source?.Trim(), PriceDirectionPredictionService.SourceAutomation, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAutomationSource(MlLightGbmTripleBarrierPrediction entity) =>
+        string.Equals(entity.Source?.Trim(), PriceDirectionPredictionService.SourceAutomation, StringComparison.OrdinalIgnoreCase);
+
+    private static string SanitizeFilenameToken(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "engine";
+
+        var sb = new StringBuilder(raw.Length);
+        foreach (var c in raw.Trim())
+            sb.Append(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_');
+
+        return sb.Length > 0 ? sb.ToString() : "engine";
     }
 
     private async Task ProcessUserPredictionsAsync(User user, CancellationToken ct)
@@ -537,3 +698,9 @@ public sealed class FavoriteMlAutomationService
         }
     }
 }
+
+public sealed record FavoriteMlManualAutomationEmailReportResult(
+    int RowCount,
+    string LocalCalendarDateIso,
+    int PieChartsAttached,
+    int TotalAttachmentsSent);

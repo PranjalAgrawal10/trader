@@ -47,4 +47,22 @@ public sealed class FavoriteMlAutomationOptions
 
     /// <summary>Max pending rows to scan for resolution per user per tick.</summary>
     public int MaxPendingResolutionBatch { get; set; } = 2_000;
+
+    /// <summary>
+    /// When true, skips prediction + pending resolution during the daily window below (same TZ as reports; default IST via <see cref="ReportTimeZoneId"/>).
+    /// Nightly EOD email still runs on its schedule.
+    /// </summary>
+    public bool QuietHoursEnabled { get; set; } = true;
+
+    /// <summary>Local hour when automation stops (inclusive).</summary>
+    public int QuietHoursStartLocalHour { get; set; } = 23;
+
+    /// <summary>Local minute when automation stops (inclusive); default <c>20</c> → 11:20 PM IST when TZ is Kolkata.</summary>
+    public int QuietHoursStartLocalMinute { get; set; } = 20;
+
+    /// <summary>Local hour when automation resumes (exclusive).</summary>
+    public int QuietHoursEndLocalHour { get; set; } = 5;
+
+    /// <summary>Local minute when automation resumes (exclusive); → 5:00 AM local.</summary>
+    public int QuietHoursEndLocalMinute { get; set; } = 0;
 }

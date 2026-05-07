@@ -5,7 +5,7 @@ namespace Trader.Infrastructure.Reporting;
 
 public sealed class SkiaMlOutcomePieChartPngRenderer : IMlOutcomePieChartPngRenderer
 {
-    public byte[] Render(int correct, int wrong, int pending)
+    public byte[] Render(int correct, int wrong, int pending, string? chartTitle = null)
     {
         const int w = 520;
         const int h = 420;
@@ -21,7 +21,10 @@ public sealed class SkiaMlOutcomePieChartPngRenderer : IMlOutcomePieChartPngRend
             TextSize = 22f,
             Typeface = SKTypeface.FromFamilyName("Arial"),
         };
-        canvas.DrawText("ML outcomes (favorites)", 24f, 36f, titlePaint);
+        var title = string.IsNullOrWhiteSpace(chartTitle) ? "ML outcomes (favorites)" : chartTitle.Trim();
+        if (title.Length > 96)
+            title = title[..96] + "…";
+        canvas.DrawText(title, 24f, 36f, titlePaint);
 
         if (total == 0)
         {

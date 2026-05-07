@@ -15,13 +15,16 @@ namespace Trader.Api.Controllers.V1;
 public sealed class PredictionsController : ControllerBase
 {
     private readonly IPriceDirectionPredictionService _predictions;
+    private readonly FavoriteMlAutomationService _favoriteMlAutomation;
     private readonly IPriceDirectionPredictionEngineRegistry _engineRegistry;
 
     public PredictionsController(
         IPriceDirectionPredictionService predictions,
+        FavoriteMlAutomationService favoriteMlAutomation,
         IPriceDirectionPredictionEngineRegistry engineRegistry)
     {
         _predictions = predictions;
+        _favoriteMlAutomation = favoriteMlAutomation;
         _engineRegistry = engineRegistry;
     }
 
@@ -190,6 +193,29 @@ public sealed class PredictionsController : ControllerBase
                 .ListAutomationRecentAsync(User.GetUserId(), take ?? 100, ct)
                 .ConfigureAwait(false);
             return Ok(list);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>
+    /// Send a manual email summarizing automation-sourced predictions for one local calendar day (same TZ as server
+    /// <c>FavoriteMlAutomation:ReportTimeZoneId</c>): combined pie, one pie per engine, and CSV. Requires SMTP plus a saved profile email.
+    /// </summary>
+    [HttpPost("price-direction/automation-report-email")]
+    [ProducesResponseType(typeof(FavoriteMlManualAutomationEmailReportResult), StatusCodes.Status200OK)]
+    public async Task<ActionResult<FavoriteMlManualAutomationEmailReportResult>> PostAutomationReportEmail(
+        [FromQuery(Name = "date")] DateOnly? reportLocalDate,
+        CancellationToken ct)
+    {
+        try
+        {
+            var result = await _favoriteMlAutomation
+                .SendManualAutomationEmailReportAsync(User.GetUserId(), reportLocalDate, ct)
+                .ConfigureAwait(false);
+            return Ok(result);
         }
         catch (InvalidOperationException ex)
         {

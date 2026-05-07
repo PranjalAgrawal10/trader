@@ -210,6 +210,14 @@ interface MlAutomationRecentRow {
   engineModelId: string
 }
 
+/** POST /predictions/price-direction/automation-report-email */
+interface ManualAutomationEmailReportResponse {
+  rowCount: number
+  localCalendarDateIso: string
+  pieChartsAttached: number
+  totalAttachmentsSent: number
+}
+
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
 type ChartInterval = (typeof CHART_INTERVALS)[number]
 
@@ -3108,6 +3116,9 @@ export function KiteInstrumentsPage() {
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
   const [automationModelsLoading, setAutomationModelsLoading] = useState(false)
+  const [automationReportEmailSending, setAutomationReportEmailSending] = useState(false)
+  const [automationReportEmailSuccess, setAutomationReportEmailSuccess] = useState<string | null>(null)
+  const [automationReportEmailError, setAutomationReportEmailError] = useState<string | null>(null)
   const automationRecentSorted = useMemo(
     () => sortByPredictedAtNewestFirst(automationRecent),
     [automationRecent],
@@ -3462,6 +3473,7 @@ export function KiteInstrumentsPage() {
                       .finally(() => setMlAutomationSaving(false))
                   }}
                 />
+                <div className="d-flex flex-wrap gap-2 align-items-center">
                 <Button
                   type="button"
                   variant="outline-secondary"
@@ -3474,6 +3486,32 @@ export function KiteInstrumentsPage() {
                 >
                   {automationRecentLoading ? 'Loading…' : 'Refresh list'}
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline-primary"
+                  size="sm"
+                  disabled={automationReportEmailSending || !isZerodha}
+                  title="Emails automation rows for today's calendar date in the server's FavoriteMlAutomation report timezone (Asia/Kolkata by default): combined pie + one pie per engine + CSV. Requires SMTP and a saved profile email."
+                  onClick={() => {
+                    setAutomationReportEmailError(null)
+                    setAutomationReportEmailSuccess(null)
+                    setAutomationReportEmailSending(true)
+                    void api
+                      .post<ManualAutomationEmailReportResponse>(
+                        '/predictions/price-direction/automation-report-email',
+                      )
+                      .then(({ data }) => {
+                        setAutomationReportEmailSuccess(
+                          `Email sent: ${data.rowCount} automation row${data.rowCount === 1 ? '' : 's'} for ${data.localCalendarDateIso} (${data.pieChartsAttached} pie chart PNGs + CSV).`,
+                        )
+                      })
+                      .catch((err) => setAutomationReportEmailError(problemDetail(err)))
+                      .finally(() => setAutomationReportEmailSending(false))
+                  }}
+                >
+                  {automationReportEmailSending ? 'Sending…' : 'Email automation report'}
+                </Button>
+                </div>
               </div>
               <p className="text-secondary small mb-2">
                 When enabled, the API runs scheduled next-bar predictions for each favorite using <strong>every</strong>{' '}
@@ -3488,6 +3526,26 @@ export function KiteInstrumentsPage() {
               {mlAutomationError ? (
                 <Alert variant="warning" className="py-2 small mb-2">
                   {mlAutomationError}
+                </Alert>
+              ) : null}
+              {automationReportEmailSuccess ? (
+                <Alert
+                  variant="success"
+                  className="py-2 small mb-2"
+                  dismissible
+                  onClose={() => setAutomationReportEmailSuccess(null)}
+                >
+                  {automationReportEmailSuccess}
+                </Alert>
+              ) : null}
+              {automationReportEmailError ? (
+                <Alert
+                  variant="warning"
+                  className="py-2 small mb-2"
+                  dismissible
+                  onClose={() => setAutomationReportEmailError(null)}
+                >
+                  {automationReportEmailError}
                 </Alert>
               ) : null}
               <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
