@@ -67,15 +67,19 @@ public sealed class FavoriteMlAutomationService
     }
 
     /// <summary>
-    /// Sends a one-off email with one outcome pie PNG per registered engine (automation rows only for the local calendar day)
-    /// plus one combined-engine pie and a CSV. Does not gate on <see cref="User.FavoriteMlAutomationEnabled"/> or log to <c>MlFavoriteEodReportsSent</c>.
+    /// Sends a one-off email with outcome pies (combined + per engine) and CSV for <strong>Source=automation</strong> rows
+    /// whose <c>PredictedAtUtc</c> is in [<paramref name="rangeFromUtcInclusive"/>, <paramref name="rangeToUtcExclusive"/>).
+    /// When both UTC bounds are <c>null</c>, uses today's full calendar day in <see cref="FavoriteMlAutomationOptions.ReportTimeZoneId"/>.
     /// </summary>
-    /// <exception cref="InvalidOperationException">SMTP off, missing email, or no automation rows for the day.</exception>
+    /// <exception cref="InvalidOperationException">SMTP off, missing email, invalid range, or no matching rows.</exception>
     public async Task<FavoriteMlManualAutomationEmailReportResult> SendManualAutomationEmailReportAsync(
         Guid userId,
-        DateOnly? reportLocalDayOptional,
+        DateTimeOffset? rangeFromUtcInclusive,
+        DateTimeOffset? rangeToUtcExclusive,
         CancellationToken ct)
     {
+        const int maxRangeDays = 93;
+
         if (!_smtp.IsEnabled)
         {
             throw new InvalidOperationException(
@@ -94,20 +98,63 @@ public sealed class FavoriteMlAutomationService
         }
 
         var tz = ResolveReportTimeZone(_opts.ReportTimeZoneId);
-        var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
-        var todayLocal = DateOnly.FromDateTime(nowLocal.Date);
-        var reportDay = reportLocalDayOptional ?? todayLocal;
+        DateTimeOffset startDto;
+        DateTimeOffset endDto;
+        string reportRangeSummary;
+        string fileSuffix;
 
-        var localMidnight = reportDay.ToDateTime(TimeOnly.MinValue);
-        var startUtc = TimeZoneInfo.ConvertTimeToUtc(
-            DateTime.SpecifyKind(localMidnight, DateTimeKind.Unspecified),
-            tz);
-        var startDto = new DateTimeOffset(DateTime.SpecifyKind(startUtc, DateTimeKind.Utc));
-        var endDto = startDto.AddDays(1);
+        switch (rangeFromUtcInclusive, rangeToUtcExclusive)
+        {
+            case (null, null):
+            {
+                var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+                var reportDay = DateOnly.FromDateTime(nowLocal.Date);
+                var localMidnight = reportDay.ToDateTime(TimeOnly.MinValue);
+                var startUtcDt = TimeZoneInfo.ConvertTimeToUtc(
+                    DateTime.SpecifyKind(localMidnight, DateTimeKind.Unspecified),
+                    tz);
+                startDto = new DateTimeOffset(DateTime.SpecifyKind(startUtcDt, DateTimeKind.Utc));
+                endDto = startDto.AddDays(1);
+                reportRangeSummary = $"{reportDay:yyyy-MM-dd} (full local day {tz.Id})";
+                fileSuffix = reportDay.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+                break;
+            }
+            case ({ } fromU, { } toU):
+            {
+                var startUtc = fromU.UtcDateTime;
+                var endUtcRaw = toU.UtcDateTime;
+                if (endUtcRaw <= startUtc)
+                {
+                    throw new InvalidOperationException(
+                        "Report range invalid: end must be after start. Rows use PredictedAtUtc in [start, end).");
+                }
 
-        var legacyAll = await _predictions.ListPredictedBetweenAsync(userId, startDto, endDto, ct).ConfigureAwait(false);
-        var gbmAll = await _lightGbmPredictions.ListPredictedBetweenAsync(userId, startDto, endDto, ct)
-            .ConfigureAwait(false);
+                var spanDays = (endUtcRaw - startUtc).TotalDays;
+                if (spanDays <= 0 || spanDays > maxRangeDays)
+                {
+                    throw new InvalidOperationException(
+                        $"Report range exceeds {maxRangeDays} days between start and end, or bounds are invalid.");
+                }
+
+                startDto = new DateTimeOffset(startUtc, TimeSpan.Zero);
+                endDto = new DateTimeOffset(endUtcRaw, TimeSpan.Zero);
+
+                var sLoc = TimeZoneInfo.ConvertTimeFromUtc(startDto.UtcDateTime, tz);
+                var eLoc = TimeZoneInfo.ConvertTimeFromUtc(endDto.UtcDateTime, tz);
+                reportRangeSummary =
+                    $"{sLoc:yyyy-MM-dd HH:mm} – {eLoc:yyyy-MM-dd HH:mm} ({tz.Id}; PredictedAt in [start,end) UTC)";
+                fileSuffix = SafeManualReportRangeFileSuffix(startDto, endDto);
+                break;
+            }
+            default:
+                throw new InvalidOperationException(
+                    "Provide both fromUtc and toUtcExclusive, or omit both for today's calendar day (report timezone).");
+        }
+
+        var legacyAll =
+            await _predictions.ListPredictedBetweenAsync(userId, startDto, endDto, ct).ConfigureAwait(false);
+        var gbmAll =
+            await _lightGbmPredictions.ListPredictedBetweenAsync(userId, startDto, endDto, ct).ConfigureAwait(false);
 
         var legacyFiltered = legacyAll.Where(IsAutomationSource).ToList();
         var gbmFiltered = gbmAll.Where(IsAutomationSource).ToList();
@@ -115,7 +162,7 @@ public sealed class FavoriteMlAutomationService
         if (rows.Count == 0)
         {
             throw new InvalidOperationException(
-                $"No automation-source predictions stored for local date {reportDay:yyyy-MM-dd} ({tz.Id}). Pick another calendar day or run automation first.");
+                $"No automation-source predictions for {reportRangeSummary}. Expand the range or verify automation ran in that interval.");
         }
 
         var favs = await _favorites.ListByUserAsync(userId, ct).ConfigureAwait(false);
@@ -128,14 +175,14 @@ public sealed class FavoriteMlAutomationService
         var wrongAll = rows.Count(r => string.Equals(r.Outcome, "wrong", StringComparison.OrdinalIgnoreCase));
         var pendingAll = rows.Count(r => string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase));
 
-        var ymd = reportDay.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var pieTitleSuffix = reportRangeSummary.Length > 86 ? reportRangeSummary[..83] + "…" : reportRangeSummary;
         var engineIdsForPies = OrderedRegistryEngineIdsForManualReport(rows);
         var attachments = new List<EmailAttachment>
         {
             new(
-                $"ml-automation-all-engines-{ymd}.png",
+                $"ml-automation-all-engines-{fileSuffix}.png",
                 "image/png",
-                _pieRenderer.Render(correctAll, wrongAll, pendingAll, $"Automation outcomes — all engines ({ymd})")),
+                _pieRenderer.Render(correctAll, wrongAll, pendingAll, $"Automation — all engines ({pieTitleSuffix})")),
         };
 
         foreach (var engineId in engineIdsForPies)
@@ -146,22 +193,22 @@ public sealed class FavoriteMlAutomationService
             var p = scoped.Count(r => string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase));
             attachments.Add(
                 new EmailAttachment(
-                    $"ml-auto-{SanitizeFilenameToken(engineId)}-{ymd}.png",
+                    $"ml-auto-{SanitizeFilenameToken(engineId)}-{fileSuffix}.png",
                     "image/png",
-                    _pieRenderer.Render(c, w, p, $"Automation outcomes — {engineId} ({ymd})")));
+                    _pieRenderer.Render(c, w, p, $"Automation — {engineId} ({pieTitleSuffix})")));
         }
 
         var csvBody = BuildCsv(rows, symbolByToken);
         attachments.Add(
-            new EmailAttachment($"ml-automation-{ymd}.csv", "text/csv", Encoding.UTF8.GetBytes(csvBody)));
+            new EmailAttachment($"ml-automation-{fileSuffix}.csv", "text/csv", Encoding.UTF8.GetBytes(csvBody)));
 
         var subject =
-            $"Trader ML automation — manual report {ymd} (rows={rows.Count}; SMTP; all engines)";
+            $"Trader ML automation — manual ({reportRangeSummary}) rows={rows.Count}";
         var bodyLines = new[]
         {
-            $"Manual automation report for local calendar day {ymd} ({tz.Id}).",
+            $"Manual automation report for {reportRangeSummary}.",
             $"Rows (Source=automation only): {rows.Count} (correct {correctAll}, wrong {wrongAll}, pending {pendingAll}).",
-            "Attachments: one PNG for all engines combined, one PNG per registered engine (may show empty slices), and CSV.",
+            "Attachments: combined pie, one PNG per registered engine, and CSV.",
             "This send is not throttled against the nightly EOD job.",
         };
         await _email
@@ -170,14 +217,14 @@ public sealed class FavoriteMlAutomationService
 
         var pieCharts = 1 + engineIdsForPies.Count;
         _logger.LogInformation(
-            "Manual automation email report sent to user {UserId} for local {Day}; rows={Count}; pieCharts={Pies}; totalAttachments={Attachments}",
+            "Manual automation email sent user {UserId} range={Range}; rows={Count}; pieCharts={Pies}; attachments={Attachments}",
             userId,
-            ymd,
+            reportRangeSummary,
             rows.Count,
             pieCharts,
             attachments.Count);
 
-        return new FavoriteMlManualAutomationEmailReportResult(rows.Count, ymd, pieCharts, attachments.Count);
+        return new FavoriteMlManualAutomationEmailReportResult(rows.Count, reportRangeSummary, pieCharts, attachments.Count);
     }
 
     public async Task RunCycleAsync(CancellationToken ct)
@@ -255,6 +302,9 @@ public sealed class FavoriteMlAutomationService
 
         return sb.Length > 0 ? sb.ToString() : "engine";
     }
+
+    private static string SafeManualReportRangeFileSuffix(DateTimeOffset startUtc, DateTimeOffset endUtcExclusive) =>
+        $"{startUtc.UtcDateTime:yyyyMMddTHHmmss}Z-{endUtcExclusive.UtcDateTime:yyyyMMddTHHmmss}Z";
 
     /// <summary>Resolve pending favorite-ML rows; optionally run the per-favorite new prediction pass for automation.</summary>
     /// <remarks>
@@ -712,6 +762,6 @@ public sealed class FavoriteMlAutomationService
 
 public sealed record FavoriteMlManualAutomationEmailReportResult(
     int RowCount,
-    string LocalCalendarDateIso,
+    string ReportRangeSummary,
     int PieChartsAttached,
     int TotalAttachmentsSent);

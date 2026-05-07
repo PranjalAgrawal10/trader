@@ -201,19 +201,23 @@ public sealed class PredictionsController : ControllerBase
     }
 
     /// <summary>
-    /// Send a manual email summarizing automation-sourced predictions for one local calendar day (same TZ as server
-    /// <c>FavoriteMlAutomation:ReportTimeZoneId</c>): combined pie, one pie per engine, and CSV. Requires SMTP plus a saved profile email.
+    /// Send automation-sourced rows in a UTC half-open PredictedAt window <c>[fromUtc, toUtcExclusive)</c>; omit both for today (full local report day).
+    /// Max span 93 days. Requires SMTP and profile email.
     /// </summary>
     [HttpPost("price-direction/automation-report-email")]
     [ProducesResponseType(typeof(FavoriteMlManualAutomationEmailReportResult), StatusCodes.Status200OK)]
     public async Task<ActionResult<FavoriteMlManualAutomationEmailReportResult>> PostAutomationReportEmail(
-        [FromQuery(Name = "date")] DateOnly? reportLocalDate,
+        [FromBody] ManualAutomationReportEmailRequestDto? body,
         CancellationToken ct)
     {
         try
         {
             var result = await _favoriteMlAutomation
-                .SendManualAutomationEmailReportAsync(User.GetUserId(), reportLocalDate, ct)
+                .SendManualAutomationEmailReportAsync(
+                    User.GetUserId(),
+                    body?.FromUtc,
+                    body?.ToUtcExclusive,
+                    ct)
                 .ConfigureAwait(false);
             return Ok(result);
         }
@@ -280,3 +284,8 @@ public sealed record PriceDirectionModelItemDto(string Id, string Description);
 public sealed record ResolveMlPredictionBodyDto(
     DateTimeOffset NextBarTime,
     decimal NextClose);
+
+/// <summary>Optional body for POST …/automation-report-email. Both null = today (full local report day). Both set = UTC half-open range.</summary>
+public sealed record ManualAutomationReportEmailRequestDto(
+    DateTimeOffset? FromUtc = null,
+    DateTimeOffset? ToUtcExclusive = null);
