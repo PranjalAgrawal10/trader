@@ -611,6 +611,15 @@ function effectiveCustomEmaPeriod(visibility: MaLineVisibility, period: number):
 
 const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
+/** Top-left scroll stack when the chart panel is browser-fullscreen. */
+const CHART_FULLSCREEN_META_WRAP_CLASS = 'align-self-start text-start mb-2 flex-shrink-0 small border-bottom border-secondary pb-2'
+const CHART_FULLSCREEN_META_WRAP_STYLE: { maxHeight: string; overflowY: 'auto'; maxWidth: string; WebkitOverflowScrolling: 'touch' } = {
+  maxHeight: 'min(42vh, 28rem)',
+  overflowY: 'auto',
+  maxWidth: 'min(42rem, 100%)',
+  WebkitOverflowScrolling: 'touch',
+}
+
 /** Fewer bars visible (most recent on the right); reindexed for chart axes. */
 function ChartZoomControls({
   idPrefix,
@@ -1423,18 +1432,25 @@ function CompactPriceChart({
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
+  const compactHasChart = !loading && !error && series.length > 0
+  const compactMetaOutside = !fullscreenActive || !compactHasChart
+
   return (
     <>
-      {candleRange && !loading && !error ? (
-        <HistoricalRangeCaption
-          compact
-          candleInterval={candleRange.interval}
-          fromIso={candleRange.from}
-          toIso={candleRange.to}
-        />
+      {compactMetaOutside ? (
+        <>
+          {candleRange && !loading && !error ? (
+            <HistoricalRangeCaption
+              compact
+              candleInterval={candleRange.interval}
+              fromIso={candleRange.from}
+              toIso={candleRange.to}
+            />
+          ) : null}
+          <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact candleSeries={seriesWithCustom} />
+        </>
       ) : null}
-      <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact candleSeries={seriesWithCustom} />
-      {!loading && !error && series.length > 0 ? (
+      {compactHasChart ? (
         <div
           ref={panelRef}
           className={fullscreenActive ? 'd-flex flex-column' : undefined}
@@ -1449,6 +1465,19 @@ function CompactPriceChart({
               : undefined
           }
         >
+          {fullscreenActive ? (
+            <div className={CHART_FULLSCREEN_META_WRAP_CLASS} style={CHART_FULLSCREEN_META_WRAP_STYLE}>
+              {candleRange && !loading && !error ? (
+                <HistoricalRangeCaption
+                  compact
+                  candleInterval={candleRange.interval}
+                  fromIso={candleRange.from}
+                  toIso={candleRange.to}
+                />
+              ) : null}
+              <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact candleSeries={seriesWithCustom} />
+            </div>
+          ) : null}
           <ChartZoomControls
             idPrefix={`fav-chart-${row.instrumentToken}`}
             totalBars={series.length}
@@ -1781,6 +1810,60 @@ function InstrumentChartCard({
 
   const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
 
+  const browseHasChartData = !loading && !error && displayWithMa.length > 0
+  const browseDetailMetaInFullscreen = fullscreenActive && browseHasChartData
+
+  const browseDetailMeta =
+    selection == null ? null : (
+      <>
+        <p className="small text-secondary mb-2 d-flex flex-wrap align-items-center gap-2">
+          <span className="font-monospace">{selection.tradingsymbol}</span>
+          <span>· {selection.exchange}</span>
+          {liveLastPrice != null ? (
+            <span className="font-monospace text-success">LTP {liveLastPrice}</span>
+          ) : null}
+          {onToggleFavorite ? (
+            <Button
+              type="button"
+              variant="outline-warning"
+              size="sm"
+              className="py-0 px-2"
+              aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+              aria-pressed={isFavorite}
+              onClick={() => onToggleFavorite()}
+            >
+              {isFavorite ? '★ Favorited' : '☆ Add to fav'}
+            </Button>
+          ) : null}
+        </p>
+        {candleRange && !loading && !error ? (
+          <HistoricalRangeCaption
+            candleInterval={candleRange.interval}
+            fromIso={candleRange.from}
+            toIso={candleRange.to}
+          />
+        ) : null}
+        <ChartSettingsToolbar
+          idPrefix="browse-detail"
+          rangePreset={rangePreset}
+          onRangePresetChange={onRangePresetChange}
+          interval={interval}
+          onIntervalChange={onIntervalChange}
+          graphType={graphType}
+          onGraphTypeChange={onGraphTypeChange}
+          maLineVisibility={maLineVisibility}
+          onMaLineVisibilityChange={onMaLineVisibilityChange}
+          customEmaPeriod={customEmaPeriod}
+          onCustomEmaPeriodChange={onCustomEmaPeriodChange}
+        />
+        <MlNextBarBiasBar
+          instrumentToken={selection.instrumentToken}
+          interval={interval}
+          candleSeries={displayWithMa}
+        />
+      </>
+    )
+
   return (
     <Card className="border-secondary mt-4">
       <Card.Body>
@@ -1793,52 +1876,8 @@ function InstrumentChartCard({
           </p>
         ) : (
           <>
-            <p className="small text-secondary mb-2 d-flex flex-wrap align-items-center gap-2">
-              <span className="font-monospace">{selection.tradingsymbol}</span>
-              <span>· {selection.exchange}</span>
-              {liveLastPrice != null ? (
-                <span className="font-monospace text-success">LTP {liveLastPrice}</span>
-              ) : null}
-              {onToggleFavorite ? (
-                <Button
-                  type="button"
-                  variant="outline-warning"
-                  size="sm"
-                  className="py-0 px-2"
-                  aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-                  aria-pressed={isFavorite}
-                  onClick={() => onToggleFavorite()}
-                >
-                  {isFavorite ? '★ Favorited' : '☆ Add to fav'}
-                </Button>
-              ) : null}
-            </p>
-            {candleRange && !loading && !error ? (
-              <HistoricalRangeCaption
-                candleInterval={candleRange.interval}
-                fromIso={candleRange.from}
-                toIso={candleRange.to}
-              />
-            ) : null}
-            <ChartSettingsToolbar
-              idPrefix="browse-detail"
-              rangePreset={rangePreset}
-              onRangePresetChange={onRangePresetChange}
-              interval={interval}
-              onIntervalChange={onIntervalChange}
-              graphType={graphType}
-              onGraphTypeChange={onGraphTypeChange}
-              maLineVisibility={maLineVisibility}
-              onMaLineVisibilityChange={onMaLineVisibilityChange}
-              customEmaPeriod={customEmaPeriod}
-              onCustomEmaPeriodChange={onCustomEmaPeriodChange}
-            />
-            <MlNextBarBiasBar
-              instrumentToken={selection.instrumentToken}
-              interval={interval}
-              candleSeries={displayWithMa}
-            />
-            {!loading && !error && displayWithMa.length > 0 ? (
+            {!browseDetailMetaInFullscreen ? browseDetailMeta : null}
+            {browseHasChartData ? (
               <div
                 ref={panelRef}
                 className={fullscreenActive ? 'd-flex flex-column mb-2' : undefined}
@@ -1853,6 +1892,11 @@ function InstrumentChartCard({
                     : undefined
                 }
               >
+                {fullscreenActive ? (
+                  <div className={CHART_FULLSCREEN_META_WRAP_CLASS} style={CHART_FULLSCREEN_META_WRAP_STYLE}>
+                    {browseDetailMeta}
+                  </div>
+                ) : null}
                 <ChartZoomControls
                   idPrefix="browse-chart-zoom"
                   totalBars={displayWithMa.length}
