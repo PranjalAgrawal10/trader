@@ -1425,16 +1425,6 @@ function MlNextBarBiasBar({
       {fullscreenActive && history.length > 0 ? (
         <div className="d-flex flex-column flex-md-row flex-wrap gap-3 mb-3 flex-shrink-0 align-items-md-start">
           <MlOutcomePieChart counts={outcomeCounts} height={compact ? 240 : 280} />
-          <div className="small text-secondary pt-1">
-            <div className="fw-semibold text-uppercase mb-1" style={{ fontSize: '0.65rem' }}>
-              Outcomes (all {history.length} rows)
-            </div>
-            <ul className="mb-0 ps-3">
-              <li className="text-success">Correct: {outcomeCounts.correct}</li>
-              <li className="text-danger">Wrong: {outcomeCounts.wrong}</li>
-              <li className="text-muted">Pending: {outcomeCounts.pending}</li>
-            </ul>
-          </div>
         </div>
       ) : null}
       {history.length > 0 ? (
@@ -1454,9 +1444,7 @@ function MlNextBarBiasBar({
         >
           <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
             <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              {fullscreenActive
-                ? `ML predictions (${history.length}, newest first) · scroll · green / red = correct / wrong · stored on your account`
-                : `ML predictions (${history.length}, newest first) · ~5 rows visible, then scroll · green / red = correct / wrong · stored on your account`}
+              ML history ({history.length})
             </span>
           </div>
           <Table
@@ -1869,14 +1857,7 @@ function FavoritesChartsGrid({
 
   return (
     <div className="mt-4">
-      <h2 className="h6 mb-1">All charts</h2>
-      <p className="small text-secondary mb-3">
-        Historical OHLC (line, bar, or green/red candles) for every favorite below. Each chart shows{' '}
-        <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong> on closes. Use{' '}
-        <strong>ML next-bar bias</strong> per tile for the same prediction as on Browse. Interval and chart type apply to
-        all tiles. Charts re-fetch about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this browser tab is
-        visible.
-      </p>
+      <h2 className="h6 mb-3">All charts</h2>
       <ChartSettingsToolbar
         idPrefix="fav-all"
         rangePreset={rangePreset}
@@ -2532,15 +2513,9 @@ export function KiteInstrumentsPage() {
               <Col>
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
-                  Preview loads 100 rows per exchange. Filter as you type. Press <strong>Enter</strong> or{' '}
-                  <strong>Search Kite</strong> to scan the full instrument files on the server (including when the preview
-                  already shows matches). On <strong>All favorites</strong>, Search Kite queries <strong>F&amp;O and MCX</strong>{' '}
-                  together. Favorites are saved to <strong>your account on the server</strong> (not just this browser).
-                  Chart range, interval, and chart style (line / bar / candles) use the <strong>same server account</strong>;
-                  all charts overlay <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong>. Use the{' '}
-                  <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for the list and a{' '}
-                  <strong>chart per favorite</strong>. On <strong>Browse</strong>, <strong>click a row</strong> for the
-                  detailed price chart below.
+                  Filter preview or press <strong>Enter</strong> / <strong>Search Kite</strong> for a full scan (on{' '}
+                  <strong>All favorites</strong>, F&amp;O + MCX). Favorites and chart settings sync to your account; use ☆/★ and{' '}
+                  <strong>All favorites</strong> for the grid; on <strong>Browse</strong>, click a row for the chart.
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">

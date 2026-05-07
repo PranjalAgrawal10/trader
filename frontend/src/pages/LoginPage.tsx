@@ -184,24 +184,18 @@ export function LoginPage() {
         <Col xs={12} sm={10} md={6} lg={4}>
           <Card className="border-secondary shadow">
             <Card.Body className="p-4">
-              <Card.Title className="text-center h4 mb-2">Trader Console</Card.Title>
-              <Card.Text className="text-center text-secondary small mb-4">
-                Sign in to manage strategies and bots.
-              </Card.Text>
+              <Card.Title className="text-center h4 mb-4">Trader Console</Card.Title>
 
               {twoFactor ? (
                 <Form onSubmit={submitTotp}>
                   <p className="small text-secondary mb-3">
                     {twoFactor.second_factor === 'email_otp' ? (
                       <>
-                        We sent a <strong>6-digit code</strong> to <strong>{email}</strong>. Enter it below. This step can
-                        time out — use <strong>Back</strong> and sign in again if needed.
+                        <strong>6-digit code</strong> sent to <strong>{email}</strong>. Timed out? Use <strong>Back</strong>.
                       </>
                     ) : (
                       <>
-                        Enter your 6-digit authenticator code, or an unused recovery code, for <strong>{email}</strong>. If
-                        you waited a long time after entering your password, this step may time out — use <strong>Back</strong>{' '}
-                        and sign in again.
+                        Authenticator or recovery code for <strong>{email}</strong>. Timed out? Use <strong>Back</strong>.
                       </>
                     )}
                   </p>
@@ -243,11 +237,10 @@ export function LoginPage() {
               ) : registerSent && mode === 'register' ? (
                 <div>
                   <Alert variant="success">
-                    Check your email for a verification link. After you confirm your address, switch to <strong>Login</strong>{' '}
-                    to continue.
+                    Verify email, then <strong>Login</strong>.
                   </Alert>
                   <Button variant="outline-secondary" className="w-100" onClick={() => setRegisterSent(false)}>
-                    Back to registration form
+                    Back
                   </Button>
                 </div>
               ) : (
