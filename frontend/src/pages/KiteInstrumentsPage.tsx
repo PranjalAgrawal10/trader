@@ -1171,7 +1171,7 @@ function MlNextBarBiasBar({
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary sticky-top">
+          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary">
             <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
               ML predictions ({history.length}, newest first) · scroll · green / red = correct / wrong · local only
             </span>
