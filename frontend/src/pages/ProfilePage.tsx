@@ -7,6 +7,7 @@ import { Layout } from '../components/Layout'
 import { SecuritySettingsSection } from '../components/SecuritySettingsSection'
 import { api } from '../api/client'
 import { useAuthStore } from '../store/useAuthStore'
+import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 
 type ProfileMe = {
   user_id: string
@@ -18,7 +19,7 @@ type ProfileMe = {
 function formatJoined(iso: string): string {
   try {
     const d = new Date(iso)
-    return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    return Number.isNaN(d.getTime()) ? iso : formatLocalDateTime(d)
   } catch {
     return iso
   }

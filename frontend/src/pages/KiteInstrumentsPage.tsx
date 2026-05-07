@@ -63,6 +63,7 @@ import {
   type MlPredictionLogEntry,
   type MlPriceDirectionHistoryApiRow,
 } from '../utils/mlPredictionHistory'
+import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import {
   addCustomEmaToChartPoints,
   attachMovingAverages,
@@ -936,8 +937,8 @@ function HistoricalRangeCaption({
   toIso: string
   compact?: boolean
 }) {
-  const from = new Date(fromIso).toLocaleString()
-  const to = new Date(toIso).toLocaleString()
+  const from = formatLocalDateTime(fromIso)
+  const to = formatLocalDateTime(toIso)
   return (
     <div className={compact ? 'small text-secondary mb-2' : 'small text-secondary mb-3'}>
       <div className={compact ? 'mb-0' : 'mb-1'}>
@@ -974,7 +975,7 @@ function ChartTooltipContent({
       className="rounded border border-secondary p-2 small"
       style={{ background: '#212529', color: '#f8f9fa' }}
     >
-      <div>{new Date(p.t).toLocaleString()}</div>
+      <div>{formatLocalDateTime(p.t)}</div>
       <div className="font-monospace mt-1">
         O {p.open} · H {p.high} · L {p.low} · C {p.close}
       </div>
@@ -1050,8 +1051,8 @@ function ChartSettingsToolbar({
                 id === 'auto'
                   ? 'Server default window per candle size'
                   : id === 'last1mo'
-                    ? 'Last calendar month (UTC)'
-                    : 'From / to sent as UTC to the API'
+                    ? 'Last calendar month'
+                    : 'History window; candle range captions use your local timezone'
               }
             >
               {CHART_RANGE_LABEL[id]}
@@ -1524,7 +1525,7 @@ function MlNextBarBiasBar({
                   }}
                 >
                   <td className="text-muted">{idx + 1}</td>
-                  <td className="text-nowrap">{new Date(e.predictedAt).toLocaleString()}</td>
+                  <td className="text-nowrap">{formatLocalDateTime(e.predictedAt)}</td>
                   <td
                     className={
                       e.direction === 'up'
@@ -1546,10 +1547,10 @@ function MlNextBarBiasBar({
                       </span>
                     )}
                   </td>
-                  <td className="text-nowrap">{new Date(e.refBarTime).toLocaleString()}</td>
+                  <td className="text-nowrap">{formatLocalDateTime(e.refBarTime)}</td>
                   <td>{e.refClose.toFixed(4)}</td>
                   <td className="text-nowrap">
-                    {e.nextBarTime ? new Date(e.nextBarTime).toLocaleString() : '—'}
+                    {e.nextBarTime ? formatLocalDateTime(e.nextBarTime) : '—'}
                   </td>
                   <td>{e.nextClose != null ? e.nextClose.toFixed(4) : '—'}</td>
                   <td className="text-truncate" style={{ maxWidth: compact ? '4.5rem' : '7rem' }} title={e.modelId}>
@@ -2720,7 +2721,7 @@ export function KiteInstrumentsPage() {
                 <Table striped bordered size="sm" className="mb-0 align-middle">
                   <thead className="table-light">
                     <tr className="text-nowrap">
-                      <th>Time (UTC)</th>
+                      <th>Time</th>
                       <th>Symbol</th>
                       <th>Interval</th>
                       <th>Dir</th>
@@ -2738,7 +2739,7 @@ export function KiteInstrumentsPage() {
                     ) : (
                       automationRecent.map((r) => (
                         <tr key={r.id}>
-                          <td className="small">{new Date(r.predictedAt).toLocaleString(undefined, { timeZone: 'UTC' })}</td>
+                          <td className="small">{formatLocalDateTime(r.predictedAt)}</td>
                           <td>
                             {r.tradingsymbol ? `${r.tradingsymbol}` : r.instrumentToken}
                             {r.exchange ? ` (${r.exchange})` : ''}

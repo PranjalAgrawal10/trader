@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Table } from 'react-bootstrap'
 import { api } from '../api/client'
 import { Layout } from '../components/Layout'
+import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 
 interface TradeRow {
   id: string
@@ -54,7 +55,7 @@ export function TradesPage() {
             {rows.map((t) => (
               <tr key={t.id}>
                 <td className="text-secondary text-nowrap">
-                  {new Date(t.executedAt).toLocaleString()}
+                  {formatLocalDateTime(t.executedAt)}
                 </td>
                 <td className="fw-medium">{t.symbol}</td>
                 <td>{sideLabel(t.side)}</td>

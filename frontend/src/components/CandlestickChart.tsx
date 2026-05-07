@@ -1,4 +1,5 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import type { ChartPointWithMa, MaLineVisibility } from '../utils/movingAverages'
 import {
   DEFAULT_MA_LINE_VISIBILITY,
@@ -399,7 +400,7 @@ export function CandlestickChart({
             const p = data[hover.idx]
             return (
               <>
-                <div className="text-white-50 small mb-1">{new Date(p.t).toLocaleString()}</div>
+                <div className="text-white-50 small mb-1">{formatLocalDateTime(p.t)}</div>
                 <div className="font-monospace">
                   O {p.open} · H {p.high} · L {p.low} · C {p.close}
                 </div>
