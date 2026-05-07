@@ -29,7 +29,9 @@ public sealed class FavoriteMlAutomationBackgroundService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var opts = _options.CurrentValue;
-            var poll = TimeSpan.FromMinutes(Math.Clamp(opts.PollIntervalMinutes, 1, 120));
+            var poll = opts.PollIntervalSeconds > 0
+                ? TimeSpan.FromSeconds(Math.Clamp(opts.PollIntervalSeconds, 15, 3600))
+                : TimeSpan.FromMinutes(Math.Clamp(opts.PollIntervalMinutes, 1, 120));
             var idle = TimeSpan.FromMinutes(5);
 
             try

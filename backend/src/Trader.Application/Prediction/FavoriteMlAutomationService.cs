@@ -128,7 +128,7 @@ public sealed class FavoriteMlAutomationService
             ct.ThrowIfCancellationRequested();
             try
             {
-                var interval = EffectiveInterval(globalInterval, intervalOverrides, fav.InstrumentToken);
+                var interval = IntervalForAutomation(globalInterval, intervalOverrides, fav.InstrumentToken);
                 var hist = await _broker
                     .GetKiteHistoricalCandlesAsync(userId, fav.InstrumentToken, interval, null, null, ct)
                     .ConfigureAwait(false);
@@ -204,6 +204,18 @@ public sealed class FavoriteMlAutomationService
         {
             return fallback;
         }
+    }
+
+    private string IntervalForAutomation(
+        string globalInterval,
+        IReadOnlyDictionary<string, string> overrides,
+        string instrumentToken)
+    {
+        var raw = _opts.PredictionIntervalOverride?.Trim();
+        if (!string.IsNullOrEmpty(raw))
+            return SafeNormalizeInterval(raw, "1m");
+
+        return EffectiveInterval(globalInterval, overrides, instrumentToken);
     }
 
     private static string EffectiveInterval(

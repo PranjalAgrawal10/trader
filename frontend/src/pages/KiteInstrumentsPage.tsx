@@ -1907,7 +1907,9 @@ function FavoritesChartsGrid({
       />
       <p className="small text-secondary mb-3" style={{ maxWidth: '48rem' }}>
         <strong>Default interval</strong> applies to every favorite chart unless you pick a symbol-specific interval on
-        that card. <strong>Auto ML</strong> uses the same rule: one interval per favorite when automation is on.
+        that card. Server <strong>Auto ML</strong> usually runs on <strong>1m</strong> candles (see{' '}
+        <span className="font-monospace text-body-secondary">FavoriteMlAutomation:PredictionIntervalOverride</span>) so it
+        is not slowed by 3m/5m bar closes; it can be configured to follow these chart intervals instead.
       </p>
       <Row className="g-3">
         {favorites.map((row) => (
@@ -2705,6 +2707,8 @@ export function KiteInstrumentsPage() {
               <p className="text-secondary small mb-2">
                 When enabled, the API runs scheduled next-bar predictions for each favorite (needs Kite session;{' '}
                 <strong className="text-body-secondary">FavoriteMlAutomation</strong> must be on in server config).
+                By default the server uses <strong>1m</strong> candles for automation so predictions are not held until
+                a 3m/5m bar closes; chart interval below still controls what you see on each card.
               </p>
               {mlAutomationError ? (
                 <Alert variant="warning" className="py-2 small mb-2">

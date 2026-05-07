@@ -11,8 +11,21 @@ public sealed class FavoriteMlAutomationOptions
     /// <summary>When false, the hosted service idles with a longer sleep.</summary>
     public bool Enabled { get; set; }
 
-    /// <summary>How often to resolve + predict for users with favorites (minutes).</summary>
+    /// <summary>
+    /// When &gt; 0, delay this many seconds between automation cycles (clamped 15–3600).
+    /// When 0 (default), <see cref="PollIntervalMinutes"/> is used instead.
+    /// </summary>
+    public int PollIntervalSeconds { get; set; }
+
+    /// <summary>How often to resolve + predict when <see cref="PollIntervalSeconds"/> is 0 (minutes, 1–120).</summary>
     public int PollIntervalMinutes { get; set; } = 1;
+
+    /// <summary>
+    /// Candle interval for favorite automation predictions only (e.g. <c>1m</c>).
+    /// When null or whitespace, uses saved chart interval (global toolbar + per-favorite overrides).
+    /// Use <c>1m</c> here to run on one-minute bars so automation is not blocked until a 3m/5m bar completes.
+    /// </summary>
+    public string? PredictionIntervalOverride { get; set; } = "1m";
 
     /// <summary>IANA or Windows TZ id (e.g. <c>Asia/Kolkata</c>, <c>India Standard Time</c>).</summary>
     public string ReportTimeZoneId { get; set; } = "Asia/Kolkata";
