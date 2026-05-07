@@ -4,7 +4,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- After Build, runs `dotnet ef database update` (global dotnet-ef + reachable DB + valid config). Tests reference this project with RunEfMigrationsOnBuild=false. Release publish passes RunEfMigrationsOnBuild=false in Dockerfile. -->
+    <!-- After Build, runs `dotnet ef database update` (install `dotnet tool install -g dotnet-ef` + reachable DB + env/config). Set RunEfMigrationsOnBuild=false when the DB is not available (CI, tests). Dockerfile publish sets false; production then applies pending migrations at startup via MigrateAsync when Database:ApplyMigrationsOnStartup is true. -->
     <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == ''">true</RunEfMigrationsOnBuild>
   </PropertyGroup>
 
@@ -27,7 +27,7 @@
     <ProjectReference Include="..\Trader.Infrastructure\Trader.Infrastructure.csproj" />
   </ItemGroup>
 
-  <Target Name="ApplyEfMigrationsAfterBuild" AfterTargets="Build" Condition="'$(RunEfMigrationsOnBuild)' == 'true' AND '$(DesignTimeBuild)' != 'true' AND ('$(SolutionDir)' == '' OR '$(SolutionDir)' == '*Undefined*')">
+  <Target Name="ApplyEfMigrationsAfterBuild" AfterTargets="Build" Condition="'$(RunEfMigrationsOnBuild)' == 'true' AND '$(DesignTimeBuild)' != 'true'">
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\.."
           Command='dotnet ef database update --project "src/Trader.Infrastructure/Trader.Infrastructure.csproj" --startup-project "src/Trader.Api/Trader.Api.csproj" --configuration "$(Configuration)" --no-build' />
   </Target>

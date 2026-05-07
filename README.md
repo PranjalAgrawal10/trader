@@ -42,7 +42,7 @@ Database host defaults to **localhost:3306** when you run the API on the host ag
 
 With **`Database:Provider=MySQL`** (and not **IntegrationTesting**), the API runs **`Migrate()`** on startup when **`Database:ApplyMigrationsOnStartup`** is **true** (default in `appsettings.json`). In **Development** it also **creates the database** if missing. **Production** and **Docker** typically use an existing catalog (e.g. managed MySQL) and only apply pending migrations. Set **`Database__ApplyMigrationsOnStartup=false`** to disable automatic startup migrations. You can still apply migrations manually (`dotnet ef`, below).
 
-When you **`dotnet build src/Trader.Api/Trader.Api.csproj`** (entry project — not **`dotnet build Trader.sln`**), **`dotnet ef database update`** runs by default (**`RunEfMigrationsOnBuild`** is **true** unless you pass **`-p:RunEfMigrationsOnBuild=false`**). That requires the **`dotnet-ef`** global tool and a reachable database. **Solution** and **`dotnet test`** builds skip this step. **Docker** **`dotnet publish`** uses **`/p:RunEfMigrationsOnBuild=false`**.
+When you **`dotnet build Trader.sln`** or **`dotnet build src/Trader.Api/Trader.Api.csproj`** from `backend/`, **`dotnet ef database update`** runs after the API project build by default (**`RunEfMigrationsOnBuild`** is **true** unless you pass **`-p:RunEfMigrationsOnBuild=false`** on the command line). That requires the **`dotnet-ef`** global tool and a **reachable MySQL** using the same **`Database__*`** / `.env` config as **`dotnet run`**. Use **`-p:RunEfMigrationsOnBuild=false`** in CI or when the database is not available during compile. **`dotnet test`** references the API with **`RunEfMigrationsOnBuild=false`**. **Docker** **`dotnet publish`** uses **`/p:RunEfMigrationsOnBuild=false`** (image build has no DB); rely on **`Migrate()` on API startup** in production unless you apply SQL manually.
 
 ### 2. Apply EF Core migrations (optional)
 
@@ -55,10 +55,11 @@ dotnet ef database update --project src/Trader.Infrastructure --startup-project 
 
 Use this when you prefer a one-off migrate without building, or when startup/build migrations are disabled. Migrations live under `backend/src/Trader.Infrastructure/Migrations/`.
 
-**To skip the post-build step** when building the API project only:
+**To skip the post-build step** for any build:
 
 ```bash
 cd backend
+dotnet build Trader.sln -p:RunEfMigrationsOnBuild=false
 dotnet build src/Trader.Api/Trader.Api.csproj -p:RunEfMigrationsOnBuild=false
 ```
 
@@ -154,7 +155,7 @@ Required for a real MySQL run: **`Database:Provider`**, then all of **`Database:
 1. Create a Kite Connect app at [developers.kite.trade](https://developers.kite.trade/).
 2. Set the **Redirect URL** in the developer console to exactly the same value as **`ZerodhaKite__RedirectUrl`** (e.g. dev API: `http://localhost:5232/api/v1/broker/kite/callback`). Mismatches cause OAuth failures.
 3. Set **`ZerodhaKite__ApiKey`**, **`ZerodhaKite__ApiSecret`**, and **`ZerodhaKite__RedirectUrl`** as **environment variables** (Production/Staging) or in **`.env.development`** / **`.env.development.local`** when `ASPNETCORE_ENVIRONMENT=Development` (merged into configuration by `DotEnvBootstrap`). **Do not** put these values in committed **`appsettings*.json`**. Optionally override **`ZerodhaKite__PostLoginRedirectUrl`** if your SPA runs on a different origin than the default **`http://localhost:5173/profile#broker-connection`** (where users return after OAuth; should open **Profile → Broker connection**).
-4. Apply EF migrations so `Users` includes Kite token columns (**`Migrate()`** on API startup for MySQL, post-build when you **`dotnet build`** the API project directly, or `dotnet ef database update`).
+4. Apply EF migrations so `Users` matches the model (e.g. **`Migrate()`** on API startup for MySQL, **`dotnet build`** with **`RunEfMigrationsOnBuild=true`**, or `dotnet ef database update`).
 
 Successful redirects from Kite include **`request_token`**; a **`status=success`** query parameter is **not** always present. The API treats the callback as failed only if **`status`** is sent and is **not** `success`.
 
