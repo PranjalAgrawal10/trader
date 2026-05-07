@@ -4,11 +4,17 @@ import { BrowserRouter } from 'react-router-dom'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './index.css'
 import App from './App.tsx'
+import { initializeDocumentThemeFromStorage } from './theme/preference'
+import { ThemeProvider } from './theme/ThemeProvider'
+
+initializeDocumentThemeFromStorage()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <ThemeProvider>
+        <App />
+      </ThemeProvider>
     </BrowserRouter>
   </StrictMode>,
 )

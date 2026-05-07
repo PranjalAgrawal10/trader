@@ -2,10 +2,12 @@ import type { ReactNode } from 'react'
 import { Button, Container, Nav, Navbar } from 'react-bootstrap'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/useAuthStore'
+import { useTheme } from '../theme/ThemeProvider'
 
 export function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const { logout } = useAuthStore()
+  const { effectiveTheme } = useTheme()
 
   const handleLogout = () => {
     logout()
@@ -14,7 +16,12 @@ export function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-vh-100 d-flex flex-column bg-body-tertiary">
-      <Navbar expand="lg" bg="dark" variant="dark" className="border-bottom border-secondary">
+      <Navbar
+        expand="lg"
+        bg={effectiveTheme === 'dark' ? 'dark' : 'light'}
+        variant={effectiveTheme === 'dark' ? 'dark' : 'light'}
+        className="border-bottom border-secondary"
+      >
         <Container>
           <Navbar.Brand as={Link} to="/" className="text-success">
             Trader
@@ -42,7 +49,12 @@ export function Layout({ children }: { children: ReactNode }) {
               <Nav.Link as={NavLink} to="/profile">
                 Profile
               </Nav.Link>
-              <Button variant="outline-light" size="sm" className="w-100 w-lg-auto" onClick={handleLogout}>
+              <Button
+                variant={effectiveTheme === 'dark' ? 'outline-light' : 'outline-dark'}
+                size="sm"
+                className="w-100 w-lg-auto"
+                onClick={handleLogout}
+              >
                 Sign out
               </Button>
             </Nav>

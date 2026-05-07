@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, Card, Col, Row, Spinner } from 'react-bootstrap'
+import { useCallback, useEffect, useId, useState } from 'react'
+import { Alert, Card, Col, Row, Spinner, ToggleButton, ToggleButtonGroup } from 'react-bootstrap'
 import { useSearchParams } from 'react-router-dom'
 import { BrokerSettingsSection } from '../components/BrokerSettingsSection'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
@@ -7,6 +7,8 @@ import { Layout } from '../components/Layout'
 import { SecuritySettingsSection } from '../components/SecuritySettingsSection'
 import { api } from '../api/client'
 import { useAuthStore } from '../store/useAuthStore'
+import type { ThemePreference } from '../theme/preference'
+import { useTheme } from '../theme/ThemeProvider'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 
 type ProfileMe = {
@@ -27,6 +29,7 @@ function formatJoined(iso: string): string {
 
 export function ProfilePage() {
   const [searchParams] = useSearchParams()
+  const themeChoiceIdPrefix = useId()
   const setupRequired = searchParams.get('required') === '1'
   const brokerSetupRequired = searchParams.get('setup') === '1'
   const storeEmail = useAuthStore((s) => s.email)
@@ -74,6 +77,8 @@ export function ProfilePage() {
   const displayUserId = profile?.user_id ?? '—'
   const displayJoined = profile?.created_at ? formatJoined(profile.created_at) : '—'
 
+  const { preference: themePreference, setPreference: setThemePreference } = useTheme()
+
   return (
     <Layout>
       <Row className="justify-content-center">
@@ -109,6 +114,52 @@ export function ProfilePage() {
                   </dl>
                 </>
               )}
+            </Card.Body>
+          </Card>
+
+          <Card className="border-secondary shadow-sm mb-4">
+            <Card.Body>
+              <Card.Title className="h6">Appearance</Card.Title>
+              <p className="small text-secondary mb-3">
+                Light or dark UI for this console. Choose <strong>System</strong> to follow your device setting. Saved in
+                this browser only (not tied to your account).
+              </p>
+              <ToggleButtonGroup
+                type="radio"
+                name={`theme-pref-${themeChoiceIdPrefix}`}
+                value={themePreference}
+                onChange={(v) => {
+                  if (v === 'light' || v === 'dark' || v === 'system') setThemePreference(v as ThemePreference)
+                }}
+              >
+                <ToggleButton
+                  id={`${themeChoiceIdPrefix}-light`}
+                  value="light"
+                  type="radio"
+                  variant="outline-secondary"
+                  size="sm"
+                >
+                  Light
+                </ToggleButton>
+                <ToggleButton
+                  id={`${themeChoiceIdPrefix}-dark`}
+                  value="dark"
+                  type="radio"
+                  variant="outline-secondary"
+                  size="sm"
+                >
+                  Dark
+                </ToggleButton>
+                <ToggleButton
+                  id={`${themeChoiceIdPrefix}-system`}
+                  value="system"
+                  type="radio"
+                  variant="outline-secondary"
+                  size="sm"
+                >
+                  System
+                </ToggleButton>
+              </ToggleButtonGroup>
             </Card.Body>
           </Card>
 

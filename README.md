@@ -178,7 +178,7 @@ The API exchanges the `request_token` at Kite’s token endpoint and stores **en
 
 ### Web (`frontend/`)
 
-SPA paths: **`/instruments?tab=favorites`** (or **`?tab=fav`**, **`?fav=1`**, **`?fav=true`**) opens **All favorites**; **`?tab=automation`** (**`/instruments/automation`**) opens **Auto predictions** (server automation toggle + merged log; per-engine **pie charts** for correct/wrong/pending, **Up** / **Down** / **Neutral** direction toggles; **Email automation report** accepts a configurable **datetime range** (browser local → UTC **`fromUtc`** / **`toUtcExclusive`**) instead of relying on report-tz “today” only; search—table and pies use the same filtered rows); **`/instruments/fav`** redirects to **`?tab=favorites`**. **`/instruments`** without **`tab`** is **Browse**. Switching tabs updates the query with **`replace`**. On **Browse**, **Today's top performers** ranks capped preview contracts by OHLC-derived % vs the prior session and supports opening the chart from a row.
+SPA paths: **`/instruments?tab=favorites`** (or **`?tab=fav`**, **`?fav=1`**, **`?fav=true`**) opens **All favorites**; **`?tab=automation`** (**`/instruments/automation`**) opens **Auto predictions** (server automation toggle + merged log; per-engine **pie charts** for correct/wrong/pending, **Direction** / **outcome** / **interval** / **engine** filter toggles (plus search); **Email automation report** accepts a configurable **datetime range** (browser local → UTC **`fromUtc`** / **`toUtcExclusive`**) instead of relying on report-tz “today” only; search—table and pies use the same filtered rows); **`/instruments/fav`** redirects to **`?tab=favorites`**. **`/instruments`** without **`tab`** is **Browse**. Switching tabs updates the query with **`replace`**. On **Browse**, **Today's top performers** ranks capped preview contracts by OHLC-derived % vs the prior session and supports opening the chart from a row.
 
 | File | Purpose |
 |------|---------|
@@ -187,7 +187,7 @@ SPA paths: **`/instruments?tab=favorites`** (or **`?tab=fav`**, **`?fav=1`**, **
 
 See `frontend/.env.example`. Only variables prefixed with `VITE_` are exposed to the browser.
 
-The SPA uses **React Bootstrap** (components) and **Bootstrap 5** (CSS); `index.html` sets `data-bs-theme="dark"`.
+The SPA uses **React Bootstrap** (components) and **Bootstrap 5** (CSS). `index.html` defaults **`data-bs-theme="dark"`**; on load **`main.tsx`** applies the saved **Profile → Appearance** choice (light / dark / system) from **`localStorage`** (`**trader-theme-preference**`) so the whole app, including **login**, matches the user’s mode.
 
 Example layout for production: see **[Deploy to DigitalOcean App Platform](#deploy-to-digitalocean-app-platform)** and **`.do/app.yaml`**.
 

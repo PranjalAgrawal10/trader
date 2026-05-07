@@ -237,6 +237,19 @@ function initialAutomationEmailReportDatetimeLocal(): { from: string; to: string
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
 type ChartInterval = (typeof CHART_INTERVALS)[number]
 
+/** Sort automation row interval codes in chart order, then unknown codes alphabetically. */
+function sortMlAutomationIntervalCodes(intervals: string[]): string[] {
+  const order = CHART_INTERVALS as readonly string[]
+  return [...intervals].sort((a, b) => {
+    const ia = order.indexOf(a)
+    const ib = order.indexOf(b)
+    if (ia !== -1 && ib !== -1) return ia - ib
+    if (ia !== -1) return -1
+    if (ib !== -1) return 1
+    return a.localeCompare(b)
+  })
+}
+
 /** Lookback for historical request. Labels mirror candle-style shorthand (5m = last 5 minutes); `1mo` = last calendar month. `auto` = omit from/to (server default per interval). */
 const CHART_RANGE_PRESETS = [
   'auto',
@@ -1441,7 +1454,8 @@ function MlAutomationOutcomesPieGrid({
   return (
     <div className="flex-shrink-0 overflow-visible mb-3">
       <div className="small text-muted text-uppercase mb-2" style={{ fontSize: '0.68rem' }}>
-        Outcomes by engine — {modelIds.length} model{modelIds.length === 1 ? '' : 's'} (respects Direction + search)
+        Outcomes by engine — {modelIds.length} model{modelIds.length === 1 ? '' : 's'} (respects search + direction +
+        outcome + interval + engine)
       </div>
       <div
         className="d-grid gap-3"
@@ -3012,6 +3026,9 @@ const EMPTY_INSTRUMENTS: KiteInstrumentRow[] = []
 export function KiteInstrumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const automationDirToggleIdPrefix = useId()
+  const automationOutcomeToggleIdPrefix = useId()
+  const automationEngineToggleIdPrefix = useId()
+  const automationIntervalToggleIdPrefix = useId()
   const [favorites, setFavorites] = useState<KiteInstrumentRow[]>([])
   const [favoritesError, setFavoritesError] = useState<string | null>(null)
 
@@ -3137,6 +3154,10 @@ export function KiteInstrumentsPage() {
   const [automationReportEmailSuccess, setAutomationReportEmailSuccess] = useState<string | null>(null)
   const [automationReportEmailError, setAutomationReportEmailError] = useState<string | null>(null)
   const [automationEmailReportRange, setAutomationEmailReportRange] = useState(initialAutomationEmailReportDatetimeLocal)
+  const automationRecentRef = useRef(automationRecent)
+  automationRecentRef.current = automationRecent
+  const automationPriceModelsRef = useRef(automationPriceModels)
+  automationPriceModelsRef.current = automationPriceModels
   const automationRecentSorted = useMemo(
     () => sortByPredictedAtNewestFirst(automationRecent),
     [automationRecent],
@@ -3145,6 +3166,11 @@ export function KiteInstrumentsPage() {
   const [automationDirUp, setAutomationDirUp] = useState(true)
   const [automationDirDown, setAutomationDirDown] = useState(true)
   const [automationDirNeutral, setAutomationDirNeutral] = useState(true)
+  const [automationOutcomeCorrect, setAutomationOutcomeCorrect] = useState(true)
+  const [automationOutcomeWrong, setAutomationOutcomeWrong] = useState(true)
+  const [automationOutcomePending, setAutomationOutcomePending] = useState(true)
+  const [automationEngineOn, setAutomationEngineOn] = useState<Record<string, boolean>>({})
+  const [automationIntervalOn, setAutomationIntervalOn] = useState<Record<string, boolean>>({})
   /** If every direction toggle is off, treat as “all directions” so the UI never goes blank by mistake. */
   const automationDirAccepted = useMemo(() => {
     if (!automationDirUp && !automationDirDown && !automationDirNeutral)
@@ -3155,6 +3181,86 @@ export function KiteInstrumentsPage() {
       neutral: automationDirNeutral,
     } as const
   }, [automationDirUp, automationDirDown, automationDirNeutral])
+  /** Same guard when every outcome toggle is off. */
+  const automationOutcomeAccepted = useMemo(() => {
+    if (!automationOutcomeCorrect && !automationOutcomeWrong && !automationOutcomePending)
+      return { correct: true, wrong: true, pending: true } as const
+    return {
+      correct: automationOutcomeCorrect,
+      wrong: automationOutcomeWrong,
+      pending: automationOutcomePending,
+    } as const
+  }, [automationOutcomeCorrect, automationOutcomeWrong, automationOutcomePending])
+
+  const automationEngineIdsAvailable = useMemo(
+    () => orderedAutomationEngineIds(automationPriceModels, automationRecentSorted),
+    [automationPriceModels, automationRecentSorted],
+  )
+  /** Distinct engines in loaded rows — stable string across refetches when the set is unchanged. */
+  const automationEnginesSignature = useMemo(
+    () =>
+      [...new Set(automationRecent.map((r) => r.engineModelId?.trim() ?? '').filter(Boolean))]
+        .sort()
+        .join('|'),
+    [automationRecent],
+  )
+  const automationIntervalsAvailable = useMemo(() => {
+    const ivs = new Set<string>()
+    for (const r of automationRecentSorted) {
+      const v = r.interval?.trim()
+      if (v) ivs.add(v)
+    }
+    return sortMlAutomationIntervalCodes([...ivs])
+  }, [automationRecentSorted])
+  const automationIntervalsSignature = useMemo(
+    () =>
+      [...new Set(automationRecent.map((r) => r.interval?.trim() ?? '').filter(Boolean))]
+        .sort()
+        .join('|'),
+    [automationRecent],
+  )
+
+  const automationRegistrySignature = useMemo(
+    () => (automationPriceModels?.models ?? []).map((m) => m.id.trim()).filter(Boolean).join('|'),
+    [automationPriceModels],
+  )
+
+  useEffect(() => {
+    const sorted = sortByPredictedAtNewestFirst(automationRecentRef.current)
+    const ids = orderedAutomationEngineIds(automationPriceModelsRef.current, sorted)
+    setAutomationEngineOn((prev) => {
+      const next: Record<string, boolean> = {}
+      for (const id of ids) next[id] = prev[id] ?? true
+      return next
+    })
+  }, [automationEnginesSignature, automationRegistrySignature])
+
+  useEffect(() => {
+    const sorted = sortByPredictedAtNewestFirst(automationRecentRef.current)
+    const ivs = sortMlAutomationIntervalCodes([
+      ...new Set(sorted.map((r) => r.interval?.trim() ?? '').filter(Boolean)),
+    ])
+    setAutomationIntervalOn((prev) => {
+      const next: Record<string, boolean> = {}
+      for (const iv of ivs) next[iv] = prev[iv] ?? true
+      return next
+    })
+  }, [automationIntervalsSignature])
+
+  const automationEnginePasses = useMemo(() => {
+    if (automationEngineIdsAvailable.length === 0) return () => true
+    const anyOn = automationEngineIdsAvailable.some((id) => automationEngineOn[id] ?? true)
+    if (!anyOn) return () => true
+    return (engineId: string) => automationEngineOn[engineId.trim()] ?? true
+  }, [automationEngineIdsAvailable, automationEngineOn])
+
+  const automationIntervalPasses = useMemo(() => {
+    if (automationIntervalsAvailable.length === 0) return () => true
+    const anyOn = automationIntervalsAvailable.some((iv) => automationIntervalOn[iv] ?? true)
+    if (!anyOn) return () => true
+    return (interval: string) => automationIntervalOn[interval.trim()] ?? true
+  }, [automationIntervalsAvailable, automationIntervalOn])
+
   const automationRecentFiltered = useMemo(
     () =>
       automationRecentSorted.filter((r) =>
@@ -3163,8 +3269,21 @@ export function KiteInstrumentsPage() {
     [automationRecentSorted, automationTableFilter, favoriteByInstrumentToken],
   )
   const automationRecentDisplay = useMemo(
-    () => automationRecentFiltered.filter((r) => automationDirAccepted[r.direction]),
-    [automationRecentFiltered, automationDirAccepted],
+    () =>
+      automationRecentFiltered.filter(
+        (r) =>
+          automationOutcomeAccepted[r.outcome] &&
+          automationDirAccepted[r.direction] &&
+          automationEnginePasses(r.engineModelId) &&
+          automationIntervalPasses(r.interval),
+      ),
+    [
+      automationRecentFiltered,
+      automationOutcomeAccepted,
+      automationDirAccepted,
+      automationEnginePasses,
+      automationIntervalPasses,
+    ],
   )
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
   const [chartIntervalByToken, setChartIntervalByToken] = useState<Record<string, ChartInterval>>({})
@@ -3633,40 +3752,77 @@ export function KiteInstrumentsPage() {
                   {automationReportEmailError}
                 </Alert>
               ) : null}
-              <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
-                <span className="small text-secondary text-uppercase mb-0">Direction filter</span>
-                <ButtonGroup size="sm" aria-label="Filter automation rows by predicted direction">
-                  <ToggleButton
-                    id={`${automationDirToggleIdPrefix}-up`}
-                    type="checkbox"
-                    variant={automationDirUp ? 'secondary' : 'outline-secondary'}
-                    value="up"
-                    checked={automationDirUp}
-                    onChange={(e) => setAutomationDirUp(e.currentTarget.checked)}
-                  >
-                    Up
-                  </ToggleButton>
-                  <ToggleButton
-                    id={`${automationDirToggleIdPrefix}-down`}
-                    type="checkbox"
-                    variant={automationDirDown ? 'secondary' : 'outline-secondary'}
-                    value="down"
-                    checked={automationDirDown}
-                    onChange={(e) => setAutomationDirDown(e.currentTarget.checked)}
-                  >
-                    Down
-                  </ToggleButton>
-                  <ToggleButton
-                    id={`${automationDirToggleIdPrefix}-neutral`}
-                    type="checkbox"
-                    variant={automationDirNeutral ? 'secondary' : 'outline-secondary'}
-                    value="neutral"
-                    checked={automationDirNeutral}
-                    onChange={(e) => setAutomationDirNeutral(e.currentTarget.checked)}
-                  >
-                    Neutral
-                  </ToggleButton>
-                </ButtonGroup>
+              <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
+                <div className="d-flex flex-wrap align-items-center gap-2">
+                  <span className="small text-secondary text-uppercase mb-0">Direction</span>
+                  <ButtonGroup size="sm" aria-label="Filter automation rows by predicted direction">
+                    <ToggleButton
+                      id={`${automationDirToggleIdPrefix}-up`}
+                      type="checkbox"
+                      variant={automationDirUp ? 'secondary' : 'outline-secondary'}
+                      value="up"
+                      checked={automationDirUp}
+                      onChange={(e) => setAutomationDirUp(e.currentTarget.checked)}
+                    >
+                      Up
+                    </ToggleButton>
+                    <ToggleButton
+                      id={`${automationDirToggleIdPrefix}-down`}
+                      type="checkbox"
+                      variant={automationDirDown ? 'secondary' : 'outline-secondary'}
+                      value="down"
+                      checked={automationDirDown}
+                      onChange={(e) => setAutomationDirDown(e.currentTarget.checked)}
+                    >
+                      Down
+                    </ToggleButton>
+                    <ToggleButton
+                      id={`${automationDirToggleIdPrefix}-neutral`}
+                      type="checkbox"
+                      variant={automationDirNeutral ? 'secondary' : 'outline-secondary'}
+                      value="neutral"
+                      checked={automationDirNeutral}
+                      onChange={(e) => setAutomationDirNeutral(e.currentTarget.checked)}
+                    >
+                      Neutral
+                    </ToggleButton>
+                  </ButtonGroup>
+                </div>
+                <div className="d-flex flex-wrap align-items-center gap-2">
+                  <span className="small text-secondary text-uppercase mb-0">Outcome</span>
+                  <ButtonGroup size="sm" aria-label="Filter automation rows by outcome">
+                    <ToggleButton
+                      id={`${automationOutcomeToggleIdPrefix}-correct`}
+                      type="checkbox"
+                      variant={automationOutcomeCorrect ? 'success' : 'outline-success'}
+                      value="correct"
+                      checked={automationOutcomeCorrect}
+                      onChange={(e) => setAutomationOutcomeCorrect(e.currentTarget.checked)}
+                    >
+                      Correct
+                    </ToggleButton>
+                    <ToggleButton
+                      id={`${automationOutcomeToggleIdPrefix}-wrong`}
+                      type="checkbox"
+                      variant={automationOutcomeWrong ? 'danger' : 'outline-danger'}
+                      value="wrong"
+                      checked={automationOutcomeWrong}
+                      onChange={(e) => setAutomationOutcomeWrong(e.currentTarget.checked)}
+                    >
+                      Wrong
+                    </ToggleButton>
+                    <ToggleButton
+                      id={`${automationOutcomeToggleIdPrefix}-pending`}
+                      type="checkbox"
+                      variant={automationOutcomePending ? 'secondary' : 'outline-secondary'}
+                      value="pending"
+                      checked={automationOutcomePending}
+                      onChange={(e) => setAutomationOutcomePending(e.currentTarget.checked)}
+                    >
+                      Pending
+                    </ToggleButton>
+                  </ButtonGroup>
+                </div>
                 {automationModelsLoading ? (
                   <span className="small text-muted">
                     <Spinner animation="border" size="sm" className="me-1 align-middle" role="status" />
@@ -3674,6 +3830,61 @@ export function KiteInstrumentsPage() {
                   </span>
                 ) : null}
               </div>
+              {automationIntervalsAvailable.length > 0 ? (
+                <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                  <span className="small text-secondary text-uppercase mb-0">Interval</span>
+                  <div className="d-flex flex-wrap gap-1 align-items-center" role="group" aria-label="Filter by candle interval">
+                    {automationIntervalsAvailable.map((iv, ix) => (
+                      <ToggleButton
+                        key={iv}
+                        id={`${automationIntervalToggleIdPrefix}-${ix}`}
+                        type="checkbox"
+                        size="sm"
+                        variant={(automationIntervalOn[iv] ?? true) ? 'secondary' : 'outline-secondary'}
+                        value={iv}
+                        checked={automationIntervalOn[iv] ?? true}
+                        onChange={(e) =>
+                          setAutomationIntervalOn((p) => ({ ...p, [iv]: e.currentTarget.checked }))
+                        }
+                      >
+                        {iv}
+                      </ToggleButton>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {automationEngineIdsAvailable.length > 0 ? (
+                <div className="d-flex flex-wrap align-items-start gap-2 mb-3">
+                  <span className="small text-secondary text-uppercase mb-0 pt-1">Engine</span>
+                  <div className="d-flex flex-wrap gap-1 align-items-center" role="group" aria-label="Filter by registered ML engine">
+                    {automationEngineIdsAvailable.map((eng, idx) => {
+                      const desc = automationPriceModels?.models?.find((m) => m.id === eng)?.description
+                      const short = eng.length > 30 ? `${eng.slice(0, 28)}…` : eng
+                      const on = automationEngineOn[eng] ?? true
+                      return (
+                        <ToggleButton
+                          key={eng}
+                          id={`${automationEngineToggleIdPrefix}-${idx}`}
+                          type="checkbox"
+                          size="sm"
+                          variant={on ? 'secondary' : 'outline-secondary'}
+                          value={eng}
+                          checked={on}
+                          onChange={(e) =>
+                            setAutomationEngineOn((p) => ({ ...p, [eng]: e.currentTarget.checked }))
+                          }
+                          className="font-monospace"
+                          title={desc ? `${eng} — ${desc}` : eng}
+                        >
+                          <span className="text-truncate d-inline-block" style={{ maxWidth: '11rem' }}>
+                            {short}
+                          </span>
+                        </ToggleButton>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
               <MlAutomationOutcomesPieGrid rows={automationRecentDisplay} priceModels={automationPriceModels} />
               <div className="small text-secondary text-uppercase mb-1">Recent auto predictions</div>
               <Form.Control
@@ -3688,7 +3899,7 @@ export function KiteInstrumentsPage() {
               {automationRecent.length > 0 && automationRecentDisplay.length !== automationRecent.length ? (
                 <div className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
                   Showing {automationRecentDisplay.length} of {automationRecent.length} row
-                  {automationRecent.length === 1 ? '' : 's'} (search + direction)
+                  {automationRecent.length === 1 ? '' : 's'} (search + table filters above)
                 </div>
               ) : null}
               <div
