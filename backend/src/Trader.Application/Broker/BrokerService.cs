@@ -12,7 +12,7 @@ namespace Trader.Application.Broker;
 
 public sealed class BrokerService : IBrokerService
 {
-    private const int ChartZoomMinBars = 24;
+    private const int ChartZoomMinBars = 1;
     private const int ChartZoomMaxBars = 500_000;
     private static readonly JsonSerializerOptions ChartZoomJsonOptions = new()
     {

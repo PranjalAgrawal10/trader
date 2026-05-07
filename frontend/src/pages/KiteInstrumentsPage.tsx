@@ -1165,60 +1165,94 @@ function MlNextBarBiasBar({
       {history.length > 0 ? (
         <div
           className={`rounded border border-secondary overflow-hidden ${gapClass}`}
-          style={{ maxHeight: compact ? '10rem' : '14rem', overflowY: 'auto' }}
+          style={{ maxHeight: compact ? '12rem' : '18rem', overflow: 'auto' }}
         >
-          <div className="px-2 py-1 bg-body-secondary text-secondary text-uppercase border-bottom border-secondary">
-            <span style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              ML log (last {history.length}) · green = correct next-bar move, red = wrong (local only)
+          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary">
+            <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
+              ML analysis (last {history.length}) · green / red = resolved correct / wrong · stored locally
             </span>
           </div>
-          <ul className="list-unstyled mb-0">
-            {historyNewestFirst.map((e) => (
-              <li
-                key={e.id}
-                className="px-2 py-1 border-top border-secondary"
-                style={{
-                  fontSize: compact ? '0.65rem' : '0.72rem',
-                  borderLeft: '4px solid',
-                  borderLeftColor:
-                    e.outcome === 'pending' ? '#6c757d' : e.outcome === 'correct' ? '#198754' : '#dc3545',
-                  backgroundColor:
-                    e.outcome === 'pending'
-                      ? undefined
-                      : e.outcome === 'correct'
-                        ? 'rgba(25, 135, 84, 0.09)'
-                        : 'rgba(220, 53, 69, 0.09)',
-                }}
-              >
-                <div className="text-secondary">{new Date(e.predictedAt).toLocaleString()}</div>
-                <div className="font-monospace">
-                  <span
+          <Table
+            responsive
+            bordered
+            size="sm"
+            className="mb-0 align-middle font-monospace"
+            style={{ fontSize: compact ? '0.65rem' : '0.72rem' }}
+          >
+            <thead className="table-light text-secondary text-nowrap">
+              <tr>
+                <th>#</th>
+                <th>Predicted</th>
+                <th>Dir</th>
+                <th>Conf</th>
+                <th>Outcome</th>
+                <th>Ref bar</th>
+                <th>Ref close</th>
+                <th>Next bar</th>
+                <th>Next close</th>
+                <th>Model</th>
+                <th className="d-none d-md-table-cell">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyNewestFirst.map((e, idx) => (
+                <tr
+                  key={e.id}
+                  style={{
+                    borderLeft: '3px solid',
+                    borderLeftColor:
+                      e.outcome === 'pending' ? '#6c757d' : e.outcome === 'correct' ? '#198754' : '#dc3545',
+                    backgroundColor:
+                      e.outcome === 'pending'
+                        ? undefined
+                        : e.outcome === 'correct'
+                          ? 'rgba(25, 135, 84, 0.09)'
+                          : 'rgba(220, 53, 69, 0.09)',
+                  }}
+                >
+                  <td className="text-muted">{idx + 1}</td>
+                  <td className="text-nowrap">{new Date(e.predictedAt).toLocaleString()}</td>
+                  <td
                     className={
-                      e.direction === 'up' ? 'text-success' : e.direction === 'down' ? 'text-danger' : 'text-secondary'
+                      e.direction === 'up'
+                        ? 'text-success fw-semibold'
+                        : e.direction === 'down'
+                          ? 'text-danger fw-semibold'
+                          : 'text-secondary fw-semibold'
                     }
                   >
                     {e.direction.toUpperCase()}
-                  </span>{' '}
-                  {e.confidence}% · ref close {e.refClose.toFixed(4)}{' '}
-                  <span className="text-muted">@ {new Date(e.refBarTime).toLocaleString()}</span>
-                </div>
-                <div className="text-muted text-truncate" title={`${e.modelId}: ${e.detail}`}>
-                  {e.modelId} · {e.detail}
-                </div>
-                {e.outcome === 'pending' ? (
-                  <div className="text-muted fst-italic">Awaiting next candle in series…</div>
-                ) : (
-                  <div className="font-monospace">
-                    Next bar {e.nextBarTime ? new Date(e.nextBarTime).toLocaleString() : '—'} · close{' '}
-                    {e.nextClose != null ? e.nextClose.toFixed(4) : '—'} ·{' '}
-                    <span className={e.outcome === 'correct' ? 'text-success' : 'text-danger'}>
-                      {e.outcome === 'correct' ? 'true' : 'false'}
-                    </span>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+                  </td>
+                  <td>{e.confidence}%</td>
+                  <td className="text-nowrap">
+                    {e.outcome === 'pending' ? (
+                      <span className="text-muted fst-italic">Pending</span>
+                    ) : (
+                      <span className={e.outcome === 'correct' ? 'text-success' : 'text-danger'}>
+                        {e.outcome === 'correct' ? 'Correct' : 'Wrong'}
+                      </span>
+                    )}
+                  </td>
+                  <td className="text-nowrap">{new Date(e.refBarTime).toLocaleString()}</td>
+                  <td>{e.refClose.toFixed(4)}</td>
+                  <td className="text-nowrap">
+                    {e.nextBarTime ? new Date(e.nextBarTime).toLocaleString() : '—'}
+                  </td>
+                  <td>{e.nextClose != null ? e.nextClose.toFixed(4) : '—'}</td>
+                  <td className="text-truncate" style={{ maxWidth: compact ? '4.5rem' : '7rem' }} title={e.modelId}>
+                    {e.modelId}
+                  </td>
+                  <td
+                    className="d-none d-md-table-cell text-truncate text-muted"
+                    style={{ maxWidth: '12rem' }}
+                    title={e.detail}
+                  >
+                    {e.detail}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
         </div>
       ) : null}
     </>
