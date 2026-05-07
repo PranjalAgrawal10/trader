@@ -20,6 +20,7 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
                 u.KiteInstrumentsChartRangePreset,
                 u.KiteInstrumentsChartGraphType,
                 u.KiteInstrumentsChartZoomJson,
+                u.KiteInstrumentsChartIntervalByInstrumentTokenJson,
                 u.FavoriteMlAutomationEnabled))
             .FirstOrDefaultAsync(ct);
 
@@ -49,6 +50,17 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
                    ?? throw new InvalidOperationException("User not found.");
         user.KiteInstrumentsChartZoomJson = chartZoomByInstrumentTokenJson;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveChartIntervalByInstrumentTokenJsonAsync(
+        Guid userId,
+        string? chartIntervalByInstrumentTokenJson,
+        CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+                   ?? throw new InvalidOperationException("User not found.");
+        user.KiteInstrumentsChartIntervalByInstrumentTokenJson = chartIntervalByInstrumentTokenJson;
         await _db.SaveChangesAsync(ct);
     }
 }

@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Messaging;
@@ -94,7 +96,9 @@ public sealed class FavoriteMlAutomationService
         if (!user.FavoriteMlAutomationEnabled)
             return;
 
-        var interval = await ResolveIntervalAsync(userId, ct).ConfigureAwait(false);
+        var chartState = await _chartSettings.GetAsync(userId, ct).ConfigureAwait(false);
+        var globalInterval = SafeNormalizeInterval(chartState?.Interval, _opts.DefaultChartInterval.Trim());
+        var intervalOverrides = ParseIntervalOverrides(chartState?.ChartIntervalByInstrumentTokenJson);
         var favorites = await _favorites.ListByUserAsync(userId, ct).ConfigureAwait(false);
         if (favorites.Count == 0)
             return;
@@ -124,6 +128,7 @@ public sealed class FavoriteMlAutomationService
             ct.ThrowIfCancellationRequested();
             try
             {
+                var interval = EffectiveInterval(globalInterval, intervalOverrides, fav.InstrumentToken);
                 var hist = await _broker
                     .GetKiteHistoricalCandlesAsync(userId, fav.InstrumentToken, interval, null, null, ct)
                     .ConfigureAwait(false);
@@ -169,13 +174,57 @@ public sealed class FavoriteMlAutomationService
             .ConfigureAwait(false);
     }
 
-    private async Task<string> ResolveIntervalAsync(Guid userId, CancellationToken ct)
+    private static Dictionary<string, string> ParseIntervalOverrides(string? json)
     {
-        var state = await _chartSettings.GetAsync(userId, ct).ConfigureAwait(false);
-        var raw = state?.Interval?.Trim();
-        if (string.IsNullOrEmpty(raw))
-            return _opts.DefaultChartInterval.Trim();
-        return raw;
+        if (string.IsNullOrWhiteSpace(json))
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+
+        try
+        {
+            var d = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            return d is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(d, StringComparer.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+    }
+
+    private static string SafeNormalizeInterval(string? raw, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return fallback;
+        try
+        {
+            return ChartUiIntervals.Normalize(raw);
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    private static string EffectiveInterval(
+        string globalInterval,
+        IReadOnlyDictionary<string, string> overrides,
+        string instrumentToken)
+    {
+        var key = instrumentToken.Trim();
+        if (overrides.TryGetValue(key, out var o) && !string.IsNullOrWhiteSpace(o))
+        {
+            try
+            {
+                return ChartUiIntervals.Normalize(o);
+            }
+            catch
+            {
+                // ignore bad override
+            }
+        }
+
+        return globalInterval;
     }
 
     private async Task MaybeSendEodReportAsync(User user, CancellationToken ct)

@@ -65,6 +65,7 @@ public sealed record KiteInstrumentsChartSettingsDto(
     string? RangePreset,
     string? GraphType,
     Dictionary<string, int>? ZoomByInstrumentToken = null,
+    Dictionary<string, string>? IntervalByInstrumentToken = null,
     bool? MlAutomationEnabled = null);
 
 /// <summary>Toggle background ML runs for favorite instruments (per user).</summary>
@@ -72,3 +73,6 @@ public sealed record FavoriteMlAutomationPutDto(bool Enabled);
 
 /// <summary>Updates saved visible bar count for one instrument; <c>null</c> <see cref="VisibleBars"/> clears zoom for that token.</summary>
 public sealed record KiteInstrumentsChartZoomPutDto(string InstrumentToken, int? VisibleBars);
+
+/// <summary>Sets or clears a per-instrument candle interval override; <c>null</c> <see cref="Interval"/> uses the page default for that token.</summary>
+public sealed record KiteInstrumentsChartIntervalPutDto(string InstrumentToken, string? Interval);

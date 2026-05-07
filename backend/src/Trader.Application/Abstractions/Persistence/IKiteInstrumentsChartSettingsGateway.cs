@@ -6,6 +6,7 @@ public sealed record KiteInstrumentsChartSettingsState(
     string? RangePreset,
     string? GraphType,
     string? ChartZoomByInstrumentTokenJson,
+    string? ChartIntervalByInstrumentTokenJson,
     bool? FavoriteMlAutomationEnabled);
 
 public interface IKiteInstrumentsChartSettingsGateway
@@ -18,4 +19,7 @@ public interface IKiteInstrumentsChartSettingsGateway
 
     /// <summary>Persists only the instruments-page chart zoom map JSON (other chart fields unchanged).</summary>
     Task SaveChartZoomJsonAsync(Guid userId, string? chartZoomByInstrumentTokenJson, CancellationToken ct = default);
+
+    /// <summary>Persists only the per-instrument chart interval override map JSON (other chart fields unchanged).</summary>
+    Task SaveChartIntervalByInstrumentTokenJsonAsync(Guid userId, string? chartIntervalByInstrumentTokenJson, CancellationToken ct = default);
 }

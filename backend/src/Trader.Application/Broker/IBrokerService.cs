@@ -59,4 +59,10 @@ public interface IBrokerService
 
     /// <summary>Updates or clears saved zoom (visible bar count) for one instrument token.</summary>
     Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default);
+
+    /// <summary>Sets or clears a per-instrument candle interval override (null interval = use page default for that token).</summary>
+    Task SaveKiteInstrumentsChartIntervalOverrideAsync(
+        Guid userId,
+        KiteInstrumentsChartIntervalPutDto body,
+        CancellationToken ct = default);
 }

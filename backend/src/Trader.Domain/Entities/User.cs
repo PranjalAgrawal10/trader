@@ -35,6 +35,9 @@ public class User
     /// <summary>JSON object: instrument token → visible bar count when chart zoom is applied (same keys as Kite token strings).</summary>
     public string? KiteInstrumentsChartZoomJson { get; set; }
 
+    /// <summary>JSON object: instrument token → chart interval override (<c>1m</c>…<c>1d</c>); missing key uses <see cref="KiteInstrumentsChartInterval"/>.</summary>
+    public string? KiteInstrumentsChartIntervalByInstrumentTokenJson { get; set; }
+
     /// <summary>When true, server background job may run ML predictions for <see cref="KiteFavoriteInstruments"/> (requires global automation + Kite session).</summary>
     public bool FavoriteMlAutomationEnabled { get; set; }
 

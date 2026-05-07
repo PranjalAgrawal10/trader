@@ -42,6 +42,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.KiteInstrumentsChartRangePreset).HasMaxLength(32);
             e.Property(x => x.KiteInstrumentsChartGraphType).HasMaxLength(16);
             e.Property(x => x.KiteInstrumentsChartZoomJson);
+            e.Property(x => x.KiteInstrumentsChartIntervalByInstrumentTokenJson);
             e.Property(x => x.FavoriteMlAutomationEnabled).HasDefaultValue(false);
             e.Property(x => x.TotpSecretProtected);
             e.Property(x => x.TotpPendingSecretProtected);

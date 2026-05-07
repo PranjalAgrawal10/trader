@@ -342,6 +342,7 @@ public sealed class BrokerService : IBrokerService
             row.RangePreset,
             row.GraphType,
             ParseChartZoomMap(row.ChartZoomByInstrumentTokenJson),
+            ParseChartIntervalOverrideMap(row.ChartIntervalByInstrumentTokenJson),
             row.FavoriteMlAutomationEnabled ?? false);
     }
 
@@ -372,10 +373,66 @@ public sealed class BrokerService : IBrokerService
         await _kiteChartSettings.SaveChartZoomJsonAsync(userId, json, ct).ConfigureAwait(false);
     }
 
+    public async Task SaveKiteInstrumentsChartIntervalOverrideAsync(
+        Guid userId,
+        KiteInstrumentsChartIntervalPutDto body,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (string.IsNullOrWhiteSpace(body.InstrumentToken) || !body.InstrumentToken.Trim().All(char.IsAsciiDigit))
+            throw new InvalidOperationException("A numeric instrument token is required.");
+
+        var token = body.InstrumentToken.Trim();
+        string? normalized = null;
+        if (body.Interval is { } rawInterval)
+        {
+            if (string.IsNullOrWhiteSpace(rawInterval))
+                throw new InvalidOperationException("interval must be non-empty when provided.");
+            normalized = ChartUiIntervals.Normalize(rawInterval);
+        }
+
+        var row = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false);
+        if (row is null)
+            throw new InvalidOperationException("User not found.");
+
+        var dict = ParseChartIntervalOverrideDict(row.ChartIntervalByInstrumentTokenJson);
+        if (normalized is null)
+            dict.Remove(token);
+        else
+            dict[token] = normalized;
+
+        var json = dict.Count == 0 ? null : JsonSerializer.Serialize(dict, ChartZoomJsonOptions);
+        await _kiteChartSettings.SaveChartIntervalByInstrumentTokenJsonAsync(userId, json, ct).ConfigureAwait(false);
+    }
+
+    private static Dictionary<string, string>? ParseChartIntervalOverrideMap(string? json)
+    {
+        var d = ParseChartIntervalOverrideDict(json);
+        return d.Count == 0 ? null : d;
+    }
+
     private static Dictionary<string, int>? ParseChartZoomMap(string? json)
     {
         var d = ParseChartZoomDict(json);
         return d.Count == 0 ? null : d;
+    }
+
+    private static Dictionary<string, string> ParseChartIntervalOverrideDict(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+
+        try
+        {
+            var d = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            return d is null
+                ? new Dictionary<string, string>(StringComparer.Ordinal)
+                : new Dictionary<string, string>(d, StringComparer.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
     }
 
     private static Dictionary<string, int> ParseChartZoomDict(string? json)
@@ -414,7 +471,7 @@ public sealed class BrokerService : IBrokerService
         await _kiteChartSettings
                 .SaveAsync(
                     userId,
-                    new KiteInstrumentsChartSettingsState(interval, range, graph, null, settings.MlAutomationEnabled),
+                    new KiteInstrumentsChartSettingsState(interval, range, graph, null, null, settings.MlAutomationEnabled),
                     ct)
             .ConfigureAwait(false);
     }
@@ -449,16 +506,7 @@ public sealed class BrokerService : IBrokerService
         return t.Length == 0 ? null : t;
     }
 
-    private static string NormalizeUiChartInterval(string interval)
-    {
-        var t = interval.Trim().ToLowerInvariant();
-        return t switch
-        {
-            "1m" or "2m" or "3m" or "4m" or "5m" or "10m" or "15m" or "30m" or "1h" or "1d" => t,
-            _ => throw new InvalidOperationException(
-                "Interval must be one of: 1m, 2m, 3m, 4m, 5m, 10m, 15m, 30m, 1h, 1d."),
-        };
-    }
+    private static string NormalizeUiChartInterval(string interval) => ChartUiIntervals.Normalize(interval);
 
     private static string NormalizeChartRangePreset(string preset)
     {

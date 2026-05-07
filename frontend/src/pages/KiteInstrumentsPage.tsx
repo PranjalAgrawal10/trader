@@ -147,6 +147,7 @@ interface KiteInstrumentsChartSettingsDto {
   rangePreset: string | null
   graphType: string | null
   zoomByInstrumentToken?: Record<string, number> | null
+  intervalByInstrumentToken?: Record<string, string> | null
   mlAutomationEnabled?: boolean
 }
 
@@ -248,6 +249,18 @@ type ChartGraphType = 'line' | 'bar' | 'candlestick'
 function coerceChartInterval(v: string | null | undefined): ChartInterval {
   if (v && (CHART_INTERVALS as readonly string[]).includes(v)) return v as ChartInterval
   return '5m'
+}
+
+function coerceChartIntervalOverrideMap(
+  v: Record<string, string> | null | undefined,
+): Record<string, ChartInterval> {
+  if (!v || typeof v !== 'object') return {}
+  const out: Record<string, ChartInterval> = {}
+  for (const [token, raw] of Object.entries(v)) {
+    if (!raw || !(CHART_INTERVALS as readonly string[]).includes(raw)) continue
+    out[token] = raw as ChartInterval
+  }
+  return out
 }
 
 function coerceChartRangePreset(v: string | null | undefined): ChartRangePreset {
@@ -1843,8 +1856,10 @@ function FavoritesChartsGrid({
   favorites,
   rangePreset,
   onRangePresetChange,
-  interval,
-  onIntervalChange,
+  defaultInterval,
+  onDefaultIntervalChange,
+  chartIntervalByInstrumentToken,
+  onInstrumentIntervalChange,
   graphType,
   onGraphTypeChange,
   maLineVisibility,
@@ -1858,8 +1873,10 @@ function FavoritesChartsGrid({
   favorites: KiteInstrumentRow[]
   rangePreset: ChartRangePreset
   onRangePresetChange: (v: ChartRangePreset) => void
-  interval: ChartInterval
-  onIntervalChange: (v: ChartInterval) => void
+  defaultInterval: ChartInterval
+  onDefaultIntervalChange: (v: ChartInterval) => void
+  chartIntervalByInstrumentToken: Record<string, ChartInterval>
+  onInstrumentIntervalChange: (instrumentToken: string, interval: ChartInterval | null) => void
   graphType: ChartGraphType
   onGraphTypeChange: (v: ChartGraphType) => void
   maLineVisibility: MaLineVisibility
@@ -1879,8 +1896,8 @@ function FavoritesChartsGrid({
         idPrefix="fav-all"
         rangePreset={rangePreset}
         onRangePresetChange={onRangePresetChange}
-        interval={interval}
-        onIntervalChange={onIntervalChange}
+        interval={defaultInterval}
+        onIntervalChange={onDefaultIntervalChange}
         graphType={graphType}
         onGraphTypeChange={onGraphTypeChange}
         maLineVisibility={maLineVisibility}
@@ -1888,6 +1905,10 @@ function FavoritesChartsGrid({
         customEmaPeriod={customEmaPeriod}
         onCustomEmaPeriodChange={onCustomEmaPeriodChange}
       />
+      <p className="small text-secondary mb-3" style={{ maxWidth: '48rem' }}>
+        <strong>Default interval</strong> applies to every favorite chart unless you pick a symbol-specific interval on
+        that card. <strong>Auto ML</strong> uses the same rule: one interval per favorite when automation is on.
+      </p>
       <Row className="g-3">
         {favorites.map((row) => (
           <Col key={favoriteRowKey(row)} xs={12} lg={6} xl={4}>
@@ -1908,10 +1929,29 @@ function FavoritesChartsGrid({
                     ★ Remove
                   </Button>
                 </div>
+                <Form.Group className="mb-2" controlId={`fav-iv-${row.instrumentToken}`}>
+                  <Form.Label className="small text-secondary text-uppercase mb-1">Candles for this symbol</Form.Label>
+                  <Form.Select
+                    size="sm"
+                    value={chartIntervalByInstrumentToken[row.instrumentToken] ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      onInstrumentIntervalChange(row.instrumentToken, v === '' ? null : (v as ChartInterval))
+                    }}
+                    aria-label={`Chart interval for ${row.tradingsymbol}`}
+                  >
+                    <option value="">Default ({defaultInterval})</option>
+                    {CHART_INTERVALS.map((iv) => (
+                      <option key={iv} value={iv}>
+                        {iv}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </Form.Group>
                 <CompactPriceChart
                   row={row}
                   rangePreset={rangePreset}
-                  interval={interval}
+                  interval={chartIntervalByInstrumentToken[row.instrumentToken] ?? defaultInterval}
                   graphType={graphType}
                   heightPx={220}
                   maLineVisibility={maLineVisibility}
@@ -2315,6 +2355,17 @@ export function KiteInstrumentsPage() {
       try {
         if (exists) {
           await api.delete('/broker/kite/favorites', { params: { instrumentToken: r.instrumentToken } })
+          setChartIntervalByToken((prev) => {
+            const next = { ...prev }
+            delete next[r.instrumentToken]
+            return next
+          })
+          void api
+            .put('/broker/kite/instruments/chart-interval', {
+              instrumentToken: r.instrumentToken,
+              interval: null,
+            })
+            .catch(() => {})
         } else {
           await api.post('/broker/kite/favorites', r)
         }
@@ -2387,7 +2438,9 @@ export function KiteInstrumentsPage() {
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
+  const [chartIntervalByToken, setChartIntervalByToken] = useState<Record<string, ChartInterval>>({})
   const chartZoomSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const chartIntervalSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   const persistInstrumentChartZoom = useCallback((instrumentToken: string, visibleBars: number | null) => {
     setChartZoomByToken((prev) => {
@@ -2409,9 +2462,30 @@ export function KiteInstrumentsPage() {
     }, 400)
   }, [])
 
+  const persistInstrumentChartInterval = useCallback((instrumentToken: string, interval: ChartInterval | null) => {
+    setChartIntervalByToken((prev) => {
+      const next = { ...prev }
+      if (interval == null) delete next[instrumentToken]
+      else next[instrumentToken] = interval
+      return next
+    })
+    const timers = chartIntervalSaveTimersRef.current
+    const existing = timers[instrumentToken]
+    if (existing) window.clearTimeout(existing)
+    timers[instrumentToken] = window.setTimeout(() => {
+      void api
+        .put('/broker/kite/instruments/chart-interval', { instrumentToken, interval })
+        .catch(() => {
+          /* non-fatal */
+        })
+      delete timers[instrumentToken]
+    }, 400)
+  }, [])
+
   useEffect(
     () => () => {
       Object.values(chartZoomSaveTimersRef.current).forEach((tid) => window.clearTimeout(tid))
+      Object.values(chartIntervalSaveTimersRef.current).forEach((tid) => window.clearTimeout(tid))
     },
     [],
   )
@@ -2427,6 +2501,7 @@ export function KiteInstrumentsPage() {
           ? { ...data.zoomByInstrumentToken }
           : {},
       )
+      setChartIntervalByToken(coerceChartIntervalOverrideMap(data.intervalByInstrumentToken))
       setFavoriteMlAutomationEnabled(Boolean(data.mlAutomationEnabled))
       setMlAutomationError(null)
     } catch {
@@ -2744,8 +2819,10 @@ export function KiteInstrumentsPage() {
                   favorites={favorites}
                   rangePreset={chartRangePreset}
                   onRangePresetChange={setChartRangePreset}
-                  interval={chartInterval}
-                  onIntervalChange={setChartInterval}
+                  defaultInterval={chartInterval}
+                  onDefaultIntervalChange={setChartInterval}
+                  chartIntervalByInstrumentToken={chartIntervalByToken}
+                  onInstrumentIntervalChange={persistInstrumentChartInterval}
                   graphType={chartGraphType}
                   onGraphTypeChange={setChartGraphType}
                   maLineVisibility={maLineVisibility}

@@ -311,6 +311,31 @@ public sealed class BrokerController : ControllerBase
     }
 
     [Authorize]
+    [HttpPut("kite/instruments/chart-interval")]
+    public async Task<IActionResult> PutKiteInstrumentsChartInterval(
+        [FromBody] KiteInstrumentsChartIntervalPutDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with instrumentToken and interval (UI code 1m…1d, or null to use the page default for that token).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.SaveKiteInstrumentsChartIntervalOverrideAsync(User.GetUserId(), body, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
     [HttpGet("kite/login-url")]
     public async Task<ActionResult<KiteLoginUrlDto>> KiteLoginUrl(CancellationToken ct)
     {
