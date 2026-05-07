@@ -50,7 +50,7 @@ public sealed class PredictionsController : ControllerBase
         try
         {
             var env = await _predictions
-                .PredictForInstrumentAsync(User.GetUserId(), instrumentToken.Trim(), interval.Trim(), ct)
+                .PredictForInstrumentAsync(User.GetUserId(), instrumentToken.Trim(), interval.Trim(), source: null, ct)
                 .ConfigureAwait(false);
 
             var r = env.Result;
@@ -103,6 +103,25 @@ public sealed class PredictionsController : ControllerBase
                     interval.Trim(),
                     take ?? 500,
                     ct)
+                .ConfigureAwait(false);
+            return Ok(list);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>Recent automation-sourced ML predictions (newest first), joined with favorite symbol when available.</summary>
+    [HttpGet("price-direction/automation-recent")]
+    public async Task<ActionResult<IReadOnlyList<MlAutomationPredictionListItemDto>>> AutomationRecent(
+        [FromQuery] int? take,
+        CancellationToken ct)
+    {
+        try
+        {
+            var list = await _predictions
+                .ListAutomationRecentAsync(User.GetUserId(), take ?? 100, ct)
                 .ConfigureAwait(false);
             return Ok(list);
         }

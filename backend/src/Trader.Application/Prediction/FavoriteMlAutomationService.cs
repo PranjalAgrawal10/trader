@@ -90,6 +90,10 @@ public sealed class FavoriteMlAutomationService
 
     private async Task ProcessUserPredictionsAsync(Guid userId, CancellationToken ct)
     {
+        var acct = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
+        if (acct is null || !acct.FavoriteMlAutomationEnabled)
+            return;
+
         var interval = await ResolveIntervalAsync(userId, ct).ConfigureAwait(false);
         var favorites = await _favorites.ListByUserAsync(userId, ct).ConfigureAwait(false);
         if (favorites.Count == 0)
@@ -132,7 +136,12 @@ public sealed class FavoriteMlAutomationService
                 if (hasPending)
                     continue;
                 await _predictionService
-                    .PredictForInstrumentAsync(userId, fav.InstrumentToken, hist.Interval, ct)
+                    .PredictForInstrumentAsync(
+                        userId,
+                        fav.InstrumentToken,
+                        hist.Interval,
+                        PriceDirectionPredictionService.SourceAutomation,
+                        ct)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -174,6 +183,10 @@ public sealed class FavoriteMlAutomationService
         if (!_smtp.IsEnabled)
             return;
 
+        var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
+        if (user is null || string.IsNullOrWhiteSpace(user.Email) || !user.FavoriteMlAutomationEnabled)
+            return;
+
         var tz = ResolveReportTimeZone(_opts.ReportTimeZoneId);
         var nowLocal = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
         var ymd = DateOnly.FromDateTime(nowLocal.Date).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -204,10 +217,6 @@ public sealed class FavoriteMlAutomationService
             .ListPredictedBetweenAsync(userId, startUtcDay, endUtcDay, ct)
             .ConfigureAwait(false);
         if (rows.Count == 0)
-            return;
-
-        var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
-        if (user is null || string.IsNullOrWhiteSpace(user.Email))
             return;
 
         var favs = await _favorites.ListByUserAsync(userId, ct).ConfigureAwait(false);

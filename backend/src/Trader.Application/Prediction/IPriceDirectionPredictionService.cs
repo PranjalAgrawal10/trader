@@ -10,12 +10,18 @@ public interface IPriceDirectionPredictionService
         Guid userId,
         string instrumentToken,
         string interval,
+        string? source = null,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<MlPriceDirectionPredictionItemDto>> ListPredictionHistoryAsync(
         Guid userId,
         string instrumentToken,
         string interval,
+        int take,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
+        Guid userId,
         int take,
         CancellationToken ct = default);
 

@@ -24,6 +24,9 @@ public class MlPriceDirectionPrediction
     /// <summary><c>pending</c>, <c>correct</c>, or <c>wrong</c>.</summary>
     public string Outcome { get; set; } = "pending";
 
+    /// <summary>Optional origin, e.g. <c>automation</c> for favorite auto-predict job; null/empty = interactive API/SPA.</summary>
+    public string? Source { get; set; }
+
     public DateTimeOffset? NextBarTimeUtc { get; set; }
     public decimal? NextClose { get; set; }
 }

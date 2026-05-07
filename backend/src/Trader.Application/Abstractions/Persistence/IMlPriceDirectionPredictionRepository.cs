@@ -1,3 +1,4 @@
+using Trader.Application.Prediction;
 using Trader.Domain.Entities;
 
 namespace Trader.Application.Abstractions.Persistence;
@@ -22,6 +23,11 @@ public interface IMlPriceDirectionPredictionRepository
         Guid userId,
         DateTimeOffset startUtcInclusive,
         DateTimeOffset endUtcExclusive,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
+        Guid userId,
+        int take,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<MlPriceDirectionPrediction>> ListForInstrumentAsync(

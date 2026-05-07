@@ -147,6 +147,23 @@ interface KiteInstrumentsChartSettingsDto {
   rangePreset: string | null
   graphType: string | null
   zoomByInstrumentToken?: Record<string, number> | null
+  mlAutomationEnabled?: boolean
+}
+
+interface MlAutomationRecentRow {
+  id: string
+  predictedAt: string
+  instrumentToken: string
+  tradingsymbol: string | null
+  exchange: string | null
+  interval: string
+  refBarTime: string
+  refClose: number
+  direction: 'up' | 'down' | 'neutral'
+  confidence: number
+  outcome: 'pending' | 'correct' | 'wrong'
+  nextBarTime: string | null
+  nextClose: number | null
 }
 
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
@@ -2364,6 +2381,11 @@ export function KiteInstrumentsPage() {
   }, [customEmaPeriod, maLineVisibility.showCustomEma])
 
   const [chartPrefsHydrated, setChartPrefsHydrated] = useState(false)
+  const [favoriteMlAutomationEnabled, setFavoriteMlAutomationEnabled] = useState(false)
+  const [mlAutomationSaving, setMlAutomationSaving] = useState(false)
+  const [mlAutomationError, setMlAutomationError] = useState<string | null>(null)
+  const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
+  const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
   const chartZoomSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
@@ -2405,6 +2427,8 @@ export function KiteInstrumentsPage() {
           ? { ...data.zoomByInstrumentToken }
           : {},
       )
+      setFavoriteMlAutomationEnabled(Boolean(data.mlAutomationEnabled))
+      setMlAutomationError(null)
     } catch {
       // keep defaults
     } finally {
@@ -2424,13 +2448,28 @@ export function KiteInstrumentsPage() {
           interval: chartInterval,
           rangePreset: chartRangePreset,
           graphType: chartGraphType,
+          mlAutomationEnabled: favoriteMlAutomationEnabled,
         })
         .catch(() => {
           /* non-fatal */
         })
     }, 400)
     return () => window.clearTimeout(t)
-  }, [chartInterval, chartRangePreset, chartGraphType, chartPrefsHydrated])
+  }, [chartInterval, chartRangePreset, chartGraphType, chartPrefsHydrated, favoriteMlAutomationEnabled])
+
+  const loadAutomationRecent = useCallback(async () => {
+    try {
+      setAutomationRecentLoading(true)
+      const { data } = await api.get<MlAutomationRecentRow[]>('/predictions/price-direction/automation-recent', {
+        params: { take: 100 },
+      })
+      setAutomationRecent(data)
+    } catch {
+      /* non-fatal */
+    } finally {
+      setAutomationRecentLoading(false)
+    }
+  }, [])
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
@@ -2445,6 +2484,18 @@ export function KiteInstrumentsPage() {
   }, [])
 
   const isZerodha = provider?.toLowerCase() === 'zerodha'
+
+  useEffect(() => {
+    if (!isZerodha) {
+      setAutomationRecent([])
+      return
+    }
+    void loadAutomationRecent()
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadAutomationRecent()
+    }, 60_000)
+    return () => window.clearInterval(id)
+  }, [isZerodha, loadAutomationRecent])
 
   const liveMarket = useLiveMarketTick(chartRow?.instrumentToken ?? null, isZerodha && mainTab === 'browse' && !!chartRow)
   const liveLtp = liveMarket.lastPrice
@@ -2542,6 +2593,98 @@ export function KiteInstrumentsPage() {
                 <Nav.Link eventKey="favorites">All favorites ({favorites.length})</Nav.Link>
               </Nav.Item>
             </Nav>
+
+            <div className="mt-3 p-3 rounded border border-secondary">
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <Form.Check
+                  type="switch"
+                  id="favorite-ml-automation-switch"
+                  className="small"
+                  label={<span className="fw-semibold">Auto ML for favorites (server)</span>}
+                  checked={favoriteMlAutomationEnabled}
+                  disabled={!chartPrefsHydrated || mlAutomationSaving}
+                  onChange={(e) => {
+                    const v = e.target.checked
+                    setFavoriteMlAutomationEnabled(v)
+                    setMlAutomationSaving(true)
+                    setMlAutomationError(null)
+                    void api
+                      .put('/broker/kite/instruments/favorite-ml-automation', { enabled: v })
+                      .then(() => {
+                        void loadAutomationRecent()
+                      })
+                      .catch((err) => setMlAutomationError(problemDetail(err)))
+                      .finally(() => setMlAutomationSaving(false))
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline-secondary"
+                  size="sm"
+                  disabled={automationRecentLoading || !isZerodha}
+                  onClick={() => void loadAutomationRecent()}
+                >
+                  {automationRecentLoading ? 'Loading…' : 'Refresh list'}
+                </Button>
+              </div>
+              <p className="text-secondary small mb-2">
+                When enabled, the API runs scheduled next-bar predictions for each favorite (needs Kite session;{' '}
+                <strong className="text-body-secondary">FavoriteMlAutomation</strong> must be on in server config).
+              </p>
+              {mlAutomationError ? (
+                <Alert variant="warning" className="py-2 small mb-2">
+                  {mlAutomationError}
+                </Alert>
+              ) : null}
+              <div className="small text-secondary text-uppercase mb-1">Recent auto predictions</div>
+              <div className="table-responsive" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+                <Table striped bordered size="sm" className="mb-0 align-middle">
+                  <thead className="table-light">
+                    <tr className="text-nowrap">
+                      <th>Time (UTC)</th>
+                      <th>Symbol</th>
+                      <th>Interval</th>
+                      <th>Dir</th>
+                      <th>Conf</th>
+                      <th>Outcome</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-monospace">
+                    {automationRecent.length === 0 && !automationRecentLoading ? (
+                      <tr>
+                        <td colSpan={6} className="text-secondary small">
+                          No automation rows yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      automationRecent.map((r) => (
+                        <tr key={r.id}>
+                          <td className="small">{new Date(r.predictedAt).toLocaleString(undefined, { timeZone: 'UTC' })}</td>
+                          <td>
+                            {r.tradingsymbol ? `${r.tradingsymbol}` : r.instrumentToken}
+                            {r.exchange ? ` (${r.exchange})` : ''}
+                          </td>
+                          <td>{r.interval}</td>
+                          <td>{r.direction}</td>
+                          <td>{r.confidence}</td>
+                          <td
+                            className={
+                              r.outcome === 'correct'
+                                ? 'text-success'
+                                : r.outcome === 'wrong'
+                                  ? 'text-danger'
+                                  : 'text-muted'
+                            }
+                          >
+                            {r.outcome}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </Table>
+              </div>
+            </div>
 
             {favoritesError ? (
               <Alert variant="danger" className="mt-2 py-2 small mb-0">

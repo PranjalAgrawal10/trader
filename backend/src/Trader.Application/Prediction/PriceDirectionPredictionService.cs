@@ -13,6 +13,11 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
 
     public const int MaxHistoryTake = 2000;
 
+    public const int MaxAutomationHistoryTake = 500;
+
+    /// <summary>Value stored in <see cref="MlPriceDirectionPrediction.Source"/> for background favorite runs.</summary>
+    public const string SourceAutomation = "automation";
+
     private readonly IBrokerService _broker;
     private readonly IPriceDirectionPredictionEngine _engine;
     private readonly IMlPriceDirectionPredictionRepository _predictions;
@@ -31,6 +36,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         Guid userId,
         string instrumentToken,
         string interval,
+        string? source = null,
         CancellationToken ct = default)
     {
         var hist = await _broker
@@ -53,6 +59,9 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
 
         var id = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
+        var src = string.IsNullOrWhiteSpace(source) ? null : source.Trim();
+        if (src is { Length: > 32 })
+            src = src[..32];
         var entity = new MlPriceDirectionPrediction
         {
             Id = id,
@@ -67,6 +76,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             ModelId = result.ModelId,
             Detail = result.Detail,
             Outcome = "pending",
+            Source = src,
         };
 
         await _predictions.AddAsync(entity, ct).ConfigureAwait(false);
@@ -90,6 +100,15 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             .ListForInstrumentAsync(userId, token, intervalNorm, take, ct)
             .ConfigureAwait(false);
         return rows.Select(MapRow).ToList();
+    }
+
+    public Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
+        Guid userId,
+        int take,
+        CancellationToken ct = default)
+    {
+        take = Math.Clamp(take, 1, MaxAutomationHistoryTake);
+        return _predictions.ListAutomationRecentAsync(userId, take, ct);
     }
 
     public async Task ResolvePredictionAsync(
@@ -125,7 +144,8 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             x.Detail,
             x.Outcome,
             x.NextBarTimeUtc,
-            x.NextClose);
+            x.NextClose,
+            x.Source);
 
     private static string MapDirectionLabel(PriceDirectionLabel d) =>
         d switch

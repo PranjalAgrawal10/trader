@@ -19,7 +19,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
                 u.KiteInstrumentsChartInterval,
                 u.KiteInstrumentsChartRangePreset,
                 u.KiteInstrumentsChartGraphType,
-                u.KiteInstrumentsChartZoomJson))
+                u.KiteInstrumentsChartZoomJson,
+                u.FavoriteMlAutomationEnabled))
             .FirstOrDefaultAsync(ct);
 
     public async Task SaveAsync(Guid userId, KiteInstrumentsChartSettingsState settings, CancellationToken ct = default)
@@ -30,6 +31,16 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         user.KiteInstrumentsChartInterval = settings.Interval;
         user.KiteInstrumentsChartRangePreset = settings.RangePreset;
         user.KiteInstrumentsChartGraphType = settings.GraphType;
+        if (settings.FavoriteMlAutomationEnabled is bool ml)
+            user.FavoriteMlAutomationEnabled = ml;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task SetFavoriteMlAutomationAsync(Guid userId, bool enabled, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+                   ?? throw new InvalidOperationException("User not found.");
+        user.FavoriteMlAutomationEnabled = enabled;
         await _db.SaveChangesAsync(ct);
     }
 

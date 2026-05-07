@@ -64,7 +64,11 @@ public sealed record KiteInstrumentsChartSettingsDto(
     string? Interval,
     string? RangePreset,
     string? GraphType,
-    Dictionary<string, int>? ZoomByInstrumentToken = null);
+    Dictionary<string, int>? ZoomByInstrumentToken = null,
+    bool? MlAutomationEnabled = null);
+
+/// <summary>Toggle background ML runs for favorite instruments (per user).</summary>
+public sealed record FavoriteMlAutomationPutDto(bool Enabled);
 
 /// <summary>Updates saved visible bar count for one instrument; <c>null</c> <see cref="VisibleBars"/> clears zoom for that token.</summary>
 public sealed record KiteInstrumentsChartZoomPutDto(string InstrumentToken, int? VisibleBars);

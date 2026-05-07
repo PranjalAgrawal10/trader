@@ -263,6 +263,29 @@ public sealed class BrokerController : ControllerBase
     }
 
     [Authorize]
+    [HttpPut("kite/instruments/favorite-ml-automation")]
+    public async Task<IActionResult> PutFavoriteMlAutomation([FromBody] FavoriteMlAutomationPutDto? body, CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON { \"enabled\": true|false }.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.SetFavoriteMlAutomationEnabledAsync(User.GetUserId(), body.Enabled, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
     [HttpPut("kite/instruments/chart-zoom")]
     public async Task<IActionResult> PutKiteInstrumentsChartZoom(
         [FromBody] KiteInstrumentsChartZoomPutDto? body,

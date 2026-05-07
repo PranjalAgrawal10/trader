@@ -42,6 +42,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.KiteInstrumentsChartRangePreset).HasMaxLength(32);
             e.Property(x => x.KiteInstrumentsChartGraphType).HasMaxLength(16);
             e.Property(x => x.KiteInstrumentsChartZoomJson);
+            e.Property(x => x.FavoriteMlAutomationEnabled).HasDefaultValue(false);
             e.Property(x => x.TotpSecretProtected);
             e.Property(x => x.TotpPendingSecretProtected);
             e.Property(x => x.TotpRecoveryCodesProtected);
@@ -105,6 +106,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.ModelId).HasMaxLength(128);
             e.Property(x => x.Detail).HasColumnType("longtext");
             e.Property(x => x.Outcome).HasMaxLength(16);
+            e.Property(x => x.Source).HasMaxLength(32);
             e.Property(x => x.NextBarTimeUtc).HasColumnType("datetime(6)");
             e.Property(x => x.NextClose).HasPrecision(28, 8);
             e.HasIndex(x => new { x.UserId, x.InstrumentToken, x.Interval, x.PredictedAtUtc });

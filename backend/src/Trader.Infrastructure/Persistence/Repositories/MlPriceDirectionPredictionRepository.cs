@@ -1,11 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Trader.Application.Abstractions.Persistence;
+using Trader.Application.Prediction;
 using Trader.Domain.Entities;
 
 namespace Trader.Infrastructure.Persistence.Repositories;
 
 public sealed class MlPriceDirectionPredictionRepository : IMlPriceDirectionPredictionRepository
 {
+    private const string AutomationSource = PriceDirectionPredictionService.SourceAutomation;
+
     private readonly TraderDbContext _db;
 
     public MlPriceDirectionPredictionRepository(TraderDbContext db)
@@ -57,6 +60,36 @@ public sealed class MlPriceDirectionPredictionRepository : IMlPriceDirectionPred
                 && x.PredictedAtUtc < endUtcExclusive)
             .OrderBy(x => x.PredictedAtUtc)
             .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
+        Guid userId,
+        int take,
+        CancellationToken ct = default)
+    {
+        take = Math.Clamp(take, 1, PriceDirectionPredictionService.MaxAutomationHistoryTake);
+        var q =
+            from p in _db.MlPriceDirectionPredictions.AsNoTracking()
+            where p.UserId == userId && p.Source == AutomationSource
+            join f in _db.KiteFavoriteInstruments.AsNoTracking()
+                on new { p.UserId, Token = p.InstrumentToken } equals new { f.UserId, Token = f.InstrumentToken } into fav
+            from f in fav.DefaultIfEmpty()
+            orderby p.PredictedAtUtc descending
+            select new MlAutomationPredictionListItemDto(
+                p.Id,
+                p.PredictedAtUtc,
+                p.InstrumentToken,
+                f == null ? null : f.Tradingsymbol,
+                f == null ? null : f.Exchange,
+                p.Interval,
+                p.RefBarTimeUtc,
+                p.RefClose,
+                p.Direction,
+                p.Confidence,
+                p.Outcome,
+                p.NextBarTimeUtc,
+                p.NextClose);
+        return await q.Take(take).ToListAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<MlPriceDirectionPrediction>> ListForInstrumentAsync(

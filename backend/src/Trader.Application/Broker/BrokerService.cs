@@ -337,7 +337,12 @@ public sealed class BrokerService : IBrokerService
         if (row is null)
             throw new InvalidOperationException("User not found.");
 
-        return new KiteInstrumentsChartSettingsDto(row.Interval, row.RangePreset, row.GraphType, ParseChartZoomMap(row.ChartZoomByInstrumentTokenJson));
+        return new KiteInstrumentsChartSettingsDto(
+            row.Interval,
+            row.RangePreset,
+            row.GraphType,
+            ParseChartZoomMap(row.ChartZoomByInstrumentTokenJson),
+            row.FavoriteMlAutomationEnabled ?? false);
     }
 
     public async Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default)
@@ -406,12 +411,16 @@ public sealed class BrokerService : IBrokerService
         var range = NormalizeChartRangePreset(settings.RangePreset);
         var graph = NormalizeChartGraphType(settings.GraphType);
 
-        await _kiteChartSettings.SaveAsync(
-                userId,
-                new KiteInstrumentsChartSettingsState(interval, range, graph, null),
-                ct)
+        await _kiteChartSettings
+                .SaveAsync(
+                    userId,
+                    new KiteInstrumentsChartSettingsState(interval, range, graph, null, settings.MlAutomationEnabled),
+                    ct)
             .ConfigureAwait(false);
     }
+
+    public Task SetFavoriteMlAutomationEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default) =>
+        _kiteChartSettings.SetFavoriteMlAutomationAsync(userId, enabled, ct);
 
     private async Task RequireUserExistsAsync(Guid userId, CancellationToken ct)
     {

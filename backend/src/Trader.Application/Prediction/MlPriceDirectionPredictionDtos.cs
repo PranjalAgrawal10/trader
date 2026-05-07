@@ -11,6 +11,22 @@ public sealed record MlPriceDirectionPredictionItemDto(
     string Detail,
     string Outcome,
     DateTimeOffset? NextBarTime,
+    decimal? NextClose,
+    string? Source = null);
+
+public sealed record MlAutomationPredictionListItemDto(
+    Guid Id,
+    DateTimeOffset PredictedAt,
+    string InstrumentToken,
+    string? Tradingsymbol,
+    string? Exchange,
+    string Interval,
+    DateTimeOffset RefBarTime,
+    decimal RefClose,
+    string Direction,
+    int Confidence,
+    string Outcome,
+    DateTimeOffset? NextBarTime,
     decimal? NextClose);
 
 public sealed record PriceDirectionPredictionEnvelope(
