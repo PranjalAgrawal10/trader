@@ -17,6 +17,7 @@ public sealed class TraderDbContext : DbContext
     public DbSet<HistoricalCandle> HistoricalCandles => Set<HistoricalCandle>();
     public DbSet<KiteFavoriteInstrument> KiteFavoriteInstruments => Set<KiteFavoriteInstrument>();
     public DbSet<MlPriceDirectionPrediction> MlPriceDirectionPredictions => Set<MlPriceDirectionPrediction>();
+    public DbSet<MlFavoriteEodReportSent> MlFavoriteEodReportsSent => Set<MlFavoriteEodReportSent>();
     public DbSet<Strategy> Strategies => Set<Strategy>();
     public DbSet<Bot> Bots => Set<Bot>();
     public DbSet<Trade> Trades => Set<Trade>();
@@ -108,6 +109,15 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.NextClose).HasPrecision(28, 8);
             e.HasIndex(x => new { x.UserId, x.InstrumentToken, x.Interval, x.PredictedAtUtc });
             e.HasOne(x => x.User).WithMany(u => u.MlPriceDirectionPredictions).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MlFavoriteEodReportSent>(e =>
+        {
+            e.Property(x => x.ReportDayYmd).HasMaxLength(10);
+            e.Property(x => x.SentAtUtc).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.ReportDayYmd }).IsUnique();
+            e.HasOne(x => x.User).WithMany(u => u.MlFavoriteEodReportsSent).HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -6,6 +6,24 @@ public interface IMlPriceDirectionPredictionRepository
 {
     Task<MlPriceDirectionPrediction?> FindTrackedAsync(Guid userId, Guid id, CancellationToken ct = default);
 
+    Task<bool> HasPendingForRefBarAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset refBarTimeUtc,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<MlPriceDirectionPrediction>> ListPendingAsync(
+        Guid userId,
+        int take,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<MlPriceDirectionPrediction>> ListPredictedBetweenAsync(
+        Guid userId,
+        DateTimeOffset startUtcInclusive,
+        DateTimeOffset endUtcExclusive,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<MlPriceDirectionPrediction>> ListForInstrumentAsync(
         Guid userId,
         string instrumentToken,

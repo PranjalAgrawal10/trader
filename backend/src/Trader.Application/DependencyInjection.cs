@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddScoped<ITradeService, TradeService>();
         services.AddScoped<IEmailOtpService, EmailOtpService>();
         services.AddScoped<IPriceDirectionPredictionService, PriceDirectionPredictionService>();
+        services.AddScoped<FavoriteMlAutomationService>();
         return services;
     }
 }

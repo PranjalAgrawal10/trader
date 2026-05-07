@@ -4,6 +4,8 @@ namespace Trader.Application.Abstractions.Persistence;
 
 public interface IKiteFavoriteInstrumentRepository
 {
+    Task<IReadOnlyList<Guid>> ListDistinctUserIdsWithFavoritesAsync(CancellationToken ct = default);
+
     Task<IReadOnlyList<KiteFavoriteInstrument>> ListByUserAsync(Guid userId, CancellationToken ct = default);
 
     Task<int> CountByUserAsync(Guid userId, CancellationToken ct = default);

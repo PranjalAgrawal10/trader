@@ -16,6 +16,49 @@ public sealed class MlPriceDirectionPredictionRepository : IMlPriceDirectionPred
     public Task<MlPriceDirectionPrediction?> FindTrackedAsync(Guid userId, Guid id, CancellationToken ct = default) =>
         _db.MlPriceDirectionPredictions.FirstOrDefaultAsync(x => x.UserId == userId && x.Id == id, ct);
 
+    public Task<bool> HasPendingForRefBarAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset refBarTimeUtc,
+        CancellationToken ct = default) =>
+        _db.MlPriceDirectionPredictions.AnyAsync(
+            x => x.UserId == userId
+                && x.InstrumentToken == instrumentToken
+                && x.Interval == interval
+                && x.RefBarTimeUtc == refBarTimeUtc
+                && x.Outcome == "pending",
+            ct);
+
+    public async Task<IReadOnlyList<MlPriceDirectionPrediction>> ListPendingAsync(
+        Guid userId,
+        int take,
+        CancellationToken ct = default)
+    {
+        take = Math.Clamp(take, 1, 10_000);
+        return await _db.MlPriceDirectionPredictions
+            .AsNoTracking()
+            .Where(x => x.UserId == userId && x.Outcome == "pending")
+            .OrderBy(x => x.PredictedAtUtc)
+            .Take(take)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<MlPriceDirectionPrediction>> ListPredictedBetweenAsync(
+        Guid userId,
+        DateTimeOffset startUtcInclusive,
+        DateTimeOffset endUtcExclusive,
+        CancellationToken ct = default)
+    {
+        return await _db.MlPriceDirectionPredictions
+            .AsNoTracking()
+            .Where(x => x.UserId == userId
+                && x.PredictedAtUtc >= startUtcInclusive
+                && x.PredictedAtUtc < endUtcExclusive)
+            .OrderBy(x => x.PredictedAtUtc)
+            .ToListAsync(ct);
+    }
+
     public async Task<IReadOnlyList<MlPriceDirectionPrediction>> ListForInstrumentAsync(
         Guid userId,
         string instrumentToken,

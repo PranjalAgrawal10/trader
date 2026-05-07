@@ -13,6 +13,16 @@ public sealed class KiteFavoriteInstrumentRepository : IKiteFavoriteInstrumentRe
         _db = db;
     }
 
+    public async Task<IReadOnlyList<Guid>> ListDistinctUserIdsWithFavoritesAsync(CancellationToken ct = default)
+    {
+        var ids = await _db.KiteFavoriteInstruments
+            .AsNoTracking()
+            .Select(x => x.UserId)
+            .Distinct()
+            .ToListAsync(ct);
+        return ids;
+    }
+
     public async Task<IReadOnlyList<KiteFavoriteInstrument>> ListByUserAsync(Guid userId, CancellationToken ct = default)
     {
         var list = await _db.KiteFavoriteInstruments

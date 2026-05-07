@@ -18,7 +18,15 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         _logger = logger;
     }
 
-    public async Task SendPlainTextAsync(string to, string subject, string body, CancellationToken ct = default)
+    public Task SendPlainTextAsync(string to, string subject, string body, CancellationToken ct = default) =>
+        SendPlainTextAsync(to, subject, body, Array.Empty<EmailAttachment>(), ct);
+
+    public async Task SendPlainTextAsync(
+        string to,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachment> attachments,
+        CancellationToken ct = default)
     {
         if (!_options.IsEnabled)
         {
@@ -45,6 +53,13 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         };
         message.To.Add(to.Trim());
 
+        foreach (var a in attachments)
+        {
+            var stream = new MemoryStream(a.Content, writable: false);
+            // MailMessage.Dispose disposes attached streams when the message is disposed.
+            message.Attachments.Add(new Attachment(stream, a.FileName, a.ContentType));
+        }
+
         var user = (_options.User ?? fromEmail).Trim();
         using var client = new SmtpClient(_options.Host.Trim(), _options.Port)
         {
@@ -55,7 +70,7 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         try
         {
             ct.ThrowIfCancellationRequested();
-            await client.SendMailAsync(message);
+            await client.SendMailAsync(message, ct).ConfigureAwait(false);
         }
         catch (SmtpException ex)
         {
