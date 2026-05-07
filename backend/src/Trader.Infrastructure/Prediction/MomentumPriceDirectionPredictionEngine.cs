@@ -1,3 +1,4 @@
+using Trader.Application.Broker;
 using Trader.Application.Prediction;
 
 namespace Trader.Infrastructure.Prediction;
@@ -11,19 +12,19 @@ public sealed class MomentumPriceDirectionPredictionEngine : IPriceDirectionPred
 
     public string Description => "Baseline: last close vs prior bar (no ML).";
 
-    public PriceDirectionResult PredictNextDirection(IReadOnlyList<decimal> closes)
+    public PriceDirectionResult PredictNextDirection(IReadOnlyList<KiteHistoricalCandlePointDto> candles)
     {
-        if (closes.Count < PriceDirectionPredictionService.MinCandlesRequired)
+        if (candles.Count < PriceDirectionPredictionService.MinCandlesRequired)
         {
             return new PriceDirectionResult(
                 PriceDirectionLabel.Neutral,
                 0,
                 ModelId,
-                $"Need at least {PriceDirectionPredictionService.MinCandlesRequired} closes; got {closes.Count}.");
+                $"Need at least {PriceDirectionPredictionService.MinCandlesRequired} candles; got {candles.Count}.");
         }
 
-        var a = closes[^2];
-        var b = closes[^1];
+        var a = candles[^2].Close;
+        var b = candles[^1].Close;
         if (b > a)
         {
             return new PriceDirectionResult(

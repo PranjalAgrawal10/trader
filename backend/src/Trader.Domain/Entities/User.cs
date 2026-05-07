@@ -64,5 +64,8 @@ public class User
 
     public ICollection<MlPriceDirectionPrediction> MlPriceDirectionPredictions { get; set; } = new List<MlPriceDirectionPrediction>();
 
+    public ICollection<MlLightGbmTripleBarrierPrediction> MlLightGbmTripleBarrierPredictions { get; set; } =
+        new List<MlLightGbmTripleBarrierPrediction>();
+
     public ICollection<MlFavoriteEodReportSent> MlFavoriteEodReportsSent { get; set; } = new List<MlFavoriteEodReportSent>();
 }

@@ -23,6 +23,7 @@ public sealed class FavoriteMlAutomationService
     private readonly SmtpOptions _smtp;
     private readonly IKiteFavoriteInstrumentRepository _favorites;
     private readonly IMlPriceDirectionPredictionRepository _predictions;
+    private readonly IMlLightGbmTripleBarrierPredictionRepository _lightGbmPredictions;
     private readonly IMlFavoriteEodReportSentRepository _eodSent;
     private readonly IPriceDirectionPredictionService _predictionService;
     private readonly IBrokerService _broker;
@@ -37,6 +38,7 @@ public sealed class FavoriteMlAutomationService
         IOptions<SmtpOptions> smtp,
         IKiteFavoriteInstrumentRepository favorites,
         IMlPriceDirectionPredictionRepository predictions,
+        IMlLightGbmTripleBarrierPredictionRepository lightGbmPredictions,
         IMlFavoriteEodReportSentRepository eodSent,
         IPriceDirectionPredictionService predictionService,
         IBrokerService broker,
@@ -50,6 +52,7 @@ public sealed class FavoriteMlAutomationService
         _smtp = smtp.Value;
         _favorites = favorites;
         _predictions = predictions;
+        _lightGbmPredictions = lightGbmPredictions;
         _eodSent = eodSent;
         _predictionService = predictionService;
         _broker = broker;
@@ -111,7 +114,41 @@ public sealed class FavoriteMlAutomationService
             ct.ThrowIfCancellationRequested();
             try
             {
-                await TryResolvePendingAsync(userId, row, ct).ConfigureAwait(false);
+                await TryResolvePendingRowAsync(
+                    userId,
+                    row.InstrumentToken,
+                    row.Interval,
+                    row.RefBarTimeUtc,
+                    row.Id,
+                    ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Could not resolve prediction {Id} for user {UserId}",
+                    row.Id,
+                    userId);
+            }
+        }
+
+        var pendingGbm = await _lightGbmPredictions
+            .ListPendingAsync(userId, _opts.MaxPendingResolutionBatch, ct)
+            .ConfigureAwait(false);
+        foreach (var row in pendingGbm)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await TryResolvePendingRowAsync(
+                    userId,
+                    row.InstrumentToken,
+                    row.Interval,
+                    row.RefBarTimeUtc,
+                    row.Id,
+                    ct)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -135,9 +172,9 @@ public sealed class FavoriteMlAutomationService
                 if (hist.Candles.Count == 0)
                     continue;
                 var last = hist.Candles[^1];
-                var hasPending = await _predictions
-                    .HasPendingForRefBarAsync(userId, fav.InstrumentToken.Trim(), hist.Interval, last.Time, ct)
-                    .ConfigureAwait(false);
+                var hasPending =
+                    await _predictions.HasPendingForRefBarAsync(userId, fav.InstrumentToken.Trim(), hist.Interval, last.Time, ct).ConfigureAwait(false)
+                    || await _lightGbmPredictions.HasPendingForRefBarAsync(userId, fav.InstrumentToken.Trim(), hist.Interval, last.Time, ct).ConfigureAwait(false);
                 if (hasPending)
                     continue;
                 await _predictionService
@@ -161,17 +198,23 @@ public sealed class FavoriteMlAutomationService
         }
     }
 
-    private async Task TryResolvePendingAsync(Guid userId, MlPriceDirectionPrediction row, CancellationToken ct)
+    private async Task TryResolvePendingRowAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset refBarTimeUtc,
+        Guid predictionId,
+        CancellationToken ct)
     {
         var hist = await _broker
-            .GetKiteHistoricalCandlesAsync(userId, row.InstrumentToken, row.Interval, null, null, ct)
+            .GetKiteHistoricalCandlesAsync(userId, instrumentToken, interval, null, null, ct)
             .ConfigureAwait(false);
-        var idx = FindRefBarIndex(hist.Candles, row.RefBarTimeUtc);
+        var idx = FindRefBarIndex(hist.Candles, refBarTimeUtc);
         if (idx < 0 || idx + 1 >= hist.Candles.Count)
             return;
         var next = hist.Candles[idx + 1];
         await _predictionService
-            .ResolvePredictionAsync(userId, row.Id, next.Time, next.Close, ct)
+            .ResolvePredictionAsync(userId, predictionId, next.Time, next.Close, ct)
             .ConfigureAwait(false);
     }
 
@@ -275,9 +318,13 @@ public sealed class FavoriteMlAutomationService
         var startUtcDay = TimeZoneInfo.ConvertTimeToUtc(startLocal, tz);
         var endUtcDay = TimeZoneInfo.ConvertTimeToUtc(endLocal, tz);
 
-        var rows = await _predictions
+        var legacyRows = await _predictions
             .ListPredictedBetweenAsync(userId, startUtcDay, endUtcDay, ct)
             .ConfigureAwait(false);
+        var gbmRows = await _lightGbmPredictions
+            .ListPredictedBetweenAsync(userId, startUtcDay, endUtcDay, ct)
+            .ConfigureAwait(false);
+        var rows = CombineReportRows(legacyRows, gbmRows);
         if (rows.Count == 0)
             return;
 
@@ -324,8 +371,70 @@ public sealed class FavoriteMlAutomationService
         }
     }
 
+    private static IReadOnlyList<MlEodReportRow> CombineReportRows(
+        IReadOnlyList<MlPriceDirectionPrediction> legacy,
+        IReadOnlyList<MlLightGbmTripleBarrierPrediction> gbm)
+    {
+        if (legacy.Count == 0 && gbm.Count == 0)
+            return Array.Empty<MlEodReportRow>();
+
+        var list = new List<MlEodReportRow>(legacy.Count + gbm.Count);
+        foreach (var r in legacy)
+        {
+            list.Add(
+                new MlEodReportRow(
+                    r.PredictedAtUtc,
+                    r.InstrumentToken,
+                    r.Interval,
+                    r.Direction,
+                    r.Confidence,
+                    r.Outcome,
+                    r.RefBarTimeUtc,
+                    r.RefClose,
+                    r.NextBarTimeUtc,
+                    r.NextClose,
+                    r.ModelId,
+                    r.Detail));
+        }
+
+        foreach (var r in gbm)
+        {
+            list.Add(
+                new MlEodReportRow(
+                    r.PredictedAtUtc,
+                    r.InstrumentToken,
+                    r.Interval,
+                    r.Direction,
+                    r.Confidence,
+                    r.Outcome,
+                    r.RefBarTimeUtc,
+                    r.RefClose,
+                    r.NextBarTimeUtc,
+                    r.NextClose,
+                    r.ModelId,
+                    r.Detail));
+        }
+
+        list.Sort(static (a, b) => DateTimeOffset.Compare(a.PredictedAtUtc, b.PredictedAtUtc));
+        return list;
+    }
+
+    private sealed record MlEodReportRow(
+        DateTimeOffset PredictedAtUtc,
+        string InstrumentToken,
+        string Interval,
+        string Direction,
+        int Confidence,
+        string Outcome,
+        DateTimeOffset RefBarTimeUtc,
+        decimal RefClose,
+        DateTimeOffset? NextBarTimeUtc,
+        decimal? NextClose,
+        string ModelId,
+        string Detail);
+
     private static string BuildCsv(
-        IReadOnlyList<MlPriceDirectionPrediction> rows,
+        IReadOnlyList<MlEodReportRow> rows,
         IReadOnlyDictionary<string, (string Tradingsymbol, string Exchange)> symbolByToken)
     {
         var sb = new StringBuilder();

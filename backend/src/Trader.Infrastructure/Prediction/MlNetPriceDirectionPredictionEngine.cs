@@ -1,6 +1,7 @@
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.Extensions.Logging;
+using Trader.Application.Broker;
 using Trader.Application.Prediction;
 
 namespace Trader.Infrastructure.Prediction;
@@ -27,16 +28,18 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
         _ml = new MLContext(seed: 42);
     }
 
-    public PriceDirectionResult PredictNextDirection(IReadOnlyList<decimal> closes)
+    public PriceDirectionResult PredictNextDirection(IReadOnlyList<KiteHistoricalCandlePointDto> candles)
     {
-        if (closes.Count < PriceDirectionPredictionService.MinCandlesRequired)
+        if (candles.Count < PriceDirectionPredictionService.MinCandlesRequired)
         {
             return new PriceDirectionResult(
                 PriceDirectionLabel.Neutral,
                 0,
                 ModelId,
-                "Not enough closes for ML.");
+                "Not enough candles for ML.");
         }
+
+        var closes = candles.Select(static c => c.Close).ToList();
 
         try
         {

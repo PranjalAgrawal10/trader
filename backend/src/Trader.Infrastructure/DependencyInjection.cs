@@ -100,6 +100,7 @@ public static class DependencyInjection
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IKiteFavoriteInstrumentRepository, KiteFavoriteInstrumentRepository>();
         services.AddScoped<IMlPriceDirectionPredictionRepository, MlPriceDirectionPredictionRepository>();
+        services.AddScoped<IMlLightGbmTripleBarrierPredictionRepository, MlLightGbmTripleBarrierPredictionRepository>();
         services.AddScoped<IMlFavoriteEodReportSentRepository, MlFavoriteEodReportSentRepository>();
         services.AddScoped<IStrategyRepository, StrategyRepository>();
         services.AddScoped<IBotRepository, BotRepository>();
@@ -116,11 +117,13 @@ public static class DependencyInjection
         services.AddHostedService<FavoriteMlAutomationBackgroundService>();
 
         services.AddSingleton<MlNetPriceDirectionPredictionEngine>();
+        services.AddSingleton<MlNetLightGbmTripleBarrierPredictionEngine>();
         services.AddSingleton<MomentumPriceDirectionPredictionEngine>();
         services.AddSingleton<IPriceDirectionPredictionEngineRegistry>(sp =>
             new PriceDirectionPredictionEngineRegistry(
                 new IPriceDirectionPredictionEngine[]
                 {
+                    sp.GetRequiredService<MlNetLightGbmTripleBarrierPredictionEngine>(),
                     sp.GetRequiredService<MlNetPriceDirectionPredictionEngine>(),
                     sp.GetRequiredService<MomentumPriceDirectionPredictionEngine>(),
                 },

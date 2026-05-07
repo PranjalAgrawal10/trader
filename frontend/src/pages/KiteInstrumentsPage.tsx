@@ -58,6 +58,7 @@ import {
   historiesEqual,
   historyItemsFromApi,
   loadMlHistory,
+  ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID,
   resolveMlHistory,
   saveMlHistory,
   sortByPredictedAtNewestFirst,
@@ -147,6 +148,8 @@ interface PriceDirectionApiResponse {
   refBarTime?: string | null
   refClose?: number | null
   predictedAt?: string | null
+  /** When the server persisted a row: which table it used. */
+  predictionStorage?: 'classicPriceDirection' | 'lightgbmTripleBarrier' | null
 }
 
 /** GET /api/v1/predictions/price-direction/models */
@@ -1363,7 +1366,101 @@ function MlOutcomePieChart({ counts, height }: { counts: MlOutcomeCounts; height
   )
 }
 
-/** ML next-bar direction; predictions stored on the server (history + resolve); localStorage fallback if history GET fails. */
+function MlPredictionHistoryTableBody({
+  rows,
+  compact,
+}: {
+  rows: MlPredictionLogEntry[]
+  compact?: boolean
+}) {
+  return (
+    <Table
+      responsive
+      bordered
+      size="sm"
+      className="mb-0 align-middle font-monospace"
+      style={{ fontSize: compact ? '0.65rem' : '0.72rem' }}
+    >
+      <thead
+        className="table-light text-secondary text-nowrap"
+        style={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
+          boxShadow: 'inset 0 -1px 0 var(--bs-border-color)',
+        }}
+      >
+        <tr>
+          <th>#</th>
+          <th>Predicted</th>
+          <th>Dir</th>
+          <th>Conf</th>
+          <th>Outcome</th>
+          <th>Ref bar</th>
+          <th>Ref close</th>
+          <th>Next bar</th>
+          <th>Next close</th>
+          <th>Model</th>
+          <th className="d-none d-md-table-cell">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((e, idx) => (
+          <tr
+            key={e.id}
+            style={{
+              borderLeft: '3px solid',
+              borderLeftColor:
+                e.outcome === 'pending' ? '#6c757d' : e.outcome === 'correct' ? '#198754' : '#dc3545',
+              backgroundColor:
+                e.outcome === 'pending'
+                  ? undefined
+                  : e.outcome === 'correct'
+                    ? 'rgba(25, 135, 84, 0.09)'
+                    : 'rgba(220, 53, 69, 0.09)',
+            }}
+          >
+            <td className="text-muted">{idx + 1}</td>
+            <td className="text-nowrap">{formatLocalDateTime(e.predictedAt)}</td>
+            <td
+              className={
+                e.direction === 'up'
+                  ? 'text-success fw-semibold'
+                  : e.direction === 'down'
+                    ? 'text-danger fw-semibold'
+                    : 'text-secondary fw-semibold'
+              }
+            >
+              {e.direction.toUpperCase()}
+            </td>
+            <td>{e.confidence}%</td>
+            <td className="text-nowrap">
+              {e.outcome === 'pending' ? (
+                <span className="text-muted fst-italic">Pending</span>
+              ) : (
+                <span className={e.outcome === 'correct' ? 'text-success' : 'text-danger'}>
+                  {e.outcome === 'correct' ? 'Correct' : 'Wrong'}
+                </span>
+              )}
+            </td>
+            <td className="text-nowrap">{formatLocalDateTime(e.refBarTime)}</td>
+            <td>{e.refClose.toFixed(4)}</td>
+            <td className="text-nowrap">{e.nextBarTime ? formatLocalDateTime(e.nextBarTime) : '—'}</td>
+            <td>{e.nextClose != null ? e.nextClose.toFixed(4) : '—'}</td>
+            <td className="text-truncate" style={{ maxWidth: compact ? '4.5rem' : '7rem' }} title={e.modelId}>
+              {e.modelId}
+            </td>
+            <td className="d-none d-md-table-cell text-truncate text-muted" style={{ maxWidth: '12rem' }} title={e.detail}>
+              {e.detail}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </Table>
+  )
+}
+
+/** ML next-bar direction; classic vs LightGBM rows use separate server tables and history endpoints. */
 function MlNextBarBiasBar({
   instrumentToken,
   interval,
@@ -1381,9 +1478,16 @@ function MlNextBarBiasBar({
   const [priceModels, setPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
   const [selectedPriceModelId, setSelectedPriceModelId] = useState<string>('')
   const [history, setHistory] = useState<MlPredictionLogEntry[]>([])
+  const [lightGbmHistory, setLightGbmHistory] = useState<MlPredictionLogEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const historySourceRef = useRef<'api' | 'local'>('api')
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
+
+  const storesPredictionsInLightGbm = useMemo(() => {
+    if (selectedPriceModelId)
+      return selectedPriceModelId === ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID
+    return priceModels?.defaultModelId === ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID
+  }, [selectedPriceModelId, priceModels?.defaultModelId])
 
   const outcomeCounts = useMemo(() => {
     let correct = 0
@@ -1397,17 +1501,43 @@ function MlNextBarBiasBar({
     return { correct, wrong, pending }
   }, [history])
 
+  const lightGbmOutcomeCounts = useMemo(() => {
+    let correct = 0
+    let wrong = 0
+    let pending = 0
+    for (const e of lightGbmHistory) {
+      if (e.outcome === 'correct') correct++
+      else if (e.outcome === 'wrong') wrong++
+      else pending++
+    }
+    return { correct, wrong, pending }
+  }, [lightGbmHistory])
+
   const reloadHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
-      const { data } = await api.get<MlPriceDirectionHistoryApiRow[]>('/predictions/price-direction/history', {
-        params: { instrumentToken, interval, take: 2000 },
-      })
-      historySourceRef.current = 'api'
-      setHistory(historyItemsFromApi(data))
-    } catch {
-      historySourceRef.current = 'local'
-      setHistory(loadMlHistory(instrumentToken, interval))
+      const [classicRes, lgbmRes] = await Promise.allSettled([
+        api.get<MlPriceDirectionHistoryApiRow[]>('/predictions/price-direction/history', {
+          params: { instrumentToken, interval, take: 2000 },
+        }),
+        api.get<MlPriceDirectionHistoryApiRow[]>('/predictions/price-direction/lightgbm-triple-barrier/history', {
+          params: { instrumentToken, interval, take: 2000 },
+        }),
+      ])
+
+      if (classicRes.status === 'fulfilled') {
+        historySourceRef.current = 'api'
+        setHistory(historyItemsFromApi(classicRes.value.data))
+      } else {
+        historySourceRef.current = 'local'
+        setHistory(loadMlHistory(instrumentToken, interval))
+      }
+
+      if (lgbmRes.status === 'fulfilled') {
+        setLightGbmHistory(historyItemsFromApi(lgbmRes.value.data))
+      } else {
+        setLightGbmHistory([])
+      }
     } finally {
       setHistoryLoading(false)
     }
@@ -1469,6 +1599,33 @@ function MlNextBarBiasBar({
     })
   }, [instrumentToken, interval, candleSeries])
 
+  useEffect(() => {
+    if (candleSeries.length === 0) return
+    setLightGbmHistory((prev) => {
+      const resolved = resolveMlHistory(prev, candleSeries)
+      for (const r of resolved) {
+        const p = prev.find((x) => x.id === r.id)
+        if (
+          p &&
+          p.outcome === 'pending' &&
+          r.outcome !== 'pending' &&
+          r.serverBacked &&
+          r.nextBarTime &&
+          r.nextClose != null
+        ) {
+          void api
+            .patch(`/predictions/price-direction/${r.id}/resolve`, {
+              nextBarTime: r.nextBarTime,
+              nextClose: r.nextClose,
+            })
+            .catch(() => {})
+        }
+      }
+      if (historiesEqual(prev, resolved)) return prev
+      return resolved
+    })
+  }, [instrumentToken, interval, candleSeries])
+
   const fetchMlBias = useCallback(async () => {
     setMlLoading(true)
     setMlError(null)
@@ -1490,17 +1647,34 @@ function MlNextBarBiasBar({
             : null
       if (!refBar) return
 
-      setHistory((prev) => {
+      const appendAndResolve = (prev: MlPredictionLogEntry[]) => {
         const extended = appendMlPrediction(prev, data, refBar, {
           serverId: data.predictionId ?? undefined,
           predictedAt: data.predictedAt ?? undefined,
         })
-        const resolved = resolveMlHistory(extended, candleSeries)
-        if (historySourceRef.current === 'local') {
-          saveMlHistory(instrumentToken, interval, resolved)
-        }
-        return resolved
-      })
+        return resolveMlHistory(extended, candleSeries)
+      }
+
+      const useLightGbm =
+        data.predictionStorage === 'lightgbmTripleBarrier' ||
+        (data.predictionStorage !== 'classicPriceDirection' && storesPredictionsInLightGbm)
+
+      if (useLightGbm) {
+        setLightGbmHistory((prev) => {
+          const resolved = appendAndResolve(prev)
+          if (historiesEqual(prev, resolved)) return prev
+          return resolved
+        })
+      } else {
+        setHistory((prev) => {
+          const resolved = appendAndResolve(prev)
+          if (historySourceRef.current === 'local') {
+            saveMlHistory(instrumentToken, interval, resolved)
+          }
+          if (historiesEqual(prev, resolved)) return prev
+          return resolved
+        })
+      }
       if (data.predictionId) {
         historySourceRef.current = 'api'
       }
@@ -1510,10 +1684,14 @@ function MlNextBarBiasBar({
     } finally {
       setMlLoading(false)
     }
-  }, [instrumentToken, interval, candleSeries, selectedPriceModelId])
+  }, [instrumentToken, interval, candleSeries, selectedPriceModelId, storesPredictionsInLightGbm])
 
   const gapClass = compact ? 'mb-1' : 'mb-2'
   const mlHistoryTableRows = useMemo(() => sortByPredictedAtNewestFirst(history), [history])
+  const mlLightGbmHistoryTableRows = useMemo(
+    () => sortByPredictedAtNewestFirst(lightGbmHistory),
+    [lightGbmHistory],
+  )
 
   return (
     <div
@@ -1588,7 +1766,7 @@ function MlNextBarBiasBar({
             '↻ Predictions'
           )}
         </Button>
-        {history.length > 0 ? (
+        {history.length > 0 || lightGbmHistory.length > 0 ? (
           <Button
             type="button"
             variant="outline-secondary"
@@ -1629,9 +1807,24 @@ function MlNextBarBiasBar({
           {mlPred.detail}
         </p>
       ) : null}
-      {fullscreenActive && history.length > 0 ? (
+      {fullscreenActive && (history.length > 0 || lightGbmHistory.length > 0) ? (
         <div className="d-flex flex-column flex-md-row flex-wrap gap-3 mb-3 flex-shrink-0 align-items-md-start">
-          <MlOutcomePieChart counts={outcomeCounts} height={compact ? 240 : 280} />
+          {history.length > 0 ? (
+            <div>
+              <div className="small text-muted text-uppercase mb-1" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
+                Classic models
+              </div>
+              <MlOutcomePieChart counts={outcomeCounts} height={compact ? 240 : 280} />
+            </div>
+          ) : null}
+          {lightGbmHistory.length > 0 ? (
+            <div>
+              <div className="small text-muted text-uppercase mb-1" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
+                LightGBM triple-barrier
+              </div>
+              <MlOutcomePieChart counts={lightGbmOutcomeCounts} height={compact ? 240 : 280} />
+            </div>
+          ) : null}
         </div>
       ) : null}
       {history.length > 0 ? (
@@ -1651,98 +1844,33 @@ function MlNextBarBiasBar({
         >
           <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
             <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              ML history ({history.length})
+              ML history — classic ({history.length})
             </span>
           </div>
-          <Table
-            responsive
-            bordered
-            size="sm"
-            className="mb-0 align-middle font-monospace"
-            style={{ fontSize: compact ? '0.65rem' : '0.72rem' }}
-          >
-            <thead
-              className="table-light text-secondary text-nowrap"
-              style={{
-                position: 'sticky',
-                top: 0,
-                zIndex: 2,
-                boxShadow: 'inset 0 -1px 0 var(--bs-border-color)',
-              }}
-            >
-              <tr>
-                <th>#</th>
-                <th>Predicted</th>
-                <th>Dir</th>
-                <th>Conf</th>
-                <th>Outcome</th>
-                <th>Ref bar</th>
-                <th>Ref close</th>
-                <th>Next bar</th>
-                <th>Next close</th>
-                <th>Model</th>
-                <th className="d-none d-md-table-cell">Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mlHistoryTableRows.map((e, idx) => (
-                <tr
-                  key={e.id}
-                  style={{
-                    borderLeft: '3px solid',
-                    borderLeftColor:
-                      e.outcome === 'pending' ? '#6c757d' : e.outcome === 'correct' ? '#198754' : '#dc3545',
-                    backgroundColor:
-                      e.outcome === 'pending'
-                        ? undefined
-                        : e.outcome === 'correct'
-                          ? 'rgba(25, 135, 84, 0.09)'
-                          : 'rgba(220, 53, 69, 0.09)',
-                  }}
-                >
-                  <td className="text-muted">{idx + 1}</td>
-                  <td className="text-nowrap">{formatLocalDateTime(e.predictedAt)}</td>
-                  <td
-                    className={
-                      e.direction === 'up'
-                        ? 'text-success fw-semibold'
-                        : e.direction === 'down'
-                          ? 'text-danger fw-semibold'
-                          : 'text-secondary fw-semibold'
-                    }
-                  >
-                    {e.direction.toUpperCase()}
-                  </td>
-                  <td>{e.confidence}%</td>
-                  <td className="text-nowrap">
-                    {e.outcome === 'pending' ? (
-                      <span className="text-muted fst-italic">Pending</span>
-                    ) : (
-                      <span className={e.outcome === 'correct' ? 'text-success' : 'text-danger'}>
-                        {e.outcome === 'correct' ? 'Correct' : 'Wrong'}
-                      </span>
-                    )}
-                  </td>
-                  <td className="text-nowrap">{formatLocalDateTime(e.refBarTime)}</td>
-                  <td>{e.refClose.toFixed(4)}</td>
-                  <td className="text-nowrap">
-                    {e.nextBarTime ? formatLocalDateTime(e.nextBarTime) : '—'}
-                  </td>
-                  <td>{e.nextClose != null ? e.nextClose.toFixed(4) : '—'}</td>
-                  <td className="text-truncate" style={{ maxWidth: compact ? '4.5rem' : '7rem' }} title={e.modelId}>
-                    {e.modelId}
-                  </td>
-                  <td
-                    className="d-none d-md-table-cell text-truncate text-muted"
-                    style={{ maxWidth: '12rem' }}
-                    title={e.detail}
-                  >
-                    {e.detail}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+          <MlPredictionHistoryTableBody rows={mlHistoryTableRows} compact={compact} />
+        </div>
+      ) : null}
+      {lightGbmHistory.length > 0 ? (
+        <div
+          className={`rounded border border-secondary ${fullscreenActive ? 'mb-0 flex-grow-1 d-flex flex-column' : gapClass}`}
+          style={{
+            maxHeight: fullscreenActive
+              ? undefined
+              : compact
+                ? ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT
+                : ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT,
+            flex: fullscreenActive ? '1 1 auto' : undefined,
+            minHeight: fullscreenActive ? 0 : undefined,
+            overflow: 'auto',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
+            <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
+              ML history — LightGBM triple-barrier ({lightGbmHistory.length})
+            </span>
+          </div>
+          <MlPredictionHistoryTableBody rows={mlLightGbmHistoryTableRows} compact={compact} />
         </div>
       ) : null}
     </div>

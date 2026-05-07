@@ -34,4 +34,5 @@ public sealed record PriceDirectionPredictionEnvelope(
     Guid? StoredId,
     DateTimeOffset? RefBarTimeUtc,
     decimal? RefClose,
-    DateTimeOffset? PredictedAtUtc);
+    DateTimeOffset? PredictedAtUtc,
+    MlPredictionPersistenceKind PersistenceKind = MlPredictionPersistenceKind.None);

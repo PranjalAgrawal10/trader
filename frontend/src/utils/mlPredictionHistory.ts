@@ -1,5 +1,8 @@
 import type { ChartPointWithMa } from './movingAverages'
 
+/** Must match backend `PriceDirectionModelIds.MlNetLightGbmTripleBarrierV1` (LightGBM engine id). */
+export const ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID = 'mlnet-lightgbm-triple-barrier-v1'
+
 export type MlPredictionOutcome = 'pending' | 'correct' | 'wrong'
 
 export type MlPredictionLogEntry = {

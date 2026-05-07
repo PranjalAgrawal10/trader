@@ -85,7 +85,50 @@ public sealed class PredictionsController : ControllerBase
                 env.StoredId,
                 env.RefBarTimeUtc,
                 env.RefClose,
-                env.PredictedAtUtc));
+                env.PredictedAtUtc,
+                MapPersistenceKind(env.PersistenceKind)));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>Stored LightGBM triple-barrier runs only (<c>MlLightGbmTripleBarrierPredictions</c>).</summary>
+    [HttpGet("price-direction/lightgbm-triple-barrier/history")]
+    public async Task<ActionResult<IReadOnlyList<MlPriceDirectionPredictionItemDto>>> LightGbmTripleBarrierHistory(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        [FromQuery] string? interval,
+        [FromQuery] int? take,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+        {
+            return Problem(
+                title: "Invalid instrument",
+                detail: "Provide instrumentToken (Kite numeric token).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (string.IsNullOrWhiteSpace(interval))
+        {
+            return Problem(
+                title: "Invalid interval",
+                detail: "Provide interval (e.g. 5m, 15m, 1h).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var list = await _predictions
+                .ListLightGbmTripleBarrierHistoryAsync(
+                    User.GetUserId(),
+                    instrumentToken.Trim(),
+                    interval.Trim(),
+                    take ?? 500,
+                    ct)
+                .ConfigureAwait(false);
+            return Ok(list);
         }
         catch (InvalidOperationException ex)
         {
@@ -181,6 +224,14 @@ public sealed class PredictionsController : ControllerBase
             PriceDirectionLabel.Down => "down",
             _ => "neutral",
         };
+
+    private static string? MapPersistenceKind(MlPredictionPersistenceKind k) =>
+        k switch
+        {
+            MlPredictionPersistenceKind.ClassicPriceDirection => "classicPriceDirection",
+            MlPredictionPersistenceKind.LightGbmTripleBarrier => "lightgbmTripleBarrier",
+            _ => null,
+        };
 }
 
 public sealed record PriceDirectionResponseDto(
@@ -191,7 +242,8 @@ public sealed record PriceDirectionResponseDto(
     Guid? PredictionId,
     DateTimeOffset? RefBarTime,
     decimal? RefClose,
-    DateTimeOffset? PredictedAt);
+    DateTimeOffset? PredictedAt,
+    string? PredictionStorage);
 
 public sealed record PriceDirectionModelsResponseDto(
     string DefaultModelId,

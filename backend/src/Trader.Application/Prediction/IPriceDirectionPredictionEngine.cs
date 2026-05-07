@@ -1,8 +1,10 @@
+using Trader.Application.Broker;
+
 namespace Trader.Application.Prediction;
 
 /// <summary>
-/// Encapsulates an ML (or pluggable) model that estimates whether the <strong>next</strong> close is biased up or down
-/// from the latest bar, using only past closes.
+/// Encapsulates an ML (or pluggable) model that scores the <strong>latest</strong> candle for a directional bias,
+/// trained on ascending historical OHLC (and backend-computed overlays such as MAs/SR when present).
 /// </summary>
 public interface IPriceDirectionPredictionEngine
 {
@@ -13,7 +15,7 @@ public interface IPriceDirectionPredictionEngine
     string Description { get; }
 
     /// <summary>
-    /// Trains a small binary classifier on the supplied series and scores the <strong>last</strong> observation.
+    /// Trains a compact classifier over past bars where applicable and scores the <strong>last</strong> candle.
     /// </summary>
-    PriceDirectionResult PredictNextDirection(IReadOnlyList<decimal> closes);
+    PriceDirectionResult PredictNextDirection(IReadOnlyList<KiteHistoricalCandlePointDto> candles);
 }
