@@ -10,7 +10,6 @@ using Trader.Application.Configuration;
 using Trader.Application.Streaming;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
-using Trader.Application.Abstractions.Reporting;
 using Trader.Application.Abstractions.Security;
 using Trader.Application.Prediction;
 using Trader.Infrastructure.Broker;
@@ -21,7 +20,6 @@ using Trader.Infrastructure.Prediction;
 using Trader.Infrastructure.Security;
 using Microsoft.Extensions.Hosting;
 using Trader.Infrastructure.Hosting;
-using Trader.Infrastructure.Reporting;
 using Trader.Infrastructure.Streaming;
 
 namespace Trader.Infrastructure;
@@ -113,7 +111,6 @@ public static class DependencyInjection
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
 
-        services.AddSingleton<IMlOutcomePieChartPngRenderer, SkiaMlOutcomePieChartPngRenderer>();
         services.AddHostedService<FavoriteMlAutomationBackgroundService>();
 
         services.AddSingleton<MlNetPriceDirectionPredictionEngine>();

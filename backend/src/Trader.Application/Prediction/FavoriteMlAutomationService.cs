@@ -8,14 +8,14 @@ using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
-using Trader.Application.Abstractions.Reporting;
+using Trader.Application.Reporting;
 using Trader.Domain.Entities;
 
 namespace Trader.Application.Prediction;
 
 /// <summary>
 /// Per background tick: resolve pending favorite ML rows, add at most one pending prediction per favorite bar
-/// per registered prediction engine, and optionally email an EOD CSV + pie for all engines when SMTP is enabled.
+/// per registered prediction engine, and optionally email an EOD CSV + inline HTML outcome charts when SMTP is enabled.
 /// </summary>
 public sealed class FavoriteMlAutomationService
 {
@@ -31,7 +31,6 @@ public sealed class FavoriteMlAutomationService
     private readonly IKiteInstrumentsChartSettingsGateway _chartSettings;
     private readonly IUserRepository _users;
     private readonly IPlainTextEmailSender _email;
-    private readonly IMlOutcomePieChartPngRenderer _pieRenderer;
     private readonly ILogger<FavoriteMlAutomationService> _logger;
 
     public FavoriteMlAutomationService(
@@ -47,7 +46,6 @@ public sealed class FavoriteMlAutomationService
         IKiteInstrumentsChartSettingsGateway chartSettings,
         IUserRepository users,
         IPlainTextEmailSender email,
-        IMlOutcomePieChartPngRenderer pieRenderer,
         ILogger<FavoriteMlAutomationService> logger)
     {
         _opts = opts.Value;
@@ -62,12 +60,11 @@ public sealed class FavoriteMlAutomationService
         _chartSettings = chartSettings;
         _users = users;
         _email = email;
-        _pieRenderer = pieRenderer;
         _logger = logger;
     }
 
     /// <summary>
-    /// Sends a one-off email with outcome pies (combined + per engine) and CSV for <strong>Source=automation</strong> rows
+    /// Sends a one-off multipart email with <strong>inline HTML</strong> outcome charts (combined + per engine) plus a CSV attachment
     /// whose <c>PredictedAtUtc</c> is in [<paramref name="rangeFromUtcInclusive"/>, <paramref name="rangeToUtcExclusive"/>).
     /// When both UTC bounds are <c>null</c>, uses today's full calendar day in <see cref="FavoriteMlAutomationOptions.ReportTimeZoneId"/>.
     /// </summary>
@@ -177,12 +174,14 @@ public sealed class FavoriteMlAutomationService
 
         var pieTitleSuffix = reportRangeSummary.Length > 86 ? reportRangeSummary[..83] + "…" : reportRangeSummary;
         var engineIdsForPies = OrderedRegistryEngineIdsForManualReport(rows);
-        var attachments = new List<EmailAttachment>
+
+        var chartFragments = new List<string>
         {
-            new(
-                $"ml-automation-all-engines-{fileSuffix}.png",
-                "image/png",
-                _pieRenderer.Render(correctAll, wrongAll, pendingAll, $"Automation — all engines ({pieTitleSuffix})")),
+            MlOutcomePieChartHtmlBuilder.BuildChartSection(
+                $"Automation — all engines ({pieTitleSuffix})",
+                correctAll,
+                wrongAll,
+                pendingAll),
         };
 
         foreach (var engineId in engineIdsForPies)
@@ -191,40 +190,51 @@ public sealed class FavoriteMlAutomationService
             var c = scoped.Count(r => string.Equals(r.Outcome, "correct", StringComparison.OrdinalIgnoreCase));
             var w = scoped.Count(r => string.Equals(r.Outcome, "wrong", StringComparison.OrdinalIgnoreCase));
             var p = scoped.Count(r => string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase));
-            attachments.Add(
-                new EmailAttachment(
-                    $"ml-auto-{SanitizeFilenameToken(engineId)}-{fileSuffix}.png",
-                    "image/png",
-                    _pieRenderer.Render(c, w, p, $"Automation — {engineId} ({pieTitleSuffix})")));
+            chartFragments.Add(
+                MlOutcomePieChartHtmlBuilder.BuildChartSection(
+                    $"Automation — {engineId} ({pieTitleSuffix})",
+                    c,
+                    w,
+                    p));
         }
 
+        var htmlBody = MlOutcomePieChartHtmlBuilder.WrapHtmlDocument(chartFragments);
+
         var csvBody = BuildCsv(rows, symbolByToken);
-        attachments.Add(
-            new EmailAttachment($"ml-automation-{fileSuffix}.csv", "text/csv", Encoding.UTF8.GetBytes(csvBody)));
-
-        var subject =
-            $"Trader ML automation — manual ({reportRangeSummary}) rows={rows.Count}";
-        var bodyLines = new[]
+        var attachments = new[]
         {
-            $"Manual automation report for {reportRangeSummary}.",
-            $"Rows (Source=automation only): {rows.Count} (correct {correctAll}, wrong {wrongAll}, pending {pendingAll}).",
-            "Attachments: combined pie, one PNG per registered engine, and CSV.",
-            "This send is not throttled against the nightly EOD job.",
+            new EmailAttachment($"ml-automation-{fileSuffix}.csv", "text/csv", Encoding.UTF8.GetBytes(csvBody)),
         };
-        await _email
-            .SendPlainTextAsync(recipient, subject, string.Join("\r\n", bodyLines), attachments, ct)
-            .ConfigureAwait(false);
 
-        var pieCharts = 1 + engineIdsForPies.Count;
+        var subject = $"Trader ML automation — manual ({reportRangeSummary}) rows={rows.Count}";
+        var plainBody = string.Join(
+            "\r\n",
+            new[]
+            {
+                $"Manual automation report for {reportRangeSummary}.",
+                $"Rows (Source=automation only): {rows.Count} (correct {correctAll}, wrong {wrongAll}, pending {pendingAll}).",
+                $"The HTML section of this email shows {chartFragments.Count} SVG outcome charts (combined + each engine below). CSV is attached.",
+                "This send is not throttled against the nightly EOD job.",
+                string.Empty,
+                "Prefer the graphical HTML part in Mail / Outlook / Gmail or use the spreadsheet attachment.",
+            });
+
+        await _email.SendEmailAsync(recipient, subject, plainBody, htmlBody, attachments, ct).ConfigureAwait(false);
+
+        var pieCharts = chartFragments.Count;
         _logger.LogInformation(
             "Manual automation email sent user {UserId} range={Range}; rows={Count}; pieCharts={Pies}; attachments={Attachments}",
             userId,
             reportRangeSummary,
             rows.Count,
             pieCharts,
-            attachments.Count);
+            attachments.Length);
 
-        return new FavoriteMlManualAutomationEmailReportResult(rows.Count, reportRangeSummary, pieCharts, attachments.Count);
+        return new FavoriteMlManualAutomationEmailReportResult(
+            rows.Count,
+            reportRangeSummary,
+            pieCharts,
+            attachments.Length);
     }
 
     public async Task RunCycleAsync(CancellationToken ct)
@@ -573,29 +583,34 @@ public sealed class FavoriteMlAutomationService
         var correct = rows.Count(r => r.Outcome == "correct");
         var wrong = rows.Count(r => r.Outcome == "wrong");
         var pending = rows.Count(r => r.Outcome == "pending");
-        var pieBytes = _pieRenderer.Render(correct, wrong, pending);
         var csv = BuildCsv(rows, symbolByToken);
         var csvBytes = Encoding.UTF8.GetBytes(csv);
 
+        var chartFragment = MlOutcomePieChartHtmlBuilder.BuildChartSection(
+            $"Trader ML favorites — {ymd}",
+            correct,
+            wrong,
+            pending);
+        var htmlBody = MlOutcomePieChartHtmlBuilder.WrapHtmlDocument([chartFragment]);
+
         var subject =
             $"Trader ML favorites — {ymd} (all engines; rows={rows.Count}; correct {correct}, wrong {wrong}, pending {pending})";
-        var body =
+        var plainBody =
             $"Combined ML predictions (every registered automation engine; classic + LightGBM stores) on {ymd} ({tz.Id}).\r\n"
             + $"Totals: rows={rows.Count}, correct={correct}, wrong={wrong}, pending={pending}.\r\n"
-            + "See attachments: outcome pie chart (PNG) and full CSV (includes engineModelId + model output id).";
+            + "The HTML part of this email includes an inline SVG outcome chart. CSV spreadsheet is attached "
+            + "(engineModelId + model output id).\r\n\r\n"
+            + "Use a graphical mail client or the attachment for best results.";
 
         try
         {
             await _email
-                .SendPlainTextAsync(
+                .SendEmailAsync(
                     user.Email,
                     subject,
-                    body,
-                    new[]
-                    {
-                        new EmailAttachment($"ml-outcomes-{ymd}.png", "image/png", pieBytes),
-                        new EmailAttachment($"ml-predictions-{ymd}.csv", "text/csv", csvBytes),
-                    },
+                    plainBody,
+                    htmlBody,
+                    new[] { new EmailAttachment($"ml-predictions-{ymd}.csv", "text/csv", csvBytes) },
                     ct)
                 .ConfigureAwait(false);
             await _eodSent.AddAsync(userId, ymd, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);

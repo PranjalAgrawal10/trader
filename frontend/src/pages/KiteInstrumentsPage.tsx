@@ -3628,7 +3628,7 @@ export function KiteInstrumentsPage() {
                   variant="outline-primary"
                   size="sm"
                   disabled={automationReportEmailSending || !isZerodha}
-                  title="Emails automation rows whose PredictedAt falls in [fromUtc, toUtcExclusive) using the range below (sent as UTC). Combined pie + one pie per engine + CSV. Requires SMTP and a saved profile email."
+                  title="Emails automation rows whose PredictedAt falls in [fromUtc, toUtcExclusive) using the range below (sent as UTC). HTML body includes inline SVG outcome charts (combined + each engine); CSV attached. Requires SMTP and a saved profile email."
                   onClick={() => {
                     setAutomationReportEmailError(null)
                     setAutomationReportEmailSuccess(null)
@@ -3663,7 +3663,7 @@ export function KiteInstrumentsPage() {
                       })
                       .then(({ data }) => {
                         setAutomationReportEmailSuccess(
-                          `Email sent: ${data.rowCount} automation row${data.rowCount === 1 ? '' : 's'} (${data.reportRangeSummary}; ${data.pieChartsAttached} pie chart PNGs + CSV).`,
+  `Email sent: ${data.rowCount} automation row${data.rowCount === 1 ? '' : 's'} (${data.reportRangeSummary}; ${data.pieChartsAttached} HTML chart section${data.pieChartsAttached === 1 ? '' : 's'} + CSV attachment).`,
                         )
                       })
                       .catch((err) => setAutomationReportEmailError(problemDetail(err)))
