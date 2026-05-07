@@ -16,6 +16,17 @@ public interface IPriceDirectionPredictionService
         string? modelId = null,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// True when a pending row exists for this ref bar and registered engine (<see cref="PriceDirectionModelIds.MlNetLightGbmTripleBarrierV1"/> uses the LightGBM table; others classic).
+    /// </summary>
+    Task<bool> HasPendingForEngineAndRefBarAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset refBarTimeUtc,
+        string engineModelId,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<MlPriceDirectionPredictionItemDto>> ListPredictionHistoryAsync(
         Guid userId,
         string instrumentToken,

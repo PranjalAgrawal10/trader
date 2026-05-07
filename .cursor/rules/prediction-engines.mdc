@@ -9,3 +9,4 @@ alwaysApply: false
 - **Registration**: Add `AddSingleton<YourEngine>()` and include it in the array passed to `PriceDirectionPredictionEngineRegistry` in `DependencyInjection.cs`. Startup fails if **`PriceDirectionPrediction:DefaultModelId`** does not match any registered id.
 - **Service/API**: Use `IPriceDirectionPredictionEngineRegistry.Resolve(modelId)` from `PriceDirectionPredictionService`; expose new knobs via query params or options—not duplicate training logic in controllers.
 - **Heuristics / fallback**: If an engine returns a different sub-model id after fallback (e.g. `heuristic-momentum`), keep those ids short and distinct from primary engine ids.
+- **Persistence / automation**: Persist **`EngineModelId`** (registry engine) alongside output **`ModelId`**; **FavoriteMlAutomation** runs all registered engines unless `FavoriteMlAutomation:PredictionModelId` is a comma-separated subset.

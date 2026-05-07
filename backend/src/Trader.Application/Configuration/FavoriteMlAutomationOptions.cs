@@ -39,7 +39,10 @@ public sealed class FavoriteMlAutomationOptions
     /// <summary>Fallback chart interval when user has never saved instruments chart settings.</summary>
     public string DefaultChartInterval { get; set; } = "5m";
 
-    /// <summary>Price-direction model id for automation (<c>GET .../price-direction/models</c>); null/empty uses <c>PriceDirectionPrediction:DefaultModelId</c>.</summary>
+    /// <summary>
+    /// Comma-separated subset of registry model ids (GET /api/v1/predictions/price-direction/models). When null, empty,
+    /// or whitespace, automation runs <strong>every</strong> registered engine on each eligible favorite bar (LightGBM uses its own table).
+    /// </summary>
     public string? PredictionModelId { get; set; }
 
     /// <summary>Max pending rows to scan for resolution per user per tick.</summary>

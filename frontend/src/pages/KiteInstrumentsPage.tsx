@@ -210,6 +210,8 @@ interface MlAutomationRecentRow {
   outcome: 'pending' | 'correct' | 'wrong'
   nextBarTime: string | null
   nextClose: number | null
+  /** Registered prediction engine id for this automation row (which model slot was invoked). */
+  engineModelId: string
 }
 
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
@@ -2916,7 +2918,7 @@ export function KiteInstrumentsPage() {
     try {
       setAutomationRecentLoading(true)
       const { data } = await api.get<MlAutomationRecentRow[]>('/predictions/price-direction/automation-recent', {
-        params: { take: 100 },
+        params: { take: 800 },
       })
       setAutomationRecent(data)
     } catch {
@@ -3117,8 +3119,11 @@ export function KiteInstrumentsPage() {
                 </Button>
               </div>
               <p className="text-secondary small mb-2">
-                When enabled, the API runs scheduled next-bar predictions for each favorite (needs Kite session;{' '}
-                <strong className="text-body-secondary">FavoriteMlAutomation</strong> must be on in server config).
+                When enabled, the API runs scheduled next-bar predictions for each favorite using <strong>every</strong>{' '}
+                registered ML engine (comma-separated subset via server{' '}
+                <span className="font-monospace">FavoriteMlAutomation:PredictionModelId</span>); LightGBM rows are stored
+                separately. Requires Kite session; <strong className="text-body-secondary">FavoriteMlAutomation</strong>{' '}
+                must be on in server config.
                 By default the server uses <strong>1m</strong> candles for automation so predictions are not held until
                 a 3m/5m bar closes; chart interval below still controls what you see on each card.
               </p>
@@ -3134,6 +3139,7 @@ export function KiteInstrumentsPage() {
                     <tr className="text-nowrap">
                       <th>Time</th>
                       <th>Symbol</th>
+                      <th>Engine</th>
                       <th>Interval</th>
                       <th>Dir</th>
                       <th>Conf</th>
@@ -3143,7 +3149,7 @@ export function KiteInstrumentsPage() {
                   <tbody className="font-monospace">
                     {automationRecent.length === 0 && !automationRecentLoading ? (
                       <tr>
-                        <td colSpan={6} className="text-secondary small">
+                        <td colSpan={7} className="text-secondary small">
                           No automation rows yet.
                         </td>
                       </tr>
@@ -3154,6 +3160,13 @@ export function KiteInstrumentsPage() {
                           <td>
                             {r.tradingsymbol ? `${r.tradingsymbol}` : r.instrumentToken}
                             {r.exchange ? ` (${r.exchange})` : ''}
+                          </td>
+                          <td
+                            className="text-truncate small"
+                            style={{ maxWidth: '8rem' }}
+                            title={`Engine: ${r.engineModelId}`}
+                          >
+                            {r.engineModelId}
                           </td>
                           <td>{r.interval}</td>
                           <td>{r.direction}</td>

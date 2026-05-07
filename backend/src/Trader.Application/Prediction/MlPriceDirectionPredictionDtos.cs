@@ -12,7 +12,8 @@ public sealed record MlPriceDirectionPredictionItemDto(
     string Outcome,
     DateTimeOffset? NextBarTime,
     decimal? NextClose,
-    string? Source = null);
+    string? Source = null,
+    string? EngineModelId = null);
 
 public sealed record MlAutomationPredictionListItemDto(
     Guid Id,
@@ -27,7 +28,8 @@ public sealed record MlAutomationPredictionListItemDto(
     int Confidence,
     string Outcome,
     DateTimeOffset? NextBarTime,
-    decimal? NextClose);
+    decimal? NextClose,
+    string EngineModelId);
 
 public sealed record PriceDirectionPredictionEnvelope(
     PriceDirectionResult Result,

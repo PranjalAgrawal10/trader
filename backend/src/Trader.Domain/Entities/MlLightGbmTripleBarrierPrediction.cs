@@ -21,6 +21,9 @@ public class MlLightGbmTripleBarrierPrediction
 
     public int Confidence { get; set; }
 
+    /// <summary>Registered triple-barrier LightGBM engine id (constant in application configuration).</summary>
+    public string? EngineModelId { get; set; }
+
     /// <summary>Often <c>mlnet-lightgbm-triple-barrier-v1</c>; may differ when the engine falls back to a heuristic scorer.</summary>
     public string ModelId { get; set; } = string.Empty;
 

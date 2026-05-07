@@ -18,6 +18,10 @@ public class MlPriceDirectionPrediction
     public string Direction { get; set; } = string.Empty;
 
     public int Confidence { get; set; }
+
+    /// <summary>Registered price-direction engine model id (stable key from the engine registry).</summary>
+    public string? EngineModelId { get; set; }
+
     public string ModelId { get; set; } = string.Empty;
     public string Detail { get; set; } = string.Empty;
 

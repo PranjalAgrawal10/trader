@@ -14,6 +14,14 @@ public interface IMlLightGbmTripleBarrierPredictionRepository
         DateTimeOffset refBarTimeUtc,
         CancellationToken ct = default);
 
+    Task<bool> HasPendingForRefBarAndEngineModelAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset refBarTimeUtc,
+        string engineModelId,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<MlLightGbmTripleBarrierPrediction>> ListPendingAsync(
         Guid userId,
         int take,

@@ -106,6 +106,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.RefClose).HasPrecision(28, 8);
             e.Property(x => x.Direction).HasMaxLength(16);
             e.Property(x => x.ModelId).HasMaxLength(128);
+            e.Property(x => x.EngineModelId).HasMaxLength(128);
             e.Property(x => x.Detail).HasColumnType("longtext");
             e.Property(x => x.Outcome).HasMaxLength(16);
             e.Property(x => x.Source).HasMaxLength(32);
@@ -125,6 +126,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.RefClose).HasPrecision(28, 8);
             e.Property(x => x.Direction).HasMaxLength(16);
             e.Property(x => x.ModelId).HasMaxLength(128);
+            e.Property(x => x.EngineModelId).HasMaxLength(128);
             e.Property(x => x.Detail).HasColumnType("longtext");
             e.Property(x => x.Outcome).HasMaxLength(16);
             e.Property(x => x.Source).HasMaxLength(32);

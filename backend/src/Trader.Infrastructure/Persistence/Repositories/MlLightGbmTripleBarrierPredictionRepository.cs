@@ -33,6 +33,25 @@ public sealed class MlLightGbmTripleBarrierPredictionRepository : IMlLightGbmTri
                 && x.Outcome == "pending",
             ct);
 
+    public Task<bool> HasPendingForRefBarAndEngineModelAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset refBarTimeUtc,
+        string engineModelId,
+        CancellationToken ct = default)
+    {
+        var eid = engineModelId.Trim();
+        return _db.MlLightGbmTripleBarrierPredictions.AnyAsync(
+            x => x.UserId == userId
+                && x.InstrumentToken == instrumentToken
+                && x.Interval == interval
+                && x.RefBarTimeUtc == refBarTimeUtc
+                && x.Outcome == "pending"
+                && (x.EngineModelId == eid || (x.EngineModelId == null && x.ModelId == eid)),
+            ct);
+    }
+
     public async Task<IReadOnlyList<MlLightGbmTripleBarrierPrediction>> ListPendingAsync(
         Guid userId,
         int take,
@@ -88,7 +107,8 @@ public sealed class MlLightGbmTripleBarrierPredictionRepository : IMlLightGbmTri
                 p.Confidence,
                 p.Outcome,
                 p.NextBarTimeUtc,
-                p.NextClose);
+                p.NextClose,
+                p.EngineModelId ?? p.ModelId);
         return await q.Take(take).ToListAsync(ct).ConfigureAwait(false);
     }
 

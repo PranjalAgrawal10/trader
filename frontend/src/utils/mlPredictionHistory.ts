@@ -13,6 +13,8 @@ export type MlPredictionLogEntry = {
   direction: 'up' | 'down' | 'neutral'
   confidence: number
   modelId: string
+  /** Registry engine id when the server stored it (classic + LightGBM). */
+  engineModelId?: string | null
   detail: string
   outcome: MlPredictionOutcome
   nextBarTime?: string | null
@@ -75,6 +77,8 @@ export type MlPriceDirectionHistoryApiRow = {
   direction: 'up' | 'down' | 'neutral'
   confidence: number
   modelId: string
+  /** Persisted registry engine id when set (matches automation dedupe row). */
+  engineModelId?: string | null
   detail: string
   outcome: MlPredictionOutcome
   nextBarTime: string | null
@@ -104,6 +108,7 @@ export function historyItemsFromApi(rows: MlPriceDirectionHistoryApiRow[]): MlPr
     direction: x.direction,
     confidence: x.confidence,
     modelId: x.modelId,
+    engineModelId: x.engineModelId ?? undefined,
     detail: x.detail,
     outcome: x.outcome,
     nextBarTime: x.nextBarTime ? toIsoBarTime(x.nextBarTime) : null,

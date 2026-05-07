@@ -14,6 +14,17 @@ public interface IMlPriceDirectionPredictionRepository
         DateTimeOffset refBarTimeUtc,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// True when a pending classic-table row exists for this ref bar for the registered engine (<see cref="MlPriceDirectionPrediction.EngineModelId"/> or legacy fallback on <see cref="MlPriceDirectionPrediction.ModelId"/>).
+    /// </summary>
+    Task<bool> HasPendingForRefBarAndEngineModelAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset refBarTimeUtc,
+        string engineModelId,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<MlPriceDirectionPrediction>> ListPendingAsync(
         Guid userId,
         int take,

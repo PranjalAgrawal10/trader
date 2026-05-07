@@ -14,8 +14,8 @@ using Trader.Domain.Entities;
 namespace Trader.Application.Prediction;
 
 /// <summary>
-/// Per background tick: resolve pending ML rows using fresh Kite candles, add at most one pending prediction per favorite bar,
-/// and optionally email an EOD CSV + pie attachment when SMTP is enabled.
+/// Per background tick: resolve pending favorite ML rows, add at most one pending prediction per favorite bar
+/// per registered prediction engine, and optionally email an EOD CSV + pie for all engines when SMTP is enabled.
 /// </summary>
 public sealed class FavoriteMlAutomationService
 {
@@ -26,6 +26,7 @@ public sealed class FavoriteMlAutomationService
     private readonly IMlLightGbmTripleBarrierPredictionRepository _lightGbmPredictions;
     private readonly IMlFavoriteEodReportSentRepository _eodSent;
     private readonly IPriceDirectionPredictionService _predictionService;
+    private readonly IPriceDirectionPredictionEngineRegistry _engineRegistry;
     private readonly IBrokerService _broker;
     private readonly IKiteInstrumentsChartSettingsGateway _chartSettings;
     private readonly IUserRepository _users;
@@ -41,6 +42,7 @@ public sealed class FavoriteMlAutomationService
         IMlLightGbmTripleBarrierPredictionRepository lightGbmPredictions,
         IMlFavoriteEodReportSentRepository eodSent,
         IPriceDirectionPredictionService predictionService,
+        IPriceDirectionPredictionEngineRegistry engineRegistry,
         IBrokerService broker,
         IKiteInstrumentsChartSettingsGateway chartSettings,
         IUserRepository users,
@@ -55,6 +57,7 @@ public sealed class FavoriteMlAutomationService
         _lightGbmPredictions = lightGbmPredictions;
         _eodSent = eodSent;
         _predictionService = predictionService;
+        _engineRegistry = engineRegistry;
         _broker = broker;
         _chartSettings = chartSettings;
         _users = users;
@@ -160,6 +163,10 @@ public sealed class FavoriteMlAutomationService
             }
         }
 
+        var engineIds = FavoriteMlAutomationModelSelection.ResolveEngineIdsToRun(
+            _engineRegistry,
+            _opts.PredictionModelId);
+
         foreach (var fav in favorites)
         {
             ct.ThrowIfCancellationRequested();
@@ -172,20 +179,27 @@ public sealed class FavoriteMlAutomationService
                 if (hist.Candles.Count == 0)
                     continue;
                 var last = hist.Candles[^1];
-                var hasPending =
-                    await _predictions.HasPendingForRefBarAsync(userId, fav.InstrumentToken.Trim(), hist.Interval, last.Time, ct).ConfigureAwait(false)
-                    || await _lightGbmPredictions.HasPendingForRefBarAsync(userId, fav.InstrumentToken.Trim(), hist.Interval, last.Time, ct).ConfigureAwait(false);
-                if (hasPending)
-                    continue;
-                await _predictionService
-                    .PredictForInstrumentAsync(
-                        userId,
-                        fav.InstrumentToken,
-                        hist.Interval,
-                        PriceDirectionPredictionService.SourceAutomation,
-                        string.IsNullOrWhiteSpace(_opts.PredictionModelId) ? null : _opts.PredictionModelId.Trim(),
-                        ct)
-                    .ConfigureAwait(false);
+                var token = fav.InstrumentToken.Trim();
+
+                foreach (var engineModelId in engineIds)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var hasPending = await _predictionService
+                        .HasPendingForEngineAndRefBarAsync(userId, token, hist.Interval, last.Time, engineModelId, ct)
+                        .ConfigureAwait(false);
+                    if (hasPending)
+                        continue;
+
+                    await _predictionService
+                        .PredictForInstrumentAsync(
+                            userId,
+                            fav.InstrumentToken,
+                            hist.Interval,
+                            PriceDirectionPredictionService.SourceAutomation,
+                            engineModelId,
+                            ct)
+                        .ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
@@ -341,11 +355,12 @@ public sealed class FavoriteMlAutomationService
         var csv = BuildCsv(rows, symbolByToken);
         var csvBytes = Encoding.UTF8.GetBytes(csv);
 
-        var subject = $"Trader ML favorites — {ymd} (correct {correct}, wrong {wrong}, pending {pending})";
+        var subject =
+            $"Trader ML favorites — {ymd} (all engines; rows={rows.Count}; correct {correct}, wrong {wrong}, pending {pending})";
         var body =
-            $"ML price-direction predictions for your favorite instruments on {ymd} ({tz.Id}).\r\n"
-            + $"Totals: correct={correct}, wrong={wrong}, pending={pending}.\r\n"
-            + "See attachments: outcome pie chart (PNG) and full list (CSV).";
+            $"Combined ML predictions (every registered automation engine; classic + LightGBM stores) on {ymd} ({tz.Id}).\r\n"
+            + $"Totals: rows={rows.Count}, correct={correct}, wrong={wrong}, pending={pending}.\r\n"
+            + "See attachments: outcome pie chart (PNG) and full CSV (includes engineModelId + model output id).";
 
         try
         {
@@ -394,6 +409,7 @@ public sealed class FavoriteMlAutomationService
                     r.NextBarTimeUtc,
                     r.NextClose,
                     r.ModelId,
+                    r.EngineModelId ?? r.ModelId,
                     r.Detail));
         }
 
@@ -412,6 +428,7 @@ public sealed class FavoriteMlAutomationService
                     r.NextBarTimeUtc,
                     r.NextClose,
                     r.ModelId,
+                    r.EngineModelId ?? r.ModelId,
                     r.Detail));
         }
 
@@ -431,6 +448,7 @@ public sealed class FavoriteMlAutomationService
         DateTimeOffset? NextBarTimeUtc,
         decimal? NextClose,
         string ModelId,
+        string EngineModelId,
         string Detail);
 
     private static string BuildCsv(
@@ -439,7 +457,7 @@ public sealed class FavoriteMlAutomationService
     {
         var sb = new StringBuilder();
         sb.AppendLine(
-            "predictedAtUtc,instrumentToken,tradingsymbol,exchange,interval,direction,confidence,outcome,refBarTimeUtc,refClose,nextBarTimeUtc,nextClose,modelId,detail");
+            "predictedAtUtc,instrumentToken,tradingsymbol,exchange,interval,direction,confidence,outcome,refBarTimeUtc,refClose,nextBarTimeUtc,nextClose,modelId,engineModelId,detail");
         foreach (var r in rows)
         {
             var tok = r.InstrumentToken.Trim();
@@ -469,6 +487,8 @@ public sealed class FavoriteMlAutomationService
                 .Append(Csv(r.NextClose?.ToString(CultureInfo.InvariantCulture)))
                 .Append(',')
                 .Append(Csv(r.ModelId))
+                .Append(',')
+                .Append(Csv(r.EngineModelId))
                 .Append(',')
                 .Append(Csv(r.Detail))
                 .AppendLine();
