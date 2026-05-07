@@ -11,12 +11,16 @@ public interface IPlainTextEmailSender
         IReadOnlyList<EmailAttachment> attachments,
         CancellationToken ct = default);
 
-    /// <summary>multipart/alternative: <paramref name="plainTextBody"/> and <paramref name="htmlBody"/> (UTF-8) plus attachments (e.g. CSV).</summary>
+    /// <summary>
+    /// multipart/alternative: plain + HTML (UTF-8).
+    /// Inline images: add <c>&lt;img src="cid:<paramref name="embeddedImages"/>.ContentId"&gt;</c> matching <see cref="EmbeddedEmailImage"/>.
+    /// </summary>
     Task SendEmailAsync(
         string to,
         string subject,
         string plainTextBody,
         string htmlBody,
+        IReadOnlyList<EmbeddedEmailImage> embeddedImages,
         IReadOnlyList<EmailAttachment> attachments,
         CancellationToken ct = default);
 }

@@ -42,6 +42,7 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         string subject,
         string plainTextBody,
         string htmlBody,
+        IReadOnlyList<EmbeddedEmailImage> embeddedImages,
         IReadOnlyList<EmailAttachment> attachments,
         CancellationToken ct = default)
     {
@@ -59,7 +60,7 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         };
         message.To.Add(trimmedTo);
 
-        AddAlternateViews(message, plainTextBody, htmlBody);
+        AddAlternateViews(message, plainTextBody, htmlBody, embeddedImages);
         AttachFiles(message, attachments);
 
         await SendCoreAsync(ct, message).ConfigureAwait(false);
@@ -113,7 +114,11 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         }
     }
 
-    private static void AddAlternateViews(MailMessage message, string plainTextBody, string htmlBody)
+    private static void AddAlternateViews(
+        MailMessage message,
+        string plainTextBody,
+        string htmlBody,
+        IReadOnlyList<EmbeddedEmailImage> embeddedImages)
     {
         var plainView = AlternateView.CreateAlternateViewFromString(
             plainTextBody ?? string.Empty,
@@ -126,6 +131,17 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
             Encoding.UTF8,
             MediaTypeNames.Text.Html);
         htmlView.TransferEncoding = TransferEncoding.Base64;
+
+        foreach (var img in embeddedImages)
+        {
+            var stream = new MemoryStream(img.Content, writable: false);
+            var linked = new LinkedResource(stream, new ContentType(img.MimeType))
+            {
+                ContentId = img.ContentId.Trim(),
+                TransferEncoding = TransferEncoding.Base64,
+            };
+            htmlView.LinkedResources.Add(linked);
+        }
 
         message.AlternateViews.Add(plainView);
         message.AlternateViews.Add(htmlView);

@@ -12,11 +12,13 @@ using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
 using Trader.Application.Prediction;
+using Trader.Application.Abstractions.Reporting;
 using Trader.Infrastructure.Broker;
 using Trader.Infrastructure.Email;
 using Trader.Infrastructure.Persistence;
 using Trader.Infrastructure.Persistence.Repositories;
 using Trader.Infrastructure.Prediction;
+using Trader.Infrastructure.Reporting;
 using Trader.Infrastructure.Security;
 using Microsoft.Extensions.Hosting;
 using Trader.Infrastructure.Hosting;
@@ -110,6 +112,7 @@ public static class DependencyInjection
         services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
+        services.AddSingleton<IMlOutcomePieChartPngGenerator, ImageSharpMlOutcomePieChartPngGenerator>();
 
         services.AddHostedService<FavoriteMlAutomationBackgroundService>();
 

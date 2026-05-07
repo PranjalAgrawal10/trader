@@ -3588,7 +3588,7 @@ export function KiteInstrumentsPage() {
 
             {mainTab === 'automation' ? (
             <div className="mt-3 p-3 rounded border border-secondary">
-              <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+              <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
                 <Form.Check
                   type="switch"
                   id="favorite-ml-automation-switch"
@@ -3610,112 +3610,112 @@ export function KiteInstrumentsPage() {
                       .finally(() => setMlAutomationSaving(false))
                   }}
                 />
-                <div className="d-flex flex-wrap gap-2 align-items-center">
-                <Button
-                  type="button"
-                  variant="outline-secondary"
-                  size="sm"
-                  disabled={automationRecentLoading || !isZerodha}
-                  onClick={() => {
-                    void loadAutomationRecent()
-                    void loadAutomationPriceModels()
-                  }}
-                >
-                  {automationRecentLoading ? 'Loading…' : 'Refresh list'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline-primary"
-                  size="sm"
-                  disabled={automationReportEmailSending || !isZerodha}
-                  title="Emails automation rows whose PredictedAt falls in [fromUtc, toUtcExclusive) using the range below (sent as UTC). HTML body includes inline SVG outcome charts (combined + each engine); CSV attached. Requires SMTP and a saved profile email."
-                  onClick={() => {
-                    setAutomationReportEmailError(null)
-                    setAutomationReportEmailSuccess(null)
-                    const fromTrim = automationEmailReportRange.from.trim()
-                    const toTrim = automationEmailReportRange.to.trim()
-                    if (!fromTrim || !toTrim) {
-                      setAutomationReportEmailError('Pick both report start and end (browser-local date/time).')
-                      return
-                    }
-                    const fromMs = Date.parse(fromTrim)
-                    const toMs = Date.parse(toTrim)
-                    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
-                      setAutomationReportEmailError('Invalid date/time.')
-                      return
-                    }
-                    if (fromMs >= toMs) {
-                      setAutomationReportEmailError(
-                        'Start must be strictly before end. The API uses PredictedAt in [start, end exclusive).',
-                      )
-                      return
-                    }
-                    const maxSpanMs = 93 * 24 * 60 * 60 * 1000
-                    if (toMs - fromMs > maxSpanMs) {
-                      setAutomationReportEmailError('Range cannot exceed 93 days.')
-                      return
-                    }
-                    setAutomationReportEmailSending(true)
-                    void api
-                      .post<ManualAutomationEmailReportResponse>('/predictions/price-direction/automation-report-email', {
-                        fromUtc: new Date(fromMs).toISOString(),
-                        toUtcExclusive: new Date(toMs).toISOString(),
-                      })
-                      .then(({ data }) => {
-                        setAutomationReportEmailSuccess(
-  `Email sent: ${data.rowCount} automation row${data.rowCount === 1 ? '' : 's'} (${data.reportRangeSummary}; ${data.pieChartsAttached} HTML chart section${data.pieChartsAttached === 1 ? '' : 's'} + CSV attachment).`,
+                <div className="d-flex flex-wrap align-items-end gap-2 small">
+                  <Form.Group className="mb-0">
+                    <Form.Label column={false} className="small text-secondary mb-0">
+                      Report from (browser local)
+                    </Form.Label>
+                    <Form.Control
+                      type="datetime-local"
+                      step={60}
+                      size="sm"
+                      value={automationEmailReportRange.from}
+                      onChange={(e) =>
+                        setAutomationEmailReportRange((p) => ({ ...p, from: e.target.value }))
+                      }
+                      disabled={automationReportEmailSending || !isZerodha}
+                    />
+                  </Form.Group>
+                  <Form.Group className="mb-0">
+                    <Form.Label column={false} className="small text-secondary mb-0">
+                      Report to (exclusive end; browser local)
+                    </Form.Label>
+                    <Form.Control
+                      type="datetime-local"
+                      step={60}
+                      size="sm"
+                      value={automationEmailReportRange.to}
+                      onChange={(e) =>
+                        setAutomationEmailReportRange((p) => ({ ...p, to: e.target.value }))
+                      }
+                      disabled={automationReportEmailSending || !isZerodha}
+                    />
+                  </Form.Group>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="text-secondary py-0 align-self-center"
+                    disabled={automationReportEmailSending || !isZerodha}
+                    title="Restores defaults: roughly the last seven days ending at the current minute (browser local)."
+                    onClick={() => setAutomationEmailReportRange(initialAutomationEmailReportDatetimeLocal())}
+                  >
+                    Reset to last 7 days → now
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline-secondary"
+                    size="sm"
+                    className="align-self-end"
+                    disabled={automationRecentLoading || !isZerodha}
+                    onClick={() => {
+                      void loadAutomationRecent()
+                      void loadAutomationPriceModels()
+                    }}
+                  >
+                    {automationRecentLoading ? 'Loading…' : 'Refresh list'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline-primary"
+                    size="sm"
+                    className="align-self-end"
+                    disabled={automationReportEmailSending || !isZerodha}
+                    title="Emails automation rows whose PredictedAt falls in [fromUtc, toUtcExclusive) for the date range to the left (sent as UTC). HTML body includes inline PNG outcome charts (cid-linked, combined + each engine); CSV attached. Requires SMTP and a saved profile email."
+                    onClick={() => {
+                      setAutomationReportEmailError(null)
+                      setAutomationReportEmailSuccess(null)
+                      const fromTrim = automationEmailReportRange.from.trim()
+                      const toTrim = automationEmailReportRange.to.trim()
+                      if (!fromTrim || !toTrim) {
+                        setAutomationReportEmailError('Pick both report start and end (browser-local date/time).')
+                        return
+                      }
+                      const fromMs = Date.parse(fromTrim)
+                      const toMs = Date.parse(toTrim)
+                      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+                        setAutomationReportEmailError('Invalid date/time.')
+                        return
+                      }
+                      if (fromMs >= toMs) {
+                        setAutomationReportEmailError(
+                          'Start must be strictly before end. The API uses PredictedAt in [start, end exclusive).',
                         )
-                      })
-                      .catch((err) => setAutomationReportEmailError(problemDetail(err)))
-                      .finally(() => setAutomationReportEmailSending(false))
-                  }}
-                >
-                  {automationReportEmailSending ? 'Sending…' : 'Email automation report'}
-                </Button>
+                        return
+                      }
+                      const maxSpanMs = 93 * 24 * 60 * 60 * 1000
+                      if (toMs - fromMs > maxSpanMs) {
+                        setAutomationReportEmailError('Range cannot exceed 93 days.')
+                        return
+                      }
+                      setAutomationReportEmailSending(true)
+                      void api
+                        .post<ManualAutomationEmailReportResponse>('/predictions/price-direction/automation-report-email', {
+                          fromUtc: new Date(fromMs).toISOString(),
+                          toUtcExclusive: new Date(toMs).toISOString(),
+                        })
+                        .then(({ data }) => {
+                          setAutomationReportEmailSuccess(
+                            `Email sent: ${data.rowCount} automation row${data.rowCount === 1 ? '' : 's'} (${data.reportRangeSummary}; ${data.pieChartsAttached} HTML chart section${data.pieChartsAttached === 1 ? '' : 's'} + CSV attachment).`,
+                          )
+                        })
+                        .catch((err) => setAutomationReportEmailError(problemDetail(err)))
+                        .finally(() => setAutomationReportEmailSending(false))
+                    }}
+                  >
+                    {automationReportEmailSending ? 'Sending…' : 'Email automation report'}
+                  </Button>
                 </div>
-              </div>
-              <div className="d-flex flex-wrap align-items-end gap-2 mb-2 small">
-                <Form.Group className="mb-0">
-                  <Form.Label column={false} className="small text-secondary mb-0">
-                    Report from (browser local)
-                  </Form.Label>
-                  <Form.Control
-                    type="datetime-local"
-                    step={60}
-                    size="sm"
-                    value={automationEmailReportRange.from}
-                    onChange={(e) =>
-                      setAutomationEmailReportRange((p) => ({ ...p, from: e.target.value }))
-                    }
-                    disabled={automationReportEmailSending || !isZerodha}
-                  />
-                </Form.Group>
-                <Form.Group className="mb-0">
-                  <Form.Label column={false} className="small text-secondary mb-0">
-                    Report to (exclusive end; browser local)
-                  </Form.Label>
-                  <Form.Control
-                    type="datetime-local"
-                    step={60}
-                    size="sm"
-                    value={automationEmailReportRange.to}
-                    onChange={(e) =>
-                      setAutomationEmailReportRange((p) => ({ ...p, to: e.target.value }))
-                    }
-                    disabled={automationReportEmailSending || !isZerodha}
-                  />
-                </Form.Group>
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="text-secondary py-0"
-                  disabled={automationReportEmailSending || !isZerodha}
-                  title="Restores defaults: roughly the last seven days ending at the current minute (browser local)."
-                  onClick={() => setAutomationEmailReportRange(initialAutomationEmailReportDatetimeLocal())}
-                >
-                  Reset to last 7 days → now
-                </Button>
               </div>
               <p className="text-secondary small mb-2">
                 When enabled, the API runs scheduled next-bar predictions for each favorite using <strong>every</strong>{' '}
