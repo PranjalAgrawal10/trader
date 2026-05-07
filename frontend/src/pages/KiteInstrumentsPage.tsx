@@ -1053,7 +1053,7 @@ function ChartSettingsToolbar({
   )
 }
 
-/** ML next-bar direction; logs last 10 predictions (local) and colors rows green/red once the next bar resolves. */
+/** ML next-bar direction; logs predictions locally (capped) in a scrollable table; rows turn green/red when the next bar resolves. */
 function MlNextBarBiasBar({
   instrumentToken,
   interval,
@@ -1164,12 +1164,16 @@ function MlNextBarBiasBar({
       ) : null}
       {history.length > 0 ? (
         <div
-          className={`rounded border border-secondary overflow-hidden ${gapClass}`}
-          style={{ maxHeight: compact ? '12rem' : '18rem', overflow: 'auto' }}
+          className={`rounded border border-secondary ${gapClass}`}
+          style={{
+            maxHeight: compact ? 'min(50vh, 24rem)' : 'min(62vh, 34rem)',
+            overflow: 'auto',
+            WebkitOverflowScrolling: 'touch',
+          }}
         >
-          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary">
+          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary sticky-top">
             <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              ML analysis (last {history.length}) · green / red = resolved correct / wrong · stored locally
+              ML predictions ({history.length}, newest first) · scroll · green / red = correct / wrong · local only
             </span>
           </div>
           <Table
@@ -1179,7 +1183,15 @@ function MlNextBarBiasBar({
             className="mb-0 align-middle font-monospace"
             style={{ fontSize: compact ? '0.65rem' : '0.72rem' }}
           >
-            <thead className="table-light text-secondary text-nowrap">
+            <thead
+              className="table-light text-secondary text-nowrap"
+              style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 2,
+                boxShadow: 'inset 0 -1px 0 var(--bs-border-color)',
+              }}
+            >
               <tr>
                 <th>#</th>
                 <th>Predicted</th>

@@ -23,7 +23,10 @@ type PriceDirectionLike = {
   detail: string
 }
 
-const MAX_ENTRIES = 10
+/** Cap retained in localStorage (newest kept). Prevents unbounded growth / quota errors. */
+export const ML_PREDICTION_HISTORY_MAX_ENTRIES = 20_000
+
+const MAX_ENTRIES = ML_PREDICTION_HISTORY_MAX_ENTRIES
 
 export function mlHistoryStorageKey(instrumentToken: string, interval: string): string {
   return `trader.mlPriceDir.v1:${instrumentToken}:${interval}`
