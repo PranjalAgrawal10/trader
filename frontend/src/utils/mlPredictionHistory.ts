@@ -14,6 +14,8 @@ export type MlPredictionLogEntry = {
   outcome: MlPredictionOutcome
   nextBarTime?: string | null
   nextClose?: number | null
+  /** When true, outcome updates are synced via the API */
+  serverBacked?: boolean
 }
 
 type PriceDirectionLike = {
@@ -61,6 +63,43 @@ function isValidEntry(x: unknown): x is MlPredictionLogEntry {
   )
 }
 
+/** Response row from GET /api/v1/predictions/price-direction/history */
+export type MlPriceDirectionHistoryApiRow = {
+  id: string
+  predictedAt: string
+  refBarTime: string
+  refClose: number
+  direction: 'up' | 'down' | 'neutral'
+  confidence: number
+  modelId: string
+  detail: string
+  outcome: MlPredictionOutcome
+  nextBarTime: string | null
+  nextClose: number | null
+}
+
+function toIsoBarTime(s: string): string {
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? s : d.toISOString()
+}
+
+export function historyItemsFromApi(rows: MlPriceDirectionHistoryApiRow[]): MlPredictionLogEntry[] {
+  return rows.map((x) => ({
+    id: x.id,
+    predictedAt: x.predictedAt,
+    refBarTime: toIsoBarTime(x.refBarTime),
+    refClose: x.refClose,
+    direction: x.direction,
+    confidence: x.confidence,
+    modelId: x.modelId,
+    detail: x.detail,
+    outcome: x.outcome,
+    nextBarTime: x.nextBarTime ? toIsoBarTime(x.nextBarTime) : null,
+    nextClose: x.nextClose ?? undefined,
+    serverBacked: true,
+  }))
+}
+
 export function saveMlHistory(
   instrumentToken: string,
   interval: string,
@@ -80,10 +119,17 @@ function newId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
 }
 
+function barTimesMatch(chartT: string, entryRefT: string): boolean {
+  if (chartT === entryRefT) return true
+  const a = new Date(chartT).getTime()
+  const b = new Date(entryRefT).getTime()
+  return !Number.isNaN(a) && !Number.isNaN(b) && a === b
+}
+
 /** Compare predicted next-bar direction vs following candle close vs ref close. */
 export function resolveMlEntry(entry: MlPredictionLogEntry, series: ChartPointWithMa[]): MlPredictionLogEntry {
   if (entry.outcome !== 'pending') return entry
-  const i = series.findIndex((p) => p.t === entry.refBarTime)
+  const i = series.findIndex((p) => barTimesMatch(p.t, entry.refBarTime))
   if (i < 0 || i + 1 >= series.length) return entry
   const next = series[i + 1]
   const nextClose = next.close
@@ -113,10 +159,11 @@ export function appendMlPrediction(
   entries: MlPredictionLogEntry[],
   pred: PriceDirectionLike,
   ref: { t: string; close: number },
+  opts?: { serverId?: string; predictedAt?: string },
 ): MlPredictionLogEntry[] {
   const next: MlPredictionLogEntry = {
-    id: newId(),
-    predictedAt: new Date().toISOString(),
+    id: opts?.serverId ?? newId(),
+    predictedAt: opts?.predictedAt ?? new Date().toISOString(),
     refBarTime: ref.t,
     refClose: ref.close,
     direction: pred.direction,
@@ -124,6 +171,7 @@ export function appendMlPrediction(
     modelId: pred.modelId,
     detail: pred.detail,
     outcome: 'pending',
+    serverBacked: opts?.serverId != null,
   }
   return [...entries, next].slice(-MAX_ENTRIES)
 }

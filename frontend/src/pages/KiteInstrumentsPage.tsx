@@ -52,10 +52,12 @@ import {
 import {
   appendMlPrediction,
   historiesEqual,
+  historyItemsFromApi,
   loadMlHistory,
   resolveMlHistory,
   saveMlHistory,
   type MlPredictionLogEntry,
+  type MlPriceDirectionHistoryApiRow,
 } from '../utils/mlPredictionHistory'
 import {
   addCustomEmaToChartPoints,
@@ -126,6 +128,10 @@ interface PriceDirectionApiResponse {
   confidence: number
   modelId: string
   detail: string
+  predictionId?: string | null
+  refBarTime?: string | null
+  refClose?: number | null
+  predictedAt?: string | null
 }
 
 interface KiteFavoritesResponse {
@@ -631,6 +637,8 @@ function ChartZoomControls({
   compact,
   onToggleFullscreen,
   fullscreenActive,
+  onRefreshChart,
+  chartRefreshing,
 }: {
   idPrefix: string
   totalBars: number
@@ -641,7 +649,34 @@ function ChartZoomControls({
   compact?: boolean
   onToggleFullscreen?: () => void
   fullscreenActive?: boolean
+  onRefreshChart?: () => void
+  chartRefreshing?: boolean
 }) {
+  const refreshBtn = onRefreshChart ? (
+    <Button
+      type="button"
+      variant="outline-secondary"
+      size="sm"
+      id={`${idPrefix}-chart-refresh`}
+      className={compact ? 'py-0 px-2' : undefined}
+      disabled={chartRefreshing}
+      onClick={onRefreshChart}
+      title="Reload candles from server"
+      aria-label="Refresh chart data"
+    >
+      {chartRefreshing ? (
+        <>
+          <Spinner animation="border" size="sm" className="me-1" role="status" />
+          {compact ? '' : 'Refreshing'}
+        </>
+      ) : compact ? (
+        '↻'
+      ) : (
+        'Refresh chart'
+      )}
+    </Button>
+  ) : null
+
   const fullscreenBtn = onToggleFullscreen ? (
     <Button
       type="button"
@@ -658,9 +693,10 @@ function ChartZoomControls({
   ) : null
 
   if (totalBars < 2) {
-    if (!fullscreenBtn) return null
+    if (!fullscreenBtn && !refreshBtn) return null
     return (
       <div className={`d-flex flex-wrap align-items-center gap-2 ${compact ? 'mb-1' : 'mb-2'}`}>
+        {refreshBtn}
         {fullscreenBtn}
       </div>
     )
@@ -714,6 +750,7 @@ function ChartZoomControls({
           {visibleBarCount} / {totalBars} bars
         </span>
       ) : null}
+      {refreshBtn}
       {fullscreenBtn}
     </div>
   )
@@ -1107,7 +1144,7 @@ function ChartSettingsToolbar({
   )
 }
 
-/** ML next-bar direction; logs predictions locally (capped) in a scrollable table; rows turn green/red when the next bar resolves. */
+/** ML next-bar direction; predictions stored on the server (history + resolve); localStorage fallback if history GET fails. */
 function MlNextBarBiasBar({
   instrumentToken,
   interval,
@@ -1123,19 +1160,57 @@ function MlNextBarBiasBar({
   const [mlLoading, setMlLoading] = useState(false)
   const [mlError, setMlError] = useState<string | null>(null)
   const [history, setHistory] = useState<MlPredictionLogEntry[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const historySourceRef = useRef<'api' | 'local'>('api')
+
+  const reloadHistory = useCallback(async () => {
+    setHistoryLoading(true)
+    try {
+      const { data } = await api.get<MlPriceDirectionHistoryApiRow[]>('/predictions/price-direction/history', {
+        params: { instrumentToken, interval, take: 2000 },
+      })
+      historySourceRef.current = 'api'
+      setHistory(historyItemsFromApi(data))
+    } catch {
+      historySourceRef.current = 'local'
+      setHistory(loadMlHistory(instrumentToken, interval))
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [instrumentToken, interval])
 
   useEffect(() => {
     setMlPred(null)
     setMlError(null)
-    setHistory(loadMlHistory(instrumentToken, interval))
-  }, [instrumentToken, interval])
+    void reloadHistory()
+  }, [reloadHistory])
 
   useEffect(() => {
     if (candleSeries.length === 0) return
     setHistory((prev) => {
       const resolved = resolveMlHistory(prev, candleSeries)
+      for (const r of resolved) {
+        const p = prev.find((x) => x.id === r.id)
+        if (
+          p &&
+          p.outcome === 'pending' &&
+          r.outcome !== 'pending' &&
+          r.serverBacked &&
+          r.nextBarTime &&
+          r.nextClose != null
+        ) {
+          void api
+            .patch(`/predictions/price-direction/${r.id}/resolve`, {
+              nextBarTime: r.nextBarTime,
+              nextClose: r.nextClose,
+            })
+            .catch(() => {})
+        }
+      }
       if (historiesEqual(prev, resolved)) return prev
-      saveMlHistory(instrumentToken, interval, resolved)
+      if (historySourceRef.current === 'local') {
+        saveMlHistory(instrumentToken, interval, resolved)
+      }
       return resolved
     })
   }, [instrumentToken, interval, candleSeries])
@@ -1149,13 +1224,27 @@ function MlNextBarBiasBar({
       })
       setMlPred(data)
       const last = candleSeries.length > 0 ? candleSeries[candleSeries.length - 1] : null
-      if (last) {
-        setHistory((prev) => {
-          const extended = appendMlPrediction(prev, data, { t: last.t, close: last.close })
-          const resolved = resolveMlHistory(extended, candleSeries)
-          saveMlHistory(instrumentToken, interval, resolved)
-          return resolved
+      const refBar =
+        data.predictionId && data.refBarTime != null && data.refClose != null
+          ? { t: new Date(data.refBarTime).toISOString(), close: data.refClose }
+          : last
+            ? { t: last.t, close: last.close }
+            : null
+      if (!refBar) return
+
+      setHistory((prev) => {
+        const extended = appendMlPrediction(prev, data, refBar, {
+          serverId: data.predictionId ?? undefined,
+          predictedAt: data.predictedAt ?? undefined,
         })
+        const resolved = resolveMlHistory(extended, candleSeries)
+        if (historySourceRef.current === 'local') {
+          saveMlHistory(instrumentToken, interval, resolved)
+        }
+        return resolved
+      })
+      if (data.predictionId) {
+        historySourceRef.current = 'api'
       }
     } catch (err) {
       setMlPred(null)
@@ -1186,6 +1275,25 @@ function MlNextBarBiasBar({
             </>
           ) : (
             'ML next-bar bias'
+          )}
+        </Button>
+        <Button
+          type="button"
+          variant="outline-secondary"
+          size="sm"
+          className="py-0 px-2"
+          disabled={historyLoading}
+          onClick={() => void reloadHistory()}
+          title="Reload prediction history from server"
+          aria-label="Refresh prediction history"
+        >
+          {historyLoading ? (
+            <>
+              <Spinner animation="border" size="sm" className="me-1" role="status" />
+              …
+            </>
+          ) : (
+            '↻ Predictions'
           )}
         </Button>
         {mlPred ? (
@@ -1227,7 +1335,7 @@ function MlNextBarBiasBar({
         >
           <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary">
             <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              ML predictions ({history.length}, newest first) · scroll · green / red = correct / wrong · local only
+              ML predictions ({history.length}, newest first) · scroll · green / red = correct / wrong · stored on your account
             </span>
           </div>
           <Table
@@ -1350,6 +1458,7 @@ function CompactPriceChart({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
+  const [chartRefreshTick, setChartRefreshTick] = useState(0)
 
   useEffect(() => {
     if (zoomVisibleBars != null && series.length > 0 && zoomVisibleBars > series.length) {
@@ -1401,7 +1510,7 @@ function CompactPriceChart({
       window.clearInterval(timer)
       ac.abort()
     }
-  }, [row.instrumentToken, interval, rangePreset])
+  }, [row.instrumentToken, interval, rangePreset, chartRefreshTick])
 
   const customEmaApplied = useMemo(
     () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
@@ -1437,6 +1546,29 @@ function CompactPriceChart({
 
   return (
     <>
+      {!compactHasChart ? (
+        <div className="d-flex justify-content-end mb-1">
+          <Button
+            type="button"
+            variant="outline-secondary"
+            size="sm"
+            className="py-0 px-2"
+            disabled={loading}
+            onClick={() => setChartRefreshTick((n) => n + 1)}
+            title="Reload candles from server"
+            aria-label="Refresh chart data"
+          >
+            {loading ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-1" role="status" />
+                Refresh…
+              </>
+            ) : (
+              '↻ Refresh chart'
+            )}
+          </Button>
+        </div>
+      ) : null}
       {compactMetaOutside ? (
         <>
           {candleRange && !loading && !error ? (
@@ -1488,6 +1620,8 @@ function CompactPriceChart({
             compact
             onToggleFullscreen={toggleFullscreen}
             fullscreenActive={fullscreenActive}
+            onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
+            chartRefreshing={loading}
           />
           <div
             className={fullscreenActive ? 'flex-grow-1 w-100' : 'w-100'}
@@ -1716,6 +1850,7 @@ function InstrumentChartCard({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
+  const [chartRefreshTick, setChartRefreshTick] = useState(0)
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
   useEffect(() => {
@@ -1770,7 +1905,7 @@ function InstrumentChartCard({
       window.clearInterval(timer)
       ac.abort()
     }
-  }, [selection, interval, rangePreset])
+  }, [selection, interval, rangePreset, chartRefreshTick])
 
   const displaySeries = useMemo(
     () => mergeLiveTickIntoOhlc(series, liveLastTick ?? null, interval, graphType),
@@ -1877,6 +2012,28 @@ function InstrumentChartCard({
         ) : (
           <>
             {!browseDetailMetaInFullscreen ? browseDetailMeta : null}
+            {selection && !browseHasChartData ? (
+              <div className="d-flex justify-content-end mb-2">
+                <Button
+                  type="button"
+                  variant="outline-secondary"
+                  size="sm"
+                  disabled={loading}
+                  onClick={() => setChartRefreshTick((n) => n + 1)}
+                  title="Reload candles from server"
+                  aria-label="Refresh chart data"
+                >
+                  {loading ? (
+                    <>
+                      <Spinner animation="border" size="sm" className="me-1" role="status" />
+                      Refresh…
+                    </>
+                  ) : (
+                    '↻ Refresh chart'
+                  )}
+                </Button>
+              </div>
+            ) : null}
             {browseHasChartData ? (
               <div
                 ref={panelRef}
@@ -1906,6 +2063,8 @@ function InstrumentChartCard({
                   onReset={onChartZoomReset}
                   onToggleFullscreen={toggleFullscreen}
                   fullscreenActive={fullscreenActive}
+                  onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
+                  chartRefreshing={loading}
                 />
                 <div
                   className={fullscreenActive ? 'flex-grow-1 w-100' : undefined}

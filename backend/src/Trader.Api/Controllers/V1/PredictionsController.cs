@@ -23,6 +23,7 @@ public sealed class PredictionsController : ControllerBase
 
     /// <summary>
     /// ML.NET on-the-fly logistic model over short-horizon return / SMA features (not investment advice).
+    /// When enough candles are available, the prediction is stored for the signed-in user.
     /// </summary>
     [HttpGet("price-direction")]
     public async Task<ActionResult<PriceDirectionResponseDto>> PriceDirection(
@@ -48,15 +49,82 @@ public sealed class PredictionsController : ControllerBase
 
         try
         {
-            var r = await _predictions
+            var env = await _predictions
                 .PredictForInstrumentAsync(User.GetUserId(), instrumentToken.Trim(), interval.Trim(), ct)
                 .ConfigureAwait(false);
 
+            var r = env.Result;
             return Ok(new PriceDirectionResponseDto(
                 MapDirection(r.Direction),
                 r.Confidence,
                 r.ModelId,
-                r.Detail));
+                r.Detail,
+                env.StoredId,
+                env.RefBarTimeUtc,
+                env.RefClose,
+                env.PredictedAtUtc));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>Recent stored predictions for an instrument and interval (newest first).</summary>
+    [HttpGet("price-direction/history")]
+    public async Task<ActionResult<IReadOnlyList<MlPriceDirectionPredictionItemDto>>> PriceDirectionHistory(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        [FromQuery] string? interval,
+        [FromQuery] int? take,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+        {
+            return Problem(
+                title: "Invalid instrument",
+                detail: "Provide instrumentToken (Kite numeric token).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        if (string.IsNullOrWhiteSpace(interval))
+        {
+            return Problem(
+                title: "Invalid interval",
+                detail: "Provide interval (e.g. 5m, 15m, 1h).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var list = await _predictions
+                .ListPredictionHistoryAsync(
+                    User.GetUserId(),
+                    instrumentToken.Trim(),
+                    interval.Trim(),
+                    take ?? 500,
+                    ct)
+                .ConfigureAwait(false);
+            return Ok(list);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>Resolve a pending prediction when the next bar is known (correct/wrong vs reference close).</summary>
+    [HttpPatch("price-direction/{id:guid}/resolve")]
+    public async Task<IActionResult> PriceDirectionResolve(
+        Guid id,
+        [FromBody] ResolveMlPredictionBodyDto body,
+        CancellationToken ct)
+    {
+        try
+        {
+            await _predictions
+                .ResolvePredictionAsync(User.GetUserId(), id, body.NextBarTime, body.NextClose, ct)
+                .ConfigureAwait(false);
+            return NoContent();
         }
         catch (InvalidOperationException ex)
         {
@@ -77,4 +145,12 @@ public sealed record PriceDirectionResponseDto(
     string Direction,
     int Confidence,
     string ModelId,
-    string Detail);
+    string Detail,
+    Guid? PredictionId,
+    DateTimeOffset? RefBarTime,
+    decimal? RefClose,
+    DateTimeOffset? PredictedAt);
+
+public sealed record ResolveMlPredictionBodyDto(
+    DateTimeOffset NextBarTime,
+    decimal NextClose);
