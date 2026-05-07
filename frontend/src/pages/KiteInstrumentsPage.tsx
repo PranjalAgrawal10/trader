@@ -1314,7 +1314,36 @@ function ChartSettingsToolbar({
 /** Correct / wrong / pending counts for ML prediction history (pie chart). */
 type MlOutcomeCounts = { correct: number; wrong: number; pending: number }
 
-function MlOutcomePieChart({ counts, height }: { counts: MlOutcomeCounts; height: number }) {
+const ML_FULLSCREEN_PIE_HEIGHT = { compact: 400, default: 480 } as const
+const ML_FULLSCREEN_PIE_MIN_COL_PX = 460
+
+/** Group history rows by <code>modelId</code> and tally outcomes (for per-model pies). */
+function outcomeCountsByModelId(rows: readonly MlPredictionLogEntry[]): Map<string, MlOutcomeCounts> {
+  const map = new Map<string, MlOutcomeCounts>()
+  for (const e of rows) {
+    const key = e.modelId?.trim() || '(unknown model)'
+    let c = map.get(key)
+    if (!c) {
+      c = { correct: 0, wrong: 0, pending: 0 }
+      map.set(key, c)
+    }
+    if (e.outcome === 'correct') c.correct++
+    else if (e.outcome === 'wrong') c.wrong++
+    else c.pending++
+  }
+  return map
+}
+
+function MlOutcomePieChart({
+  counts,
+  height,
+  maxWidth,
+}: {
+  counts: MlOutcomeCounts
+  height: number
+  /** When set, caps chart width; omit to fill the parent (e.g. grid cells). */
+  maxWidth?: number
+}) {
   const { correct, wrong, pending } = counts
   const pieData = useMemo(() => {
     const rows: { name: string; value: number; fill: string }[] = []
@@ -1328,8 +1357,8 @@ function MlOutcomePieChart({ counts, height }: { counts: MlOutcomeCounts; height
   if (total === 0) {
     return (
       <div
-        className="d-flex align-items-center justify-content-center border border-secondary rounded bg-body-secondary text-secondary small"
-        style={{ height, maxWidth: 360 }}
+        className="d-flex align-items-center justify-content-center border border-secondary rounded bg-body-secondary text-secondary small flex-shrink-0"
+        style={{ height, ...(maxWidth != null ? { maxWidth } : {}) }}
       >
         No predictions to chart
       </div>
@@ -1338,24 +1367,23 @@ function MlOutcomePieChart({ counts, height }: { counts: MlOutcomeCounts; height
 
   return (
     <div
-      className="flex-shrink-0"
+      className="flex-shrink-0 w-100"
       style={{
-        width: '100%',
-        maxWidth: 440,
+        ...(maxWidth != null ? { maxWidth } : {}),
         height,
         minHeight: height,
       }}
     >
       <ResponsiveContainer width="100%" height="100%" debounce={50}>
-        <PieChart margin={{ top: 4, right: 12, bottom: 4, left: 12 }}>
+        <PieChart margin={{ top: 8, right: 16, bottom: 12, left: 16 }}>
           <Pie
             data={pieData}
             dataKey="value"
             nameKey="name"
             cx="50%"
-            cy="46%"
+            cy="42%"
             innerRadius={0}
-            outerRadius="68%"
+            outerRadius="76%"
             paddingAngle={pieData.length > 1 ? 1.5 : 0}
             label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
             labelLine={{ stroke: 'rgba(173, 181, 189, 0.45)' }}
@@ -1369,10 +1397,65 @@ function MlOutcomePieChart({ counts, height }: { counts: MlOutcomeCounts; height
             verticalAlign="bottom"
             align="center"
             layout="horizontal"
-            wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
+            wrapperStyle={{ fontSize: 12, paddingTop: 6 }}
           />
         </PieChart>
       </ResponsiveContainer>
+    </div>
+  )
+}
+
+/** Fullscreen: one outcome pie per distinct <code>modelId</code> in a responsive grid. */
+function MlModelPieChartGrid({
+  sectionTitle,
+  rows,
+  compact,
+}: {
+  sectionTitle: string
+  rows: readonly MlPredictionLogEntry[]
+  compact?: boolean
+}) {
+  const modelsSorted = useMemo(() => {
+    const grouped = outcomeCountsByModelId(rows)
+    const entries = [...grouped.entries()].map(([modelId, counts]) => ({
+      modelId,
+      counts,
+      n: counts.correct + counts.wrong + counts.pending,
+    }))
+    entries.sort((a, b) => b.n - a.n || a.modelId.localeCompare(b.modelId))
+    return entries
+  }, [rows])
+
+  const h = compact ? ML_FULLSCREEN_PIE_HEIGHT.compact : ML_FULLSCREEN_PIE_HEIGHT.default
+
+  return (
+    <div className="flex-shrink-0 overflow-visible mb-4">
+      <div className="small text-muted text-uppercase mb-2" style={{ fontSize: compact ? '0.62rem' : '0.68rem' }}>
+        {sectionTitle} — by model ({modelsSorted.length})
+      </div>
+      <div
+        className="d-grid gap-4"
+        style={{
+          gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${ML_FULLSCREEN_PIE_MIN_COL_PX}px), 1fr))`,
+        }}
+      >
+        {modelsSorted.map(({ modelId, counts, n }) => (
+          <div key={modelId} className="flex-shrink-0 overflow-visible border border-secondary rounded p-3 bg-body-tertiary">
+            <div
+              className="small font-monospace text-secondary mb-2 fw-semibold"
+              style={{
+                wordBreak: 'break-all',
+                lineHeight: 1.3,
+              }}
+              title={`${modelId} — ${n} prediction row(s)`}
+            >
+              {modelId}
+              <span className="text-muted fw-normal ms-1">({n})</span>
+            </div>
+            <MlOutcomePieChart counts={counts} height={h} />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -1499,30 +1582,6 @@ function MlNextBarBiasBar({
       return selectedPriceModelId === ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID
     return priceModels?.defaultModelId === ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID
   }, [selectedPriceModelId, priceModels?.defaultModelId])
-
-  const outcomeCounts = useMemo(() => {
-    let correct = 0
-    let wrong = 0
-    let pending = 0
-    for (const e of history) {
-      if (e.outcome === 'correct') correct++
-      else if (e.outcome === 'wrong') wrong++
-      else pending++
-    }
-    return { correct, wrong, pending }
-  }, [history])
-
-  const lightGbmOutcomeCounts = useMemo(() => {
-    let correct = 0
-    let wrong = 0
-    let pending = 0
-    for (const e of lightGbmHistory) {
-      if (e.outcome === 'correct') correct++
-      else if (e.outcome === 'wrong') wrong++
-      else pending++
-    }
-    return { correct, wrong, pending }
-  }, [lightGbmHistory])
 
   const reloadHistory = useCallback(async () => {
     setHistoryLoading(true)
@@ -1819,22 +1878,16 @@ function MlNextBarBiasBar({
         </p>
       ) : null}
       {fullscreenActive && (history.length > 0 || lightGbmHistory.length > 0) ? (
-        <div className="d-flex flex-column flex-md-row flex-wrap gap-3 mb-3 flex-shrink-0 align-items-md-start overflow-visible">
+        <div className="flex-shrink-0 overflow-visible mb-2">
           {history.length > 0 ? (
-            <div className="flex-shrink-0 overflow-visible">
-              <div className="small text-muted text-uppercase mb-1" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-                Classic models
-              </div>
-              <MlOutcomePieChart counts={outcomeCounts} height={compact ? 268 : 320} />
-            </div>
+            <MlModelPieChartGrid sectionTitle="Classic models" rows={history} compact={compact} />
           ) : null}
           {lightGbmHistory.length > 0 ? (
-            <div className="flex-shrink-0 overflow-visible">
-              <div className="small text-muted text-uppercase mb-1" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-                LightGBM triple-barrier
-              </div>
-              <MlOutcomePieChart counts={lightGbmOutcomeCounts} height={compact ? 268 : 320} />
-            </div>
+            <MlModelPieChartGrid
+              sectionTitle="LightGBM triple-barrier"
+              rows={lightGbmHistory}
+              compact={compact}
+            />
           ) : null}
         </div>
       ) : null}
