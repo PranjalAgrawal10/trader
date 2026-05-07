@@ -3,7 +3,8 @@ namespace Trader.Application.Prediction;
 public interface IPriceDirectionPredictionService
 {
     /// <summary>
-    /// Loads historical candles via Kite for the authenticated user, then runs <see cref="IPriceDirectionPredictionEngine"/>.
+    /// Loads historical candles via Kite for the authenticated user, then runs the selected <see cref="IPriceDirectionPredictionEngine"/>.
+    /// When <paramref name="modelId"/> is null or whitespace, <see cref="IPriceDirectionPredictionEngineRegistry.DefaultModelId"/> is used.
     /// Persists a row when enough candles exist; <see cref="PriceDirectionPredictionEnvelope.StoredId"/> is null otherwise.
     /// </summary>
     Task<PriceDirectionPredictionEnvelope> PredictForInstrumentAsync(
@@ -11,6 +12,7 @@ public interface IPriceDirectionPredictionService
         string instrumentToken,
         string interval,
         string? source = null,
+        string? modelId = null,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<MlPriceDirectionPredictionItemDto>> ListPredictionHistoryAsync(

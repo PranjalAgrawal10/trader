@@ -39,6 +39,9 @@ public sealed class FavoriteMlAutomationOptions
     /// <summary>Fallback chart interval when user has never saved instruments chart settings.</summary>
     public string DefaultChartInterval { get; set; } = "5m";
 
+    /// <summary>Price-direction model id for automation (<c>GET .../price-direction/models</c>); null/empty uses <c>PriceDirectionPrediction:DefaultModelId</c>.</summary>
+    public string? PredictionModelId { get; set; }
+
     /// <summary>Max pending rows to scan for resolution per user per tick.</summary>
     public int MaxPendingResolutionBatch { get; set; } = 2_000;
 }

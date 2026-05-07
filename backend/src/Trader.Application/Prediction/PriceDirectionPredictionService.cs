@@ -19,16 +19,16 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     public const string SourceAutomation = "automation";
 
     private readonly IBrokerService _broker;
-    private readonly IPriceDirectionPredictionEngine _engine;
+    private readonly IPriceDirectionPredictionEngineRegistry _engines;
     private readonly IMlPriceDirectionPredictionRepository _predictions;
 
     public PriceDirectionPredictionService(
       IBrokerService broker,
-      IPriceDirectionPredictionEngine engine,
+      IPriceDirectionPredictionEngineRegistry engines,
       IMlPriceDirectionPredictionRepository predictions)
     {
         _broker = broker;
-        _engine = engine;
+        _engines = engines;
         _predictions = predictions;
     }
 
@@ -37,6 +37,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         string instrumentToken,
         string interval,
         string? source = null,
+        string? modelId = null,
         CancellationToken ct = default)
     {
         var hist = await _broker
@@ -55,7 +56,8 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
 
         var last = hist.Candles[^1];
         var closes = hist.Candles.Select(c => c.Close).ToList();
-        var result = _engine.PredictNextDirection(closes);
+        var engine = _engines.Resolve(modelId);
+        var result = engine.PredictNextDirection(closes);
 
         var id = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;

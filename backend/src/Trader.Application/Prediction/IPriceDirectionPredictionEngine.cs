@@ -6,6 +6,12 @@ namespace Trader.Application.Prediction;
 /// </summary>
 public interface IPriceDirectionPredictionEngine
 {
+    /// <summary>Stable key stored on predictions and used in the API <c>model</c> query (e.g. <c>mlnet-sdca-logistic-v1</c>).</summary>
+    string ModelId { get; }
+
+    /// <summary>Short human-readable summary for model pickers.</summary>
+    string Description { get; }
+
     /// <summary>
     /// Trains a small binary classifier on the supplied series and scores the <strong>last</strong> observation.
     /// </summary>

@@ -60,6 +60,7 @@ import {
   loadMlHistory,
   resolveMlHistory,
   saveMlHistory,
+  sortByPredictedAtNewestFirst,
   type MlPredictionLogEntry,
   type MlPriceDirectionHistoryApiRow,
 } from '../utils/mlPredictionHistory'
@@ -137,6 +138,12 @@ interface PriceDirectionApiResponse {
   refBarTime?: string | null
   refClose?: number | null
   predictedAt?: string | null
+}
+
+/** GET /api/v1/predictions/price-direction/models */
+interface PriceDirectionModelsApiResponse {
+  defaultModelId: string
+  models: { id: string; description: string }[]
 }
 
 interface KiteFavoritesResponse {
@@ -1249,6 +1256,8 @@ function MlNextBarBiasBar({
   const [mlPred, setMlPred] = useState<PriceDirectionApiResponse | null>(null)
   const [mlLoading, setMlLoading] = useState(false)
   const [mlError, setMlError] = useState<string | null>(null)
+  const [priceModels, setPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
+  const [selectedPriceModelId, setSelectedPriceModelId] = useState<string>('')
   const [history, setHistory] = useState<MlPredictionLogEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const historySourceRef = useRef<'api' | 'local'>('api')
@@ -1283,10 +1292,30 @@ function MlNextBarBiasBar({
   }, [instrumentToken, interval])
 
   useEffect(() => {
+    const ac = new AbortController()
+    void (async () => {
+      try {
+        const { data } = await api.get<PriceDirectionModelsApiResponse>('/predictions/price-direction/models', {
+          signal: ac.signal,
+        })
+        if (!ac.signal.aborted) setPriceModels(data)
+      } catch {
+        if (!ac.signal.aborted) setPriceModels(null)
+      }
+    })()
+    return () => ac.abort()
+  }, [])
+
+  useEffect(() => {
     setMlPred(null)
     setMlError(null)
     void reloadHistory()
   }, [reloadHistory])
+
+  useEffect(() => {
+    setMlPred(null)
+    setMlError(null)
+  }, [selectedPriceModelId])
 
   useEffect(() => {
     if (candleSeries.length === 0) return
@@ -1323,7 +1352,11 @@ function MlNextBarBiasBar({
     setMlError(null)
     try {
       const { data } = await api.get<PriceDirectionApiResponse>('/predictions/price-direction', {
-        params: { instrumentToken, interval },
+        params: {
+          instrumentToken,
+          interval,
+          ...(selectedPriceModelId ? { model: selectedPriceModelId } : {}),
+        },
       })
       setMlPred(data)
       const last = candleSeries.length > 0 ? candleSeries[candleSeries.length - 1] : null
@@ -1355,10 +1388,10 @@ function MlNextBarBiasBar({
     } finally {
       setMlLoading(false)
     }
-  }, [instrumentToken, interval, candleSeries])
+  }, [instrumentToken, interval, candleSeries, selectedPriceModelId])
 
   const gapClass = compact ? 'mb-1' : 'mb-2'
-  const historyNewestFirst = useMemo(() => [...history].reverse(), [history])
+  const mlHistoryTableRows = useMemo(() => sortByPredictedAtNewestFirst(history), [history])
 
   return (
     <div
@@ -1376,6 +1409,27 @@ function MlNextBarBiasBar({
       }
     >
       <div className={`d-flex flex-wrap align-items-center gap-2 ${fullscreenActive ? 'mb-2 flex-shrink-0' : gapClass}`}>
+        {priceModels && priceModels.models.length > 0 ? (
+          <Form.Select
+            size="sm"
+            className="py-0 w-auto"
+            style={{ maxWidth: '14rem', fontSize: compact ? '0.72rem' : '0.8rem' }}
+            value={selectedPriceModelId}
+            aria-label="Price direction model"
+            title={(() => {
+              const m = priceModels.models.find((x) => x.id === selectedPriceModelId)
+              return m?.description ?? `Server default (${priceModels.defaultModelId})`
+            })()}
+            onChange={(e) => setSelectedPriceModelId(e.target.value)}
+          >
+            <option value="">{`Default (${priceModels.defaultModelId})`}</option>
+            {priceModels.models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.id}
+              </option>
+            ))}
+          </Form.Select>
+        ) : null}
         <Button
           type="button"
           variant="outline-info"
@@ -1509,7 +1563,7 @@ function MlNextBarBiasBar({
               </tr>
             </thead>
             <tbody>
-              {historyNewestFirst.map((e, idx) => (
+              {mlHistoryTableRows.map((e, idx) => (
                 <tr
                   key={e.id}
                   style={{
@@ -2303,8 +2357,9 @@ function InstrumentChartCard({
               custom-period <strong>EMA</strong> on line, bar, and candle views. Live <strong>LTP</strong> and in-progress{' '}
               <strong>candle</strong> (Candles view) use SignalR + Kite WebSocket when a row is selected (market hours /
               session). <strong>ML next-bar bias</strong> calls{' '}
-              <span className="font-monospace">/api/v1/predictions/price-direction</span> (ML.NET on the server — not
-              financial advice).
+              <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
+              <span className="font-monospace">model</span> query (see{' '}
+              <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.
             </p>
             {error ? (
               <Alert variant="danger" className="py-2 small mb-2">
@@ -2440,6 +2495,10 @@ export function KiteInstrumentsPage() {
   const [mlAutomationError, setMlAutomationError] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
+  const automationRecentSorted = useMemo(
+    () => sortByPredictedAtNewestFirst(automationRecent),
+    [automationRecent],
+  )
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
   const [chartIntervalByToken, setChartIntervalByToken] = useState<Record<string, ChartInterval>>({})
   const chartZoomSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -2737,7 +2796,7 @@ export function KiteInstrumentsPage() {
                         </td>
                       </tr>
                     ) : (
-                      automationRecent.map((r) => (
+                      automationRecentSorted.map((r) => (
                         <tr key={r.id}>
                           <td className="small">{formatLocalDateTime(r.predictedAt)}</td>
                           <td>

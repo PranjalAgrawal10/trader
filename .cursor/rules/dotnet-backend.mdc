@@ -1,6 +1,6 @@
 ---
 description: C# / ASP.NET Core conventions for Trader.Api and libraries
-globs: src/**/*.cs
+globs: backend/src/**/*.cs
 alwaysApply: false
 ---
 

@@ -146,6 +146,7 @@ public sealed class FavoriteMlAutomationService
                         fav.InstrumentToken,
                         hist.Interval,
                         PriceDirectionPredictionService.SourceAutomation,
+                        string.IsNullOrWhiteSpace(_opts.PredictionModelId) ? null : _opts.PredictionModelId.Trim(),
                         ct)
                     .ConfigureAwait(false);
             }

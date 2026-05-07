@@ -1,6 +1,6 @@
 ---
 description: Conventions for Trader.Tests and integration-style tests
-globs: tests/**/*.cs
+globs: backend/tests/**/*.cs
 alwaysApply: false
 ---
 

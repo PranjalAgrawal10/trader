@@ -13,6 +13,10 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
 {
     public const string EngineModelId = "mlnet-sdca-logistic-v1";
 
+    public string ModelId => EngineModelId;
+
+    public string Description => "ML.NET on-the-fly SDCA logistic regression (return / SMA-gap features).";
+
     private const int FirstFeatureIndex = 14;
     private readonly ILogger<MlNetPriceDirectionPredictionEngine> _logger;
     private readonly MLContext _ml;
@@ -30,7 +34,7 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
             return new PriceDirectionResult(
                 PriceDirectionLabel.Neutral,
                 0,
-                EngineModelId,
+                ModelId,
                 "Not enough closes for ML.");
         }
 
@@ -70,7 +74,7 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
                 return new PriceDirectionResult(
                     PriceDirectionLabel.Neutral,
                     confidence,
-                    EngineModelId,
+                    ModelId,
                     "Model output near 50% — no strong directional bias.");
             }
 
@@ -78,12 +82,12 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
                 ? new PriceDirectionResult(
                     PriceDirectionLabel.Up,
                     confidence,
-                    EngineModelId,
+                    ModelId,
                     "Classifier favors a higher next close vs current (historical pattern fit).")
                 : new PriceDirectionResult(
                     PriceDirectionLabel.Down,
                     confidence,
-                    EngineModelId,
+                    ModelId,
                     "Classifier favors a lower next close vs current (historical pattern fit).");
         }
         catch (Exception ex)

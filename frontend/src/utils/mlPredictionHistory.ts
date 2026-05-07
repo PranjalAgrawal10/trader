@@ -83,6 +83,15 @@ function toIsoBarTime(s: string): string {
   return Number.isNaN(d.getTime()) ? s : d.toISOString()
 }
 
+/** Table display: most recently predicted rows first (stable for API + localStorage orders). */
+export function sortByPredictedAtNewestFirst<T extends { predictedAt: string }>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const tb = new Date(b.predictedAt).getTime()
+    const ta = new Date(a.predictedAt).getTime()
+    return tb - ta
+  })
+}
+
 export function historyItemsFromApi(rows: MlPriceDirectionHistoryApiRow[]): MlPredictionLogEntry[] {
   return rows.map((x) => ({
     id: x.id,

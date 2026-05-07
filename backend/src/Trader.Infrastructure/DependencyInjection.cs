@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
         services.Configure<LiveCandlesOptions>(configuration.GetSection(LiveCandlesOptions.SectionName));
         services.Configure<FavoriteMlAutomationOptions>(configuration.GetSection(FavoriteMlAutomationOptions.SectionName));
+        services.Configure<PriceDirectionPredictionOptions>(configuration.GetSection(PriceDirectionPredictionOptions.SectionName));
 
         services.AddSingleton<IKiteOAuthStateCodec, KiteOAuthStateCodec>();
         services.AddSingleton<ITwoFactorTotpHelper>(sp =>
@@ -114,7 +115,16 @@ public static class DependencyInjection
         services.AddSingleton<IMlOutcomePieChartPngRenderer, SkiaMlOutcomePieChartPngRenderer>();
         services.AddHostedService<FavoriteMlAutomationBackgroundService>();
 
-        services.AddSingleton<IPriceDirectionPredictionEngine, MlNetPriceDirectionPredictionEngine>();
+        services.AddSingleton<MlNetPriceDirectionPredictionEngine>();
+        services.AddSingleton<MomentumPriceDirectionPredictionEngine>();
+        services.AddSingleton<IPriceDirectionPredictionEngineRegistry>(sp =>
+            new PriceDirectionPredictionEngineRegistry(
+                new IPriceDirectionPredictionEngine[]
+                {
+                    sp.GetRequiredService<MlNetPriceDirectionPredictionEngine>(),
+                    sp.GetRequiredService<MomentumPriceDirectionPredictionEngine>(),
+                },
+                sp.GetRequiredService<IOptions<PriceDirectionPredictionOptions>>()));
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 

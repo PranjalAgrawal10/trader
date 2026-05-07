@@ -15,20 +15,37 @@ namespace Trader.Api.Controllers.V1;
 public sealed class PredictionsController : ControllerBase
 {
     private readonly IPriceDirectionPredictionService _predictions;
+    private readonly IPriceDirectionPredictionEngineRegistry _engineRegistry;
 
-    public PredictionsController(IPriceDirectionPredictionService predictions)
+    public PredictionsController(
+        IPriceDirectionPredictionService predictions,
+        IPriceDirectionPredictionEngineRegistry engineRegistry)
     {
         _predictions = predictions;
+        _engineRegistry = engineRegistry;
     }
 
     /// <summary>
-    /// ML.NET on-the-fly logistic model over short-horizon return / SMA features (not investment advice).
+    /// Registered price-direction models and the configured default (for UI or clients).
+    /// </summary>
+    [HttpGet("price-direction/models")]
+    public ActionResult<PriceDirectionModelsResponseDto> PriceDirectionModels()
+    {
+        var models = _engineRegistry.ListModels();
+        return Ok(new PriceDirectionModelsResponseDto(
+            _engineRegistry.DefaultModelId,
+            models.Select(static m => new PriceDirectionModelItemDto(m.Id, m.Description)).ToList()));
+    }
+
+    /// <summary>
+    /// On-the-fly models over short-horizon features (not investment advice). Use <paramref name="model"/> to pick an engine; omit for the configured default.
     /// When enough candles are available, the prediction is stored for the signed-in user.
     /// </summary>
     [HttpGet("price-direction")]
     public async Task<ActionResult<PriceDirectionResponseDto>> PriceDirection(
         [FromQuery(Name = "instrumentToken")] string? instrumentToken,
         [FromQuery] string? interval,
+        [FromQuery] string? model,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(instrumentToken))
@@ -50,7 +67,13 @@ public sealed class PredictionsController : ControllerBase
         try
         {
             var env = await _predictions
-                .PredictForInstrumentAsync(User.GetUserId(), instrumentToken.Trim(), interval.Trim(), source: null, ct)
+                .PredictForInstrumentAsync(
+                    User.GetUserId(),
+                    instrumentToken.Trim(),
+                    interval.Trim(),
+                    source: null,
+                    string.IsNullOrWhiteSpace(model) ? null : model.Trim(),
+                    ct)
                 .ConfigureAwait(false);
 
             var r = env.Result;
@@ -169,6 +192,12 @@ public sealed record PriceDirectionResponseDto(
     DateTimeOffset? RefBarTime,
     decimal? RefClose,
     DateTimeOffset? PredictedAt);
+
+public sealed record PriceDirectionModelsResponseDto(
+    string DefaultModelId,
+    IReadOnlyList<PriceDirectionModelItemDto> Models);
+
+public sealed record PriceDirectionModelItemDto(string Id, string Description);
 
 public sealed record ResolveMlPredictionBodyDto(
     DateTimeOffset NextBarTime,
