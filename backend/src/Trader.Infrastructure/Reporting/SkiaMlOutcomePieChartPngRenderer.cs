@@ -7,8 +7,8 @@ public sealed class SkiaMlOutcomePieChartPngRenderer : IMlOutcomePieChartPngRend
 {
     public byte[] Render(int correct, int wrong, int pending, string? chartTitle = null)
     {
-        const int w = 520;
-        const int h = 420;
+        const int w = 600;
+        const int h = 440;
         var total = correct + wrong + pending;
         using var bitmap = new SKBitmap(w, h);
         using var canvas = new SKCanvas(bitmap);
@@ -34,8 +34,8 @@ public sealed class SkiaMlOutcomePieChartPngRenderer : IMlOutcomePieChartPngRend
         }
 
         var cx = w / 2f;
-        var cy = h / 2f - 10f;
-        var radius = Math.Min(w, h) / 2f - 56f;
+        var cy = h / 2f - 32f;
+        var radius = Math.Min(w * 0.42f, h * 0.38f);
         float start = -90f;
 
         var slices = new (int count, SKColor color)[]
@@ -60,13 +60,17 @@ public sealed class SkiaMlOutcomePieChartPngRenderer : IMlOutcomePieChartPngRend
         }
 
         using var legendPaint = new SKPaint { IsAntialias = true, TextSize = 15f, Color = SKColors.Black };
-        var ly = h - 78f;
-        DrawLegendSwatch(canvas, 32f, ly, new SKColor(40, 167, 69));
-        canvas.DrawText($"Correct: {correct}", 56f, ly + 14f, legendPaint);
-        DrawLegendSwatch(canvas, 180f, ly, new SKColor(220, 53, 69));
-        canvas.DrawText($"Wrong: {wrong}", 204f, ly + 14f, legendPaint);
-        DrawLegendSwatch(canvas, 312f, ly, new SKColor(108, 117, 125));
-        canvas.DrawText($"Pending: {pending}", 336f, ly + 14f, legendPaint);
+        // Stacked legend (not one horizontal row) so wide counts / fonts never clip canvas edges.
+        const float lx = 40f;
+        var ly = h - 100f;
+        DrawLegendSwatch(canvas, lx, ly, new SKColor(40, 167, 69));
+        canvas.DrawText($"Correct: {correct}", lx + 24f, ly + 14f, legendPaint);
+        ly += 28f;
+        DrawLegendSwatch(canvas, lx, ly, new SKColor(220, 53, 69));
+        canvas.DrawText($"Wrong: {wrong}", lx + 24f, ly + 14f, legendPaint);
+        ly += 28f;
+        DrawLegendSwatch(canvas, lx, ly, new SKColor(108, 117, 125));
+        canvas.DrawText($"Pending: {pending}", lx + 24f, ly + 14f, legendPaint);
 
         return Encode(bitmap);
     }

@@ -182,7 +182,7 @@ public sealed class FavoriteMlAutomationService
 
     public async Task RunCycleAsync(CancellationToken ct)
     {
-        var pausePredictions =
+        var suppressNewAutomationPredictions =
             FavoriteMlAutomationQuietHours.IsAutomationPaused(_opts, DateTime.UtcNow);
 
         var userIds = await _favorites.ListDistinctUserIdsWithFavoritesAsync(ct).ConfigureAwait(false);
@@ -195,8 +195,7 @@ public sealed class FavoriteMlAutomationService
 
             try
             {
-                if (!pausePredictions)
-                    await ProcessUserPredictionsAsync(user, ct).ConfigureAwait(false);
+                await ProcessUserPredictionsAsync(user, suppressNewAutomationPredictions, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -257,7 +256,16 @@ public sealed class FavoriteMlAutomationService
         return sb.Length > 0 ? sb.ToString() : "engine";
     }
 
-    private async Task ProcessUserPredictionsAsync(User user, CancellationToken ct)
+    /// <summary>Resolve pending favorite-ML rows; optionally run the per-favorite new prediction pass for automation.</summary>
+    /// <remarks>
+    /// When <paramref name="suppressNewAutomationPredictions"/> is true (favorite-ML quiet hours), pending rows are still
+    /// resolved from candles; only the scheduled <strong>new</strong> prediction pass per favorite/engine is skipped.
+    /// Interactive <c>GET /predictions/price-direction</c> and other API features are not gated here.
+    /// </remarks>
+    private async Task ProcessUserPredictionsAsync(
+        User user,
+        bool suppressNewAutomationPredictions,
+        CancellationToken ct)
     {
         var userId = user.Id;
         if (!user.FavoriteMlAutomationEnabled)
@@ -323,6 +331,9 @@ public sealed class FavoriteMlAutomationService
                     userId);
             }
         }
+
+        if (suppressNewAutomationPredictions)
+            return;
 
         var engineIds = FavoriteMlAutomationModelSelection.ResolveEngineIdsToRun(
             _engineRegistry,

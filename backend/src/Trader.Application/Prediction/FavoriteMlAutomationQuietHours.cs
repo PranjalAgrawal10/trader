@@ -3,17 +3,19 @@ using Trader.Application.Configuration;
 namespace Trader.Application.Prediction;
 
 /// <summary>
-/// Daily window when scheduled favorite ML automation skips new predictions + resolution (EOD mail still evaluated separately).
-/// Times are in <see cref="FavoriteMlAutomationOptions.ReportTimeZoneId"/> (default <c>Asia/Kolkata</c> = IST).
+/// Daily window when the favorite-ML background job skips only <strong>new</strong> scheduled predictions per favorite/engine.
+/// Pending-row resolution still runs so outcomes can settle; nightly EOD email is unchanged.
+/// Uses <see cref="FavoriteMlAutomationOptions.ReportTimeZoneId"/> (default <c>Asia/Kolkata</c> = IST).
 /// </summary>
 public static class FavoriteMlAutomationQuietHours
 {
     /// <summary>
     /// When <see cref="FavoriteMlAutomationOptions.QuietHoursEnabled"/> is false, always false.
-    /// Pause interval is [<see cref="FavoriteMlAutomationOptions.QuietHoursStartLocalHour"/>:<see cref="FavoriteMlAutomationOptions.QuietHoursStartLocalMinute"/>,
-    /// <see cref="FavoriteMlAutomationOptions.QuietHoursEndLocalHour"/>:<see cref="FavoriteMlAutomationOptions.QuietHoursEndLocalMinute"/>);
-    /// end is exclusive (automation resumes on that clock time).
-    /// If start and end coincide after clamping, no pause applies.
+    /// When local time (<see cref="FavoriteMlAutomationOptions.ReportTimeZoneId"/>) falls in
+    /// [<see cref="FavoriteMlAutomationOptions.QuietHoursStartLocalHour"/>:<see cref="FavoriteMlAutomationOptions.QuietHoursStartLocalMinute"/>,
+    /// <see cref="FavoriteMlAutomationOptions.QuietHoursEndLocalHour"/>:<see cref="FavoriteMlAutomationOptions.QuietHoursEndLocalMinute"/>),
+    /// returns <c>true</c> so the automation loop skips only <strong>new</strong> scheduled predictions—pending resolutions and EOD email still run.
+    /// End time is exclusive. If start and end coincide after clamping, returns false.
     /// </summary>
     public static bool IsAutomationPaused(FavoriteMlAutomationOptions opts, DateTime utcNow)
     {

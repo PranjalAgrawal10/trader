@@ -49,8 +49,8 @@ public sealed class FavoriteMlAutomationOptions
     public int MaxPendingResolutionBatch { get; set; } = 2_000;
 
     /// <summary>
-    /// When true, skips prediction + pending resolution during the daily window below (same TZ as reports; default IST via <see cref="ReportTimeZoneId"/>).
-    /// Nightly EOD email still runs on its schedule.
+    /// When true, skips only the automated <strong>new prediction</strong> pass (per favorite/engine). Pending resolutions,
+    /// nightly EOD email, interactive REST predictions, and broker/live ticks are unchanged.
     /// </summary>
     public bool QuietHoursEnabled { get; set; } = true;
 

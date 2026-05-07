@@ -1397,7 +1397,7 @@ function orderedAutomationEngineIds(
   return [...fromApi, ...extras]
 }
 
-const ML_AUTOMATION_PIE_HEIGHT = 300
+const ML_AUTOMATION_PIE_HEIGHT = 320
 
 /** Pies merge correct / wrong / pending for each registered engine; <code>rows</code> are already filtered. */
 function MlAutomationOutcomesPieGrid({
@@ -1517,37 +1517,38 @@ function MlOutcomePieChart({
 
   return (
     <div
-      className="flex-shrink-0 w-100"
+      className="flex-shrink-0 w-100 overflow-visible"
       style={{
         ...(maxWidth != null ? { maxWidth } : {}),
         height,
         minHeight: height,
       }}
     >
+      {/* Extra bottom space + horizontal margins avoid SVG clipping where slice labels/Legend used to collide with the view edge */}
       <ResponsiveContainer width="100%" height="100%" debounce={50}>
-        <PieChart margin={{ top: 8, right: 16, bottom: 12, left: 16 }}>
+        <PieChart margin={{ top: 10, left: 12, right: 12, bottom: 44 }}>
           <Pie
             data={pieData}
             dataKey="value"
             nameKey="name"
             cx="50%"
-            cy="42%"
+            cy="44%"
             innerRadius={0}
-            outerRadius="76%"
+            outerRadius="62%"
             paddingAngle={pieData.length > 1 ? 1.5 : 0}
-            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-            labelLine={{ stroke: 'rgba(173, 181, 189, 0.45)' }}
           >
             {pieData.map((d) => (
               <Cell key={d.name} fill={d.fill} />
             ))}
           </Pie>
-          <Tooltip formatter={(value: number) => [`${value} row(s)`, 'Count']} />
+          <Tooltip
+            formatter={(value: number, name: string) => [`${value} row(s)`, name]}
+          />
           <Legend
             verticalAlign="bottom"
             align="center"
             layout="horizontal"
-            wrapperStyle={{ fontSize: 12, paddingTop: 6 }}
+            wrapperStyle={{ fontSize: 12, paddingTop: 4, overflow: 'visible' }}
           />
         </PieChart>
       </ResponsiveContainer>
