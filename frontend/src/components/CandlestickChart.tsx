@@ -7,6 +7,8 @@ import {
   MA_EMA_SLOW_PERIOD,
   MA_LINE_COLORS,
   MA_SMA_PERIOD,
+  SR_LINE_COLORS,
+  SR_SWING_PERIOD,
 } from '../utils/movingAverages'
 
 const PAD = { top: 6, right: 8, bottom: 34, left: 52 }
@@ -21,7 +23,10 @@ const CANDLE = {
   text: '#adb5bd',
 }
 
-type MaKey = keyof Pick<ChartPointWithMa, 'sma20' | 'ema9' | 'ema21' | 'emaCustom'>
+type MaKey = keyof Pick<
+  ChartPointWithMa,
+  'sma20' | 'ema9' | 'ema21' | 'emaCustom' | 'srSupport' | 'srResistance'
+>
 
 function buildMaPath(key: MaKey, data: ChartPointWithMa[], slotW: number, yPrice: (p: number) => number): string {
   let d = ''
@@ -157,6 +162,18 @@ export function CandlestickChart({
           max = Math.max(max, v)
         }
       }
+      if (maLineVisibility.showSupportResistance) {
+        const s = c.srSupport
+        const r = c.srResistance
+        if (s != null && Number.isFinite(s)) {
+          min = Math.min(min, s)
+          max = Math.max(max, s)
+        }
+        if (r != null && Number.isFinite(r)) {
+          min = Math.min(min, r)
+          max = Math.max(max, r)
+        }
+      }
     }
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null
     if (min === max) {
@@ -174,6 +191,8 @@ export function CandlestickChart({
     const pathEma9 = buildMaPath('ema9', data, slotW, yPrice)
     const pathEma21 = buildMaPath('ema21', data, slotW, yPrice)
     const pathEmaCustom = buildMaPath('emaCustom', data, slotW, yPrice)
+    const pathSrSupport = buildMaPath('srSupport', data, slotW, yPrice)
+    const pathSrResistance = buildMaPath('srResistance', data, slotW, yPrice)
 
     const shortDay = isIntradayRange(data)
     const targetXTicks = Math.min(6, Math.max(2, Math.floor(plotW / 72)))
@@ -199,6 +218,8 @@ export function CandlestickChart({
       pathEma9,
       pathEma21,
       pathEmaCustom,
+      pathSrSupport,
+      pathSrResistance,
       xTicks,
       plotBottomY,
     }
@@ -274,6 +295,31 @@ export function CandlestickChart({
               </g>
             )
           })}
+
+          {layout.pathSrResistance && maLineVisibility.showSupportResistance ? (
+            <path
+              d={layout.pathSrResistance}
+              fill="none"
+              stroke={SR_LINE_COLORS.resistance}
+              strokeWidth={1.25}
+              strokeDasharray="4 3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ pointerEvents: 'none' }}
+            />
+          ) : null}
+          {layout.pathSrSupport && maLineVisibility.showSupportResistance ? (
+            <path
+              d={layout.pathSrSupport}
+              fill="none"
+              stroke={SR_LINE_COLORS.support}
+              strokeWidth={1.25}
+              strokeDasharray="4 3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ pointerEvents: 'none' }}
+            />
+          ) : null}
 
           {layout.pathEma21 && maLineVisibility.showEma21 ? (
             <path
@@ -428,6 +474,16 @@ export function CandlestickChart({
                     EMA{customEmaPeriod} {p.emaCustom.toFixed(4)}
                   </div>
                 ) : null}
+                {maLineVisibility.showSupportResistance && p.srSupport != null ? (
+                  <div className="font-monospace mt-1" style={{ color: SR_LINE_COLORS.support }}>
+                    Sup{SR_SWING_PERIOD} {p.srSupport.toFixed(4)}
+                  </div>
+                ) : null}
+                {maLineVisibility.showSupportResistance && p.srResistance != null ? (
+                  <div className="font-monospace" style={{ color: SR_LINE_COLORS.resistance }}>
+                    Res{SR_SWING_PERIOD} {p.srResistance.toFixed(4)}
+                  </div>
+                ) : null}
               </>
             )
           })()}
@@ -452,6 +508,10 @@ export function CandlestickChart({
                 label: `EMA${customEmaPeriod}`,
                 color: MA_LINE_COLORS.emaCustom,
               })
+            if (maLineVisibility.showSupportResistance) {
+              items.push({ key: 'srs', label: `S${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.support })
+              items.push({ key: 'srr', label: `R${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.resistance })
+            }
             return items.map((item, i) => (
               <Fragment key={item.key}>
                 {i > 0 ? <span className="text-muted"> · </span> : null}

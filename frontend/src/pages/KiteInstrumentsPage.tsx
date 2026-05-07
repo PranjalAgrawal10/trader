@@ -76,6 +76,8 @@ import {
   MA_EMA_SLOW_PERIOD,
   MA_LINE_COLORS,
   MA_SMA_PERIOD,
+  SR_LINE_COLORS,
+  SR_SWING_PERIOD,
   yDomainForOhlcAndVisibleMas,
   type ChartPointWithMa,
   type MaLineVisibility,
@@ -122,6 +124,8 @@ interface HistoricalCandlesResponse {
     sma20?: number | null
     ema9?: number | null
     ema21?: number | null
+    srSupport?: number | null
+    srResistance?: number | null
   }[]
   interval: string
   from: string
@@ -157,6 +161,31 @@ interface KiteInstrumentsChartSettingsDto {
   zoomByInstrumentToken?: Record<string, number> | null
   intervalByInstrumentToken?: Record<string, string> | null
   mlAutomationEnabled?: boolean
+}
+
+/** Nested shape from broker list / movers API (camelCase JSON). */
+interface KiteInstrumentApiItem {
+  instrumentToken: string
+  tradingsymbol: string
+  exchange: string
+  name: string | null
+  instrumentType: string | null
+  segment: string | null
+  expiry: string | null
+  strike: number | null
+  lotSize: number | null
+}
+
+interface TodayTopPerformerDto {
+  instrument: KiteInstrumentApiItem
+  lastPrice: number
+  previousClose: number
+  changePercent: number
+}
+
+interface TodayTopPerformersResponse {
+  items: TodayTopPerformerDto[]
+  basis: string
 }
 
 interface MlAutomationRecentRow {
@@ -293,6 +322,20 @@ function favoritesTabFromSearchParams(params: URLSearchParams): boolean {
     fav === '1' ||
     (fav != null && fav.toLowerCase() === 'true')
   )
+}
+
+function kiteInstrumentApiToRow(i: KiteInstrumentApiItem): KiteInstrumentRow {
+  return {
+    instrumentToken: i.instrumentToken,
+    tradingsymbol: i.tradingsymbol,
+    exchange: i.exchange,
+    name: i.name,
+    instrumentType: i.instrumentType,
+    segment: i.segment,
+    expiry: i.expiry,
+    strike: i.strike != null ? Number(i.strike) : null,
+    lotSize: i.lotSize ?? null,
+  }
 }
 
 function favoriteRowKey(r: KiteInstrumentRow): string {
@@ -856,6 +899,30 @@ function MovingAverageOverlays({
           name={`EMA ${customEmaLinePeriod}`}
         />
       ) : null}
+      {visibility.showSupportResistance ? (
+        <Line
+          type="monotone"
+          dataKey="srSupport"
+          stroke={SR_LINE_COLORS.support}
+          dot={false}
+          strokeWidth={1.25}
+          connectNulls
+          strokeDasharray="4 3"
+          name={`Support (${SR_SWING_PERIOD})`}
+        />
+      ) : null}
+      {visibility.showSupportResistance ? (
+        <Line
+          type="monotone"
+          dataKey="srResistance"
+          stroke={SR_LINE_COLORS.resistance}
+          dot={false}
+          strokeWidth={1.25}
+          connectNulls
+          strokeDasharray="4 3"
+          name={`Resistance (${SR_SWING_PERIOD})`}
+        />
+      ) : null}
     </>
   )
 }
@@ -878,6 +945,10 @@ function MaChartCornerLegend({
       label: `EMA${customEmaLinePeriod}`,
       color: MA_LINE_COLORS.emaCustom,
     })
+  }
+  if (visibility.showSupportResistance) {
+    items.push({ key: 'srs', label: `S${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.support })
+    items.push({ key: 'srr', label: `R${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.resistance })
   }
   if (items.length === 0) return null
   return (
@@ -913,7 +984,7 @@ function historicalCandlesToChartPoints(data: HistoricalCandlesResponse): ChartP
   }))
 }
 
-/** Prefer server SMA/EMA (computed after Kite warmup fetch); otherwise match in-browser. Custom EMA column is added in UI. */
+/** Prefer server SMA/EMA/support–resistance (after Kite warmup); otherwise compute MAs in-browser. S/R is server-only when using API candles. Custom EMA column is added in UI. */
 function chartPointsFromHistoricalResponse(data: HistoricalCandlesResponse): ChartPointWithMa[] {
   const pts = historicalCandlesToChartPoints(data)
   const serverMa =
@@ -927,6 +998,8 @@ function chartPointsFromHistoricalResponse(data: HistoricalCandlesResponse): Cha
         ema9: data.candles[i].ema9 != null ? Number(data.candles[i].ema9) : null,
         ema21: data.candles[i].ema21 != null ? Number(data.candles[i].ema21) : null,
         emaCustom: null,
+        srSupport: data.candles[i].srSupport != null ? Number(data.candles[i].srSupport) : null,
+        srResistance: data.candles[i].srResistance != null ? Number(data.candles[i].srResistance) : null,
       }))
   return addCustomEmaToChartPoints(base, null)
 }
@@ -1008,6 +1081,16 @@ function ChartTooltipContent({
       p.emaCustom != null ? (
         <div className="font-monospace" style={{ color: MA_LINE_COLORS.emaCustom }}>
           EMA{customEmaLinePeriod} {p.emaCustom.toFixed(4)}
+        </div>
+      ) : null}
+      {maLineVisibility.showSupportResistance && p.srSupport != null ? (
+        <div className="font-monospace mt-1" style={{ color: SR_LINE_COLORS.support }}>
+          Sup{SR_SWING_PERIOD} {p.srSupport.toFixed(4)}
+        </div>
+      ) : null}
+      {maLineVisibility.showSupportResistance && p.srResistance != null ? (
+        <div className="font-monospace" style={{ color: SR_LINE_COLORS.resistance }}>
+          Res{SR_SWING_PERIOD} {p.srResistance.toFixed(4)}
         </div>
       ) : null}
     </div>
@@ -1166,6 +1249,16 @@ function ChartSettingsToolbar({
             onChange={(e) => onMaLineVisibilityChange({ showCustomEma: e.currentTarget.checked })}
           >
             Custom EMA
+          </ToggleButton>
+          <ToggleButton
+            id={`${idPrefix}-ind-sr`}
+            type="checkbox"
+            variant={maLineVisibility.showSupportResistance ? 'secondary' : 'outline-secondary'}
+            value="sr"
+            checked={maLineVisibility.showSupportResistance}
+            onChange={(e) => onMaLineVisibilityChange({ showSupportResistance: e.currentTarget.checked })}
+          >
+            S/R {SR_SWING_PERIOD}
           </ToggleButton>
         </ButtonGroup>
         <InputGroup size="sm" style={{ width: '7.5rem' }} className="flex-nowrap">
@@ -2473,6 +2566,10 @@ export function KiteInstrumentsPage() {
   const [instruments, setInstruments] = useState<InstrumentsResponse | null>(null)
   const [instrumentsLoading, setInstrumentsLoading] = useState(false)
   const [instrumentsError, setInstrumentsError] = useState<string | null>(null)
+  const [todayTopPerformers, setTodayTopPerformers] = useState<TodayTopPerformerDto[]>([])
+  const [todayTopBasis, setTodayTopBasis] = useState('')
+  const [todayTopLoading, setTodayTopLoading] = useState(false)
+  const [todayTopError, setTodayTopError] = useState<string | null>(null)
   const [chartRow, setChartRow] = useState<KiteInstrumentRow | null>(null)
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
   const [chartRangePreset, setChartRangePreset] = useState<ChartRangePreset>('auto')
@@ -2643,6 +2740,9 @@ export function KiteInstrumentsPage() {
       setInstruments(null)
       setInstrumentsError(null)
       setInstrumentsLoading(false)
+      setTodayTopPerformers([])
+      setTodayTopBasis('')
+      setTodayTopError(null)
       return
     }
     setInstrumentsLoading(true)
@@ -2657,6 +2757,37 @@ export function KiteInstrumentsPage() {
       setInstrumentsLoading(false)
     }
   }, [isZerodha])
+
+  const loadTodayTopPerformers = useCallback(async () => {
+    if (!isZerodha) {
+      setTodayTopPerformers([])
+      setTodayTopBasis('')
+      setTodayTopError(null)
+      setTodayTopLoading(false)
+      return
+    }
+    setTodayTopLoading(true)
+    setTodayTopError(null)
+    try {
+      const { data } = await api.get<TodayTopPerformersResponse>(
+        '/broker/kite/instruments/today-top-performers',
+        { params: { take: 15 } },
+      )
+      setTodayTopPerformers(data.items ?? [])
+      setTodayTopBasis(data.basis ?? '')
+    } catch (err) {
+      setTodayTopPerformers([])
+      setTodayTopBasis('')
+      setTodayTopError(problemDetail(err))
+    } finally {
+      setTodayTopLoading(false)
+    }
+  }, [isZerodha])
+
+  useEffect(() => {
+    if (!isZerodha || instrumentsLoading || !instruments || mainTab !== 'browse') return
+    void loadTodayTopPerformers()
+  }, [isZerodha, instrumentsLoading, instruments, mainTab, loadTodayTopPerformers])
 
   useEffect(() => {
     void loadStatus()
@@ -2839,6 +2970,93 @@ export function KiteInstrumentsPage() {
 
             {mainTab === 'browse' ? (
               <>
+                <div className="mt-4">
+                  <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
+                    <div className="me-2">
+                      <h2 className="h6 mb-1">Today&apos;s top performers</h2>
+                      <p className="small text-secondary mb-0" style={{ maxWidth: '44rem' }}>
+                        {todayTopBasis ||
+                          'Highest % gains vs prior session among the capped preview universe (quotes from Kite /quote/ohlc).'}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline-secondary"
+                      size="sm"
+                      disabled={todayTopLoading || instrumentsLoading}
+                      onClick={() => void loadTodayTopPerformers()}
+                    >
+                      {todayTopLoading ? 'Loading…' : 'Refresh movers'}
+                    </Button>
+                  </div>
+                  {todayTopError ? (
+                    <Alert variant="warning" className="py-2 small mb-2">
+                      {todayTopError}
+                    </Alert>
+                  ) : null}
+                  {todayTopLoading && todayTopPerformers.length === 0 && !todayTopError ? (
+                    <p className="text-secondary small mb-2">
+                      <Spinner animation="border" size="sm" className="me-2" role="status" />
+                      Loading quotes…
+                    </p>
+                  ) : null}
+                  {!todayTopLoading && todayTopPerformers.length === 0 && !todayTopError ? (
+                    <p className="text-secondary small mb-0">
+                      No movers in the preview snapshot (market closed, no quotes, or Kite returned no overlapping keys).
+                    </p>
+                  ) : null}
+                  {todayTopPerformers.length > 0 ? (
+                    <div className="table-responsive">
+                      <Table striped bordered hover size="sm" className="mb-0 align-middle">
+                        <thead className="table-light">
+                          <tr className="text-nowrap">
+                            <th>#</th>
+                            <th>Symbol</th>
+                            <th>Exch</th>
+                            <th>LTP</th>
+                            <th>Prev close</th>
+                            <th>Δ %</th>
+                          </tr>
+                        </thead>
+                        <tbody className="font-monospace">
+                          {todayTopPerformers.map((row, idx) => {
+                            const instr = kiteInstrumentApiToRow(row.instrument)
+                            const pct = Number(row.changePercent)
+                            const selected =
+                              !!chartRow && favoriteRowKey(chartRow) === favoriteRowKey(instr)
+                            return (
+                              <tr
+                                key={`top-${instr.instrumentToken}-${idx}`}
+                                role="button"
+                                tabIndex={0}
+                                className={selected ? 'table-active' : undefined}
+                                style={{ cursor: 'pointer' }}
+                                title="Show in chart below"
+                                onClick={() => setChartRow(instr)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault()
+                                    setChartRow(instr)
+                                  }
+                                }}
+                              >
+                                <td className="small text-secondary">{idx + 1}</td>
+                                <td className="fw-semibold">{instr.tradingsymbol}</td>
+                                <td className="small">{instr.exchange}</td>
+                                <td>{Number(row.lastPrice).toFixed(4)}</td>
+                                <td>{Number(row.previousClose).toFixed(4)}</td>
+                                <td className={pct >= 0 ? 'text-success' : 'text-danger'}>
+                                  {pct >= 0 ? '+' : ''}
+                                  {pct.toFixed(2)}%
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </Table>
+                    </div>
+                  ) : null}
+                </div>
                 <InstrumentListPanel
                   title="Futures & options (NFO / BFO)"
                   rows={instruments?.fno ?? EMPTY_INSTRUMENTS}

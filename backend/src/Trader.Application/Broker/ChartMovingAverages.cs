@@ -1,13 +1,16 @@
 namespace Trader.Application.Broker;
 
 /// <summary>
-/// SMA / EMA on close (matches Trader SPA <c>movingAverages.ts</c>) for Kite historical chart overlays.
+/// SMA / EMA on close and swing support / resistance (matches Trader SPA <c>movingAverages.ts</c>) for Kite historical chart overlays.
 /// </summary>
 internal static class ChartMovingAverages
 {
     public const int SmaPeriod = 20;
     public const int EmaFastPeriod = 9;
     public const int EmaSlowPeriod = 21;
+
+    /// <summary>Rolling window for min-low (support) / max-high (resistance); aligned with <see cref="SmaPeriod"/>.</summary>
+    public const int SwingSupportResistancePeriod = SmaPeriod;
 
     /// <summary>Extra bars requested before the visible window so the first candle can show full EMA/SMA lines.</summary>
     public const int WarmupBarCount = 120;
@@ -22,6 +25,7 @@ internal static class ChartMovingAverages
         var sma = ComputeSma(closes, SmaPeriod);
         var ema9 = ComputeEma(closes, EmaFastPeriod);
         var ema21 = ComputeEma(closes, EmaSlowPeriod);
+        var (support, resistance) = ComputeSwingSupportResistance(candlesAsc, SwingSupportResistancePeriod);
 
         var list = new List<KiteHistoricalCandlePointDto>(candlesAsc.Count);
         for (var i = 0; i < candlesAsc.Count; i++)
@@ -36,10 +40,39 @@ internal static class ChartMovingAverages
                 c.Volume,
                 sma[i],
                 ema9[i],
-                ema21[i]));
+                ema21[i],
+                support[i],
+                resistance[i]));
         }
 
         return list;
+    }
+
+    private static (decimal?[] Support, decimal?[] Resistance) ComputeSwingSupportResistance(
+        IReadOnlyList<KiteHistoricalCandlePointDto> candles,
+        int period)
+    {
+        var n = candles.Count;
+        var support = new decimal?[n];
+        var resistance = new decimal?[n];
+        if (period < 1 || n == 0)
+            return (support, resistance);
+
+        for (var i = period - 1; i < n; i++)
+        {
+            var minL = decimal.MaxValue;
+            var maxH = decimal.MinValue;
+            for (var j = i - period + 1; j <= i; j++)
+            {
+                minL = Math.Min(minL, candles[j].Low);
+                maxH = Math.Max(maxH, candles[j].High);
+            }
+
+            support[i] = minL;
+            resistance[i] = maxH;
+        }
+
+        return (support, resistance);
     }
 
     private static IReadOnlyList<decimal?> ComputeSma(IReadOnlyList<decimal> values, int period)

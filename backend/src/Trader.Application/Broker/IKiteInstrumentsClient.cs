@@ -33,7 +33,22 @@ public interface IKiteInstrumentsClient
         DateTimeOffset toUtc,
         bool continuous,
         CancellationToken ct = default);
+
+    /// <summary>Kite <c>GET /quote/ohlc</c> — up to <b>1000</b> instruments per HTTP call (<c>i=exchange:tradingsymbol</c>).</summary>
+    Task<KiteQuoteOhlcFetchResult> FetchQuoteOhlcAsync(
+        IReadOnlyList<string> exchangeTradingsymbolKeys,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
 }
+
+public sealed record KiteQuoteOhlcFetchResult(
+    bool Success,
+    string? ErrorMessage,
+    IReadOnlyDictionary<string, KiteQuoteOhlcTickDto> ByKey);
+
+/// <summary>Partial fields from Kite quote/ohlc (see Kite docs <c>ohlc.close</c> = prior session).</summary>
+public sealed record KiteQuoteOhlcTickDto(long InstrumentToken, decimal LastPrice, decimal OhlcOpen, decimal OhlcHigh, decimal OhlcLow, decimal OhlcClose);
 
 public sealed record KiteInstrumentsFetchResult(
     bool Success,

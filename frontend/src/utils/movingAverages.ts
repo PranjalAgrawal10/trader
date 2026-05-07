@@ -5,12 +5,19 @@ export const MA_SMA_PERIOD = 20
 export const MA_EMA_FAST_PERIOD = 9
 export const MA_EMA_SLOW_PERIOD = 21
 
+/** Rolling swing support (min low) / resistance (max high) over this many bars. */
+export const SR_SWING_PERIOD = MA_SMA_PERIOD
+
 export type ChartPointWithMa = ChartPointOhlc & {
   sma20: number | null
   ema9: number | null
   ema21: number | null
   /** User-chosen EMA period (values filled by `addCustomEmaToChartPoints`). */
   emaCustom: number | null
+  /** Trailing swing low from API (`srSupport`), or null (e.g. offline MA path). */
+  srSupport: number | null
+  /** Trailing swing high from API (`srResistance`), or null (e.g. offline MA path). */
+  srResistance: number | null
 }
 
 /** Stroke colors aligned across Recharts and SVG candlestick. */
@@ -21,12 +28,18 @@ export const MA_LINE_COLORS = {
   emaCustom: '#fb923c',
 } as const
 
+export const SR_LINE_COLORS = {
+  support: '#34d399',
+  resistance: '#f87171',
+} as const
+
 /** Toggles for SMA / EMA overlays on line, bar, and candle charts. */
 export type MaLineVisibility = {
   showSma20: boolean
   showEma9: boolean
   showEma21: boolean
   showCustomEma: boolean
+  showSupportResistance: boolean
 }
 
 export const DEFAULT_MA_LINE_VISIBILITY: MaLineVisibility = {
@@ -34,6 +47,7 @@ export const DEFAULT_MA_LINE_VISIBILITY: MaLineVisibility = {
   showEma9: true,
   showEma21: true,
   showCustomEma: false,
+  showSupportResistance: true,
 }
 
 export const CUSTOM_EMA_PERIOD_MIN = 2
@@ -110,6 +124,18 @@ export function yDomainForOhlcAndVisibleMas(
         max = Math.max(max, v)
       }
     }
+    if (visibility.showSupportResistance) {
+      const s = c.srSupport
+      const r = c.srResistance
+      if (s != null && Number.isFinite(s)) {
+        min = Math.min(min, s)
+        max = Math.max(max, s)
+      }
+      if (r != null && Number.isFinite(r)) {
+        min = Math.min(min, r)
+        max = Math.max(max, r)
+      }
+    }
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return undefined
   if (min === max) {
@@ -128,13 +154,14 @@ export function attachMovingAverages(points: ChartPointOhlc[]): ChartPointWithMa
   const sma20 = computeSma(closes, MA_SMA_PERIOD)
   const ema9 = computeEma(closes, MA_EMA_FAST_PERIOD)
   const ema21 = computeEma(closes, MA_EMA_SLOW_PERIOD)
-
   return points.map((p, i) => ({
     ...p,
     sma20: sma20[i],
     ema9: ema9[i],
     ema21: ema21[i],
     emaCustom: null,
+    srSupport: null,
+    srResistance: null,
   }))
 }
 

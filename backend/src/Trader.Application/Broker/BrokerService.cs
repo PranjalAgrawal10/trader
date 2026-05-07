@@ -31,6 +31,9 @@ public sealed class BrokerService : IBrokerService
 
     private const int MaxKiteFavoriteInstrumentsPerUser = 400;
 
+    private const int KiteQuoteOhlcBatchSizeBroker = 140;
+    private const int KiteTodayTopPerformersMaxTake = 30;
+
     private readonly IBrokerSetupGateway _brokerSetup;
     private readonly IKiteOAuthStateCodec _stateCodec;
     private readonly IKiteSessionExchange _kiteSessionExchange;
@@ -154,6 +157,63 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(mcx.ErrorMessage ?? "Could not load MCX instruments from Kite.");
 
         return new KiteFnoCommodityListsDto(fno, mcx.Items, fnoTruncated, mcx.Truncated);
+    }
+
+    /// <inheritdoc />
+    public async Task<KiteTodayTopPerformersDto> GetKiteTodayTopPerformersAsync(Guid userId, int take, CancellationToken ct = default)
+    {
+        take = Math.Clamp(take, 1, KiteTodayTopPerformersMaxTake);
+
+        static string QuoteKey(KiteInstrumentListItemDto x) =>
+            $"{x.Exchange.Trim()}:{x.Tradingsymbol.Trim()}";
+
+        var lists = await GetKiteFnoCommodityInstrumentsAsync(userId, ct).ConfigureAwait(false);
+
+        var uniqueRows = lists.Fno
+            .Concat(lists.Commodities)
+            .GroupBy(QuoteKey, StringComparer.Ordinal)
+            .Select(static g => g.First())
+            .ToList();
+
+        var quoteKeys = uniqueRows.Select(QuoteKey).ToList();
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+
+        var quotes = new Dictionary<string, KiteQuoteOhlcTickDto>(StringComparer.Ordinal);
+        for (var off = 0; off < quoteKeys.Count; off += KiteQuoteOhlcBatchSizeBroker)
+        {
+            var batchCount = Math.Min(KiteQuoteOhlcBatchSizeBroker, quoteKeys.Count - off);
+            var slice = quoteKeys.Skip(off).Take(batchCount).ToList();
+            var fetch = await _kiteInstruments.FetchQuoteOhlcAsync(slice, apiKey, accessToken, ct).ConfigureAwait(false);
+            if (!fetch.Success)
+                throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load OHLC quotes from Kite.");
+
+            foreach (var kv in fetch.ByKey)
+                quotes[kv.Key] = kv.Value;
+        }
+
+        var movers = new List<KiteInstrumentMoverDto>(uniqueRows.Count);
+        foreach (var r in uniqueRows)
+        {
+            if (!quotes.TryGetValue(QuoteKey(r), out var q))
+                continue;
+
+            var prevClose = q.OhlcClose;
+            if (prevClose <= 0)
+                continue;
+
+            var pct = (q.LastPrice - prevClose) / prevClose * 100m;
+            movers.Add(new KiteInstrumentMoverDto(r, q.LastPrice, prevClose, pct));
+        }
+
+        var items = movers
+            .OrderByDescending(static m => m.ChangePercent)
+            .Take(take)
+            .ToList();
+
+        return new KiteTodayTopPerformersDto(
+            items,
+            "% vs previous session close (Kite OHLC); universe = same capped preview as Browse lists.");
     }
 
     public async Task<KiteInstrumentSearchDto> SearchKiteInstrumentsAsync(

@@ -66,6 +66,24 @@ public sealed class BrokerController : ControllerBase
         return Ok(dto);
     }
 
+    /// <summary>Contracts with largest % gain vs prior close among the capped Browse universe (quotes via Kite /quote/ohlc).</summary>
+    [Authorize]
+    [HttpGet("kite/instruments/today-top-performers")]
+    public async Task<ActionResult<KiteTodayTopPerformersDto>> KiteTodayTopPerformers([FromQuery] int take, CancellationToken ct)
+    {
+        var clamped = take <= 0 ? 15 : take;
+        try
+        {
+            var dto = await _broker.GetKiteTodayTopPerformersAsync(User.GetUserId(), clamped, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Kite today-top-performers failed.");
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     /// <summary>Streaming substring search across Kite instrument CSVs for F&amp;O (NFO+BFO) or MCX. Use when the preview list has no match.</summary>
     [Authorize]
     [HttpGet("kite/instruments/search")]
@@ -86,7 +104,7 @@ public sealed class BrokerController : ControllerBase
         return Ok(dto);
     }
 
-    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1d</c> (see SPA). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply. Responses include <c>sma20</c>, <c>ema9</c>, <c>ema21</c> (nullable); the server requests extra history before <c>from</c> so overlays are warmed for the visible window.</summary>
+    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1d</c> (see SPA). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply. Responses include <c>sma20</c>, <c>ema9</c>, <c>ema21</c>, <c>srSupport</c>, <c>srResistance</c> (nullable); the server requests extra history before <c>from</c> so overlays are warmed for the visible window.</summary>
     [Authorize]
     [HttpGet("kite/historical-candles")]
     public async Task<ActionResult<KiteHistoricalCandlesDto>> KiteHistoricalCandles(

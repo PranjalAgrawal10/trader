@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Trader.Application.Broker;
 
@@ -92,6 +93,117 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         {
             return new KiteHistoricalFetchResult(false, "Could not parse Kite historical response.", Array.Empty<KiteHistoricalCandlePointDto>());
         }
+    }
+
+    private const int KiteQuoteOhlcBatchSize = 140;
+
+    public async Task<KiteQuoteOhlcFetchResult> FetchQuoteOhlcAsync(
+        IReadOnlyList<string> exchangeTradingsymbolKeys,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        if (exchangeTradingsymbolKeys.Count == 0)
+            return new KiteQuoteOhlcFetchResult(true, null, new Dictionary<string, KiteQuoteOhlcTickDto>(StringComparer.Ordinal));
+
+        var combined = new Dictionary<string, KiteQuoteOhlcTickDto>(StringComparer.Ordinal);
+
+        for (var off = 0; off < exchangeTradingsymbolKeys.Count; off += KiteQuoteOhlcBatchSize)
+        {
+            var count = Math.Min(KiteQuoteOhlcBatchSize, exchangeTradingsymbolKeys.Count - off);
+            var qb = new StringBuilder("quote/ohlc?");
+            for (var j = 0; j < count; j++)
+            {
+                var key = exchangeTradingsymbolKeys[off + j].Trim();
+                if (j > 0)
+                    qb.Append('&');
+                qb.Append("i=").Append(Uri.EscapeDataString(key));
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, qb.ToString());
+            request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+            request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+
+            using var response = await _http.SendAsync(request, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for quote OHLC.";
+                return new KiteQuoteOhlcFetchResult(false, msg, combined);
+            }
+
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (!doc.RootElement.TryGetProperty("status", out var st)
+                    || !string.Equals(st.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+                {
+                    var msg = TryParseKiteMessage(body) ?? "Unexpected quote OHLC response from Kite.";
+                    return new KiteQuoteOhlcFetchResult(false, msg, combined);
+                }
+
+                if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                foreach (var prop in data.EnumerateObject())
+                {
+                    var name = prop.Name;
+                    var el = prop.Value;
+                    if (TryParseOhlcQuoteTick(el, out var tick))
+                        combined[name] = tick;
+                }
+            }
+            catch (JsonException)
+            {
+                return new KiteQuoteOhlcFetchResult(false, "Could not parse Kite quote OHLC response.", combined);
+            }
+        }
+
+        return new KiteQuoteOhlcFetchResult(true, null, combined);
+    }
+
+    private static bool TryParseOhlcQuoteTick(JsonElement el, out KiteQuoteOhlcTickDto tick)
+    {
+        tick = default!;
+        long tokenNumeric = 0;
+        if (el.TryGetProperty("instrument_token", out var itk))
+        {
+            if (itk.ValueKind == JsonValueKind.Number)
+                tokenNumeric = itk.GetInt64();
+            else if (itk.ValueKind == JsonValueKind.String && long.TryParse(itk.GetString(), CultureInfo.InvariantCulture, out var tkn))
+                tokenNumeric = tkn;
+        }
+
+        if (!el.TryGetProperty("last_price", out var ltp) || ltp.ValueKind != JsonValueKind.Number)
+            return false;
+
+        if (!el.TryGetProperty("ohlc", out var oh) || oh.ValueKind != JsonValueKind.Object)
+            return false;
+
+        if (!oh.TryGetProperty("open", out var oj)
+            || !oh.TryGetProperty("high", out var hj)
+            || !oh.TryGetProperty("low", out var lj)
+            || !oh.TryGetProperty("close", out var cj))
+            return false;
+
+        var lastPrice = ltp.GetDecimal();
+
+        decimal ReadDec(JsonElement e) =>
+            e.ValueKind switch
+            {
+                JsonValueKind.Number => e.GetDecimal(),
+                JsonValueKind.String when decimal.TryParse(e.GetString(), CultureInfo.InvariantCulture, out var d) => d,
+                _ => 0,
+            };
+
+        var ohlcOpen = ReadDec(oj);
+        var ohlcHi = ReadDec(hj);
+        var ohlcLo = ReadDec(lj);
+        var ohlcClose = ReadDec(cj);
+
+        tick = new KiteQuoteOhlcTickDto(tokenNumeric, lastPrice, ohlcOpen, ohlcHi, ohlcLo, ohlcClose);
+        return true;
     }
 
     public async Task<KiteInstrumentsFetchResult> FetchExchangeInstrumentsAsync(

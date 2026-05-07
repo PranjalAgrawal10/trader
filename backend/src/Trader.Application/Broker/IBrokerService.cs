@@ -23,6 +23,9 @@ public interface IBrokerService
     /// </summary>
     Task<KiteFnoCommodityListsDto> GetKiteFnoCommodityInstrumentsAsync(Guid userId, CancellationToken ct = default);
 
+    /// <summary>Ranks capped F&amp;O+MCX preview contracts by intraday-style % vs Kite OHLC prior close (<c>/quote/ohlc</c>).</summary>
+    Task<KiteTodayTopPerformersDto> GetKiteTodayTopPerformersAsync(Guid userId, int take, CancellationToken ct = default);
+
     /// <summary>Substring search across the Kite instrument CSVs for the given segment (streams until enough matches).</summary>
     Task<KiteInstrumentSearchDto> SearchKiteInstrumentsAsync(
         Guid userId,

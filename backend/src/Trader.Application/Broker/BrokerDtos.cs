@@ -54,10 +54,23 @@ public sealed record KiteHistoricalCandlePointDto(
     /// <summary>SMA(20) on close; null when insufficient left history (client chart uses extended Kite fetch to warm up).</summary>
     decimal? Sma20 = null,
     decimal? Ema9 = null,
-    decimal? Ema21 = null);
+    decimal? Ema21 = null,
+    /// <summary>Trailing min low over a 20-bar window (same length as SMA period).</summary>
+    decimal? SrSupport = null,
+    /// <summary>Trailing max high over a 20-bar window (same length as SMA period).</summary>
+    decimal? SrResistance = null);
 
 /// <summary>Saved Kite instruments for the signed-in user (F&amp;O / MCX).</summary>
 public sealed record KiteFavoriteInstrumentsListDto(IReadOnlyList<KiteInstrumentListItemDto> Items);
+
+/// <summary>Top movers among the capped F&amp;O+MCX instrument preview (% gain vs prior close).</summary>
+public sealed record KiteTodayTopPerformersDto(IReadOnlyList<KiteInstrumentMoverDto> Items, string Basis);
+
+public sealed record KiteInstrumentMoverDto(
+    KiteInstrumentListItemDto Instrument,
+    decimal LastPrice,
+    decimal PreviousClose,
+    decimal ChangePercent);
 
 /// <summary>Persisted Kite instruments page chart controls (interval, range preset, chart type, optional per-instrument zoom).</summary>
 public sealed record KiteInstrumentsChartSettingsDto(
