@@ -54,12 +54,12 @@ export default function App() {
         }
       />
       <Route
-        path="/instruments/fav"
+        path="/instruments/automation"
         element={
           <Protected>
             <RequiresTwoFactor>
               <RequiresBroker>
-                <Navigate to="/instruments?tab=favorites" replace />
+                <Navigate to="/instruments?tab=automation" replace />
               </RequiresBroker>
             </RequiresTwoFactor>
           </Protected>

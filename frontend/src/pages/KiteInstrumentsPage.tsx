@@ -317,18 +317,21 @@ function coerceChartGraphType(v: string | null | undefined): ChartGraphType {
   return 'line'
 }
 
-type MainTab = 'browse' | 'favorites'
+type MainTab = 'browse' | 'favorites' | 'automation'
 
-/** Deep-link: <code>?tab=favorites</code>, <code>?tab=fav</code>, <code>?fav=1</code>, or <code>?fav=true</code>. */
-function favoritesTabFromSearchParams(params: URLSearchParams): boolean {
-  const tab = params.get('tab')
-  const fav = params.get('fav')
-  return (
-    tab === 'favorites' ||
-    tab === 'fav' ||
-    fav === '1' ||
-    (fav != null && fav.toLowerCase() === 'true')
-  )
+/** Deep-link: <code>?tab=favorites</code> / <code>?tab=fav</code> / <code>?fav=1</code>; <code>?tab=automation</code>. */
+function mainTabFromSearchParams(params: URLSearchParams): MainTab {
+  const raw = params.get('tab')
+  const tab = raw?.toLowerCase()
+  if (!tab) {
+    const fav = params.get('fav')
+    const favOpen =
+      fav === '1' || (fav != null && fav.toLowerCase() === 'true')
+    return favOpen ? 'favorites' : 'browse'
+  }
+  if (tab === 'favorites' || tab === 'fav') return 'favorites'
+  if (tab === 'automation' || tab === 'auto' || tab === 'auto-ml' || tab === 'automl') return 'automation'
+  return 'browse'
 }
 
 function kiteInstrumentApiToRow(i: KiteInstrumentApiItem): KiteInstrumentRow {
@@ -721,6 +724,9 @@ const CHART_FULLSCREEN_META_WRAP_STYLE: { maxHeight: string; overflowY: 'auto'; 
 /** Caption strip + sticky thead + ~5 tbody rows; additional rows scroll inside the box. */
 const ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT = 'calc(1.85rem + 2.1rem + (5 * 2rem))'
 const ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT = 'calc(2rem + 2.35rem + (5 * 2.15rem))'
+/** Matches server-side PriceDirectionPredictionService.MaxAutomationHistoryTake (merged classic + LightGBM). */
+const ML_AUTOMATION_RECENT_FETCH_TAKE = 5000
+const ML_AUTOMATION_TABLE_MAX_HEIGHT = 'min(780px, 75vh)'
 
 /** Fewer bars visible (most recent on the right); reindexed for chart axes. */
 function ChartZoomControls({
@@ -1519,16 +1525,27 @@ function MlFullscreenAllModelsPies({
   )
 }
 
-function MlAutomationRecentRowMatchesFilter(r: MlAutomationRecentRow, query: string): boolean {
+function MlAutomationRecentRowMatchesFilter(
+  r: MlAutomationRecentRow,
+  query: string,
+  favoritesByToken?: ReadonlyMap<string, KiteInstrumentRow>,
+): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
   const sym = r.tradingsymbol ?? ''
   const exch = r.exchange ?? ''
+  const fav = favoritesByToken?.get(r.instrumentToken)
+  const favSym = fav?.tradingsymbol ?? ''
+  const favExch = fav?.exchange ?? ''
   const chunks = [
     r.id,
     r.instrumentToken,
     sym,
     exch,
+    favSym,
+    favExch,
+    `${sym}${exch ? ` (${exch})` : ''}`,
+    favSym && favExch ? `${favSym} (${favExch})` : favSym,
     r.engineModelId,
     r.interval,
     r.direction,
@@ -1539,6 +1556,21 @@ function MlAutomationRecentRowMatchesFilter(r: MlAutomationRecentRow, query: str
     r.nextBarTime ? formatLocalDateTime(r.nextBarTime) : '',
   ]
   return chunks.some((c) => String(c).toLowerCase().includes(q))
+}
+
+/** Prefer API-provided symbol; else resolve from cached favorites so All favorites reflects every contract row. */
+function formatMlAutomationSymbol(
+  r: MlAutomationRecentRow,
+  favoritesByToken?: ReadonlyMap<string, KiteInstrumentRow>,
+): string {
+  if (r.tradingsymbol?.trim()) {
+    return r.exchange?.trim()
+      ? `${r.tradingsymbol.trim()} (${r.exchange.trim()})`
+      : r.tradingsymbol.trim()
+  }
+  const fav = favoritesByToken?.get(r.instrumentToken)
+  if (fav) return `${fav.tradingsymbol} (${fav.exchange})`
+  return r.instrumentToken
 }
 
 /** Case-insensitive match on model id, outcomes, timestamps, numeric fields, detail. */
@@ -2873,6 +2905,14 @@ export function KiteInstrumentsPage() {
 
   const favoriteKeySet = useMemo(() => new Set(favorites.map(favoriteRowKey)), [favorites])
 
+  const favoriteByInstrumentToken = useMemo(() => {
+    const m = new Map<string, KiteInstrumentRow>()
+    for (const row of favorites) {
+      if (row.instrumentToken) m.set(row.instrumentToken, row)
+    }
+    return m
+  }, [favorites])
+
   const toggleFavorite = useCallback(
     async (r: KiteInstrumentRow) => {
       const key = favoriteRowKey(r)
@@ -2904,13 +2944,11 @@ export function KiteInstrumentsPage() {
   )
 
   const [mainTab, setMainTab] = useState<MainTab>(() =>
-    typeof window !== 'undefined' && favoritesTabFromSearchParams(new URLSearchParams(window.location.search))
-      ? 'favorites'
-      : 'browse',
+    typeof window !== 'undefined' ? mainTabFromSearchParams(new URLSearchParams(window.location.search)) : 'browse',
   )
 
   useEffect(() => {
-    setMainTab(favoritesTabFromSearchParams(searchParams) ? 'favorites' : 'browse')
+    setMainTab(mainTabFromSearchParams(searchParams))
   }, [searchParams])
 
   const onMainTabSelect = useCallback(
@@ -2923,6 +2961,9 @@ export function KiteInstrumentsPage() {
           const p = new URLSearchParams(prev)
           if (next === 'favorites') {
             p.set('tab', 'favorites')
+            p.delete('fav')
+          } else if (next === 'automation') {
+            p.set('tab', 'automation')
             p.delete('fav')
           } else {
             p.delete('tab')
@@ -2973,8 +3014,11 @@ export function KiteInstrumentsPage() {
   )
   const [automationTableFilter, setAutomationTableFilter] = useState('')
   const automationRecentFiltered = useMemo(
-    () => automationRecentSorted.filter((r) => MlAutomationRecentRowMatchesFilter(r, automationTableFilter)),
-    [automationRecentSorted, automationTableFilter],
+    () =>
+      automationRecentSorted.filter((r) =>
+        MlAutomationRecentRowMatchesFilter(r, automationTableFilter, favoriteByInstrumentToken),
+      ),
+    [automationRecentSorted, automationTableFilter, favoriteByInstrumentToken],
   )
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
   const [chartIntervalByToken, setChartIntervalByToken] = useState<Record<string, ChartInterval>>({})
@@ -3078,7 +3122,7 @@ export function KiteInstrumentsPage() {
     try {
       setAutomationRecentLoading(true)
       const { data } = await api.get<MlAutomationRecentRow[]>('/predictions/price-direction/automation-recent', {
-        params: { take: 800 },
+        params: { take: ML_AUTOMATION_RECENT_FETCH_TAKE },
       })
       setAutomationRecent(data)
     } catch {
@@ -3113,6 +3157,11 @@ export function KiteInstrumentsPage() {
     }, 60_000)
     return () => window.clearInterval(id)
   }, [isZerodha, loadAutomationRecent])
+
+  useEffect(() => {
+    if (!isZerodha || mainTab !== 'automation') return
+    void loadAutomationRecent()
+  }, [isZerodha, mainTab, loadAutomationRecent])
 
   const liveMarket = useLiveMarketTick(chartRow?.instrumentToken ?? null, isZerodha && mainTab === 'browse' && !!chartRow)
   const liveLtp = liveMarket.lastPrice
@@ -3217,7 +3266,8 @@ export function KiteInstrumentsPage() {
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Filter preview or press <strong>Enter</strong> / <strong>Search Kite</strong> for a full scan (on{' '}
                   <strong>All favorites</strong>, F&amp;O + MCX). Favorites and chart settings sync to your account; use ☆/★ and{' '}
-                  <strong>All favorites</strong> for the grid; on <strong>Browse</strong>, click a row for the chart.
+                  <strong>All favorites</strong> for the grid; on <strong>Browse</strong>, click a row for the chart. Scheduled
+                  automation and the merged prediction log live on the <strong>Auto predictions</strong> tab.
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">
@@ -3243,8 +3293,12 @@ export function KiteInstrumentsPage() {
               <Nav.Item>
                 <Nav.Link eventKey="favorites">All favorites ({favorites.length})</Nav.Link>
               </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="automation">Auto predictions</Nav.Link>
+              </Nav.Item>
             </Nav>
 
+            {mainTab === 'automation' ? (
             <div className="mt-3 p-3 rounded border border-secondary">
               <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                 <Form.Check
@@ -3285,7 +3339,8 @@ export function KiteInstrumentsPage() {
                 separately. Requires Kite session; <strong className="text-body-secondary">FavoriteMlAutomation</strong>{' '}
                 must be on in server config.
                 By default the server uses <strong>1m</strong> candles for automation so predictions are not held until
-                a 3m/5m bar closes; chart interval below still controls what you see on each card.
+                a 3m/5m bar closes. The list below requests up to{' '}
+                <strong>{ML_AUTOMATION_RECENT_FETCH_TAKE.toLocaleString()}</strong> merged rows (classic + LightGBM).
               </p>
               {mlAutomationError ? (
                 <Alert variant="warning" className="py-2 small mb-2">
@@ -3307,7 +3362,13 @@ export function KiteInstrumentsPage() {
                   Showing {automationRecentFiltered.length} of {automationRecent.length}
                 </div>
               ) : null}
-              <div className="table-responsive" style={{ maxHeight: '220px', overflowY: 'auto' }}>
+              <div
+                className="table-responsive"
+                style={{
+                  maxHeight: ML_AUTOMATION_TABLE_MAX_HEIGHT,
+                  overflowY: 'auto',
+                }}
+              >
                 <Table striped bordered size="sm" className="mb-0 align-middle">
                   <thead className="table-light">
                     <tr className="text-nowrap">
@@ -3337,9 +3398,8 @@ export function KiteInstrumentsPage() {
                       automationRecentFiltered.map((r) => (
                         <tr key={r.id}>
                           <td className="small">{formatLocalDateTime(r.predictedAt)}</td>
-                          <td>
-                            {r.tradingsymbol ? `${r.tradingsymbol}` : r.instrumentToken}
-                            {r.exchange ? ` (${r.exchange})` : ''}
+                          <td title={`Instrument token ${r.instrumentToken}`}>
+                            {formatMlAutomationSymbol(r, favoriteByInstrumentToken)}
                           </td>
                           <td
                             className="text-truncate small"
@@ -3369,6 +3429,7 @@ export function KiteInstrumentsPage() {
                 </Table>
               </div>
             </div>
+            ) : null}
 
             {favoritesError ? (
               <Alert variant="danger" className="mt-2 py-2 small mb-0">
@@ -3496,8 +3557,8 @@ export function KiteInstrumentsPage() {
                   onToggleFavorite={(r) => void toggleFavorite(r)}
                 />
               </>
-            ) : (
-              <>
+            ) : mainTab === 'favorites' ? (
+              <div className="mt-3">
                 <InstrumentListPanel
                   title="All favorites"
                   rows={favorites}
@@ -3529,8 +3590,8 @@ export function KiteInstrumentsPage() {
                   onInstrumentChartZoomChange={persistInstrumentChartZoom}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
                 />
-              </>
-            )}
+              </div>
+            ) : null}
 
             {mainTab === 'browse' ? (
               <InstrumentChartCard
