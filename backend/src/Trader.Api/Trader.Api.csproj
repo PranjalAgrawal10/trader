@@ -4,7 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- After Build, runs `dotnet ef database update` (install `dotnet tool install -g dotnet-ef` + reachable DB + env/config). Set RunEfMigrationsOnBuild=false when the DB is not available (CI, tests). Dockerfile publish sets false; production then applies pending migrations at startup via MigrateAsync when Database:ApplyMigrationsOnStartup is true. -->
+    <!-- After Build, runs `dotnet ef database update` when true (needs `dotnet-ef` global tool + reachable DB). Default: off for Release (dotnet publish / App Platform buildpack has no dotnet-ef); on for Debug. Override with -p:RunEfMigrationsOnBuild=true|false. Production applies migrations at startup when Database:ApplyMigrationsOnStartup is true. -->
+    <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == '' AND '$(Configuration)' == 'Release'">false</RunEfMigrationsOnBuild>
     <RunEfMigrationsOnBuild Condition="'$(RunEfMigrationsOnBuild)' == ''">true</RunEfMigrationsOnBuild>
   </PropertyGroup>
 
