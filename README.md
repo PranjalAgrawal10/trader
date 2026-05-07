@@ -178,7 +178,7 @@ The API exchanges the `request_token` at Kite’s token endpoint and stores **en
 
 ### Web (`frontend/`)
 
-SPA paths: **`/instruments?tab=favorites`** (or **`?tab=fav`**, **`?fav=1`**, **`?fav=true`**) opens **All favorites**; **`?tab=automation`** (**`/instruments/automation`**) opens **Auto predictions** (server automation toggle + merged log); **`/instruments/fav`** redirects to **`?tab=favorites`**. **`/instruments`** without **`tab`** is **Browse**. Switching tabs updates the query with **`replace`**. On **Browse**, **Today's top performers** ranks capped preview contracts by OHLC-derived % vs the prior session and supports opening the chart from a row.
+SPA paths: **`/instruments?tab=favorites`** (or **`?tab=fav`**, **`?fav=1`**, **`?fav=true`**) opens **All favorites**; **`?tab=automation`** (**`/instruments/automation`**) opens **Auto predictions** (server automation toggle + merged log; per-engine **pie charts** for correct/wrong/pending, **Up** / **Down** / **Neutral** direction toggles, and search—table and pies use the same filtered rows); **`/instruments/fav`** redirects to **`?tab=favorites`**. **`/instruments`** without **`tab`** is **Browse**. Switching tabs updates the query with **`replace`**. On **Browse**, **Today's top performers** ranks capped preview contracts by OHLC-derived % vs the prior session and supports opening the chart from a row.
 
 | File | Purpose |
 |------|---------|

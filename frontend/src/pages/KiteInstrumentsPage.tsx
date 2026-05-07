@@ -1352,6 +1352,103 @@ function mergedOutcomeCountsForModel(
   }
 }
 
+/** Tally automation rows for a registered engine (<code>engineModelId</code>). */
+function outcomeCountsForAutomationEngine(
+  rows: readonly MlAutomationRecentRow[],
+  engineModelId: string,
+): MlOutcomeCounts {
+  let correct = 0
+  let wrong = 0
+  let pending = 0
+  const id = engineModelId.trim()
+  for (const r of rows) {
+    if ((r.engineModelId?.trim() || '') !== id) continue
+    if (r.outcome === 'correct') correct++
+    else if (r.outcome === 'wrong') wrong++
+    else pending++
+  }
+  return { correct, wrong, pending }
+}
+
+/** Server registry order first, then any extra <code>engineModelId</code> values seen in automation rows. */
+function orderedAutomationEngineIds(
+  priceModels: PriceDirectionModelsApiResponse | null,
+  rowsForIds: readonly MlAutomationRecentRow[],
+): string[] {
+  const fromApi = priceModels?.models?.map((m) => m.id.trim()).filter((sid) => sid.length > 0) ?? []
+  const seen = new Set(fromApi)
+  const extras: string[] = []
+  for (const r of rowsForIds) {
+    const sid = r.engineModelId?.trim()
+    if (sid && !seen.has(sid)) {
+      seen.add(sid)
+      extras.push(sid)
+    }
+  }
+  extras.sort((a, b) => a.localeCompare(b))
+  return [...fromApi, ...extras]
+}
+
+const ML_AUTOMATION_PIE_HEIGHT = 300
+
+/** Pies merge correct / wrong / pending for each registered engine; <code>rows</code> are already filtered. */
+function MlAutomationOutcomesPieGrid({
+  rows,
+  priceModels,
+}: {
+  rows: readonly MlAutomationRecentRow[]
+  priceModels: PriceDirectionModelsApiResponse | null
+}) {
+  const modelIds = useMemo(
+    () => orderedAutomationEngineIds(priceModels, rows),
+    [priceModels, rows],
+  )
+  const descById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const x of priceModels?.models ?? []) {
+      const id = x.id?.trim()
+      if (id) m.set(id, x.description)
+    }
+    return m
+  }, [priceModels])
+
+  if (modelIds.length === 0) return null
+
+  return (
+    <div className="flex-shrink-0 overflow-visible mb-3">
+      <div className="small text-muted text-uppercase mb-2" style={{ fontSize: '0.68rem' }}>
+        Outcomes by engine — {modelIds.length} model{modelIds.length === 1 ? '' : 's'} (respects Direction + search)
+      </div>
+      <div
+        className="d-grid gap-3"
+        style={{
+          gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${ML_FULLSCREEN_PIE_MIN_COL_PX}px), 1fr))`,
+        }}
+      >
+        {modelIds.map((engineId) => {
+          const counts = outcomeCountsForAutomationEngine(rows, engineId)
+          const n = counts.correct + counts.wrong + counts.pending
+          const desc = descById.get(engineId)
+          return (
+            <div key={engineId} className="flex-shrink-0 overflow-visible border border-secondary rounded p-3 bg-body-tertiary">
+              <div className="small fw-semibold text-truncate mb-1 font-monospace" title={`${engineId} — ${n} row(s)`}>
+                {engineId}
+                <span className="text-muted fw-normal ms-1">({n})</span>
+              </div>
+              {desc ? (
+                <div className="text-muted mb-2" style={{ fontSize: '0.78rem', lineHeight: 1.35 }}>
+                  {desc}
+                </div>
+              ) : null}
+              <MlOutcomePieChart counts={counts} height={ML_AUTOMATION_PIE_HEIGHT} />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /** Server registry order first, then any extra model IDs seen in histories. */
 function orderedModelIdsForFullscreenPies(
   priceModels: PriceDirectionModelsApiResponse | null,
@@ -2889,6 +2986,7 @@ const EMPTY_INSTRUMENTS: KiteInstrumentRow[] = []
 
 export function KiteInstrumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const automationDirToggleIdPrefix = useId()
   const [favorites, setFavorites] = useState<KiteInstrumentRow[]>([])
   const [favoritesError, setFavoritesError] = useState<string | null>(null)
 
@@ -3008,17 +3106,36 @@ export function KiteInstrumentsPage() {
   const [mlAutomationError, setMlAutomationError] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
+  const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
+  const [automationModelsLoading, setAutomationModelsLoading] = useState(false)
   const automationRecentSorted = useMemo(
     () => sortByPredictedAtNewestFirst(automationRecent),
     [automationRecent],
   )
   const [automationTableFilter, setAutomationTableFilter] = useState('')
+  const [automationDirUp, setAutomationDirUp] = useState(true)
+  const [automationDirDown, setAutomationDirDown] = useState(true)
+  const [automationDirNeutral, setAutomationDirNeutral] = useState(true)
+  /** If every direction toggle is off, treat as “all directions” so the UI never goes blank by mistake. */
+  const automationDirAccepted = useMemo(() => {
+    if (!automationDirUp && !automationDirDown && !automationDirNeutral)
+      return { up: true, down: true, neutral: true } as const
+    return {
+      up: automationDirUp,
+      down: automationDirDown,
+      neutral: automationDirNeutral,
+    } as const
+  }, [automationDirUp, automationDirDown, automationDirNeutral])
   const automationRecentFiltered = useMemo(
     () =>
       automationRecentSorted.filter((r) =>
         MlAutomationRecentRowMatchesFilter(r, automationTableFilter, favoriteByInstrumentToken),
       ),
     [automationRecentSorted, automationTableFilter, favoriteByInstrumentToken],
+  )
+  const automationRecentDisplay = useMemo(
+    () => automationRecentFiltered.filter((r) => automationDirAccepted[r.direction]),
+    [automationRecentFiltered, automationDirAccepted],
   )
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
   const [chartIntervalByToken, setChartIntervalByToken] = useState<Record<string, ChartInterval>>({})
@@ -3146,9 +3263,27 @@ export function KiteInstrumentsPage() {
 
   const isZerodha = provider?.toLowerCase() === 'zerodha'
 
+  const loadAutomationPriceModels = useCallback(async () => {
+    if (!isZerodha) {
+      setAutomationPriceModels(null)
+      setAutomationModelsLoading(false)
+      return
+    }
+    setAutomationModelsLoading(true)
+    try {
+      const { data } = await api.get<PriceDirectionModelsApiResponse>('/predictions/price-direction/models')
+      setAutomationPriceModels(data)
+    } catch {
+      setAutomationPriceModels(null)
+    } finally {
+      setAutomationModelsLoading(false)
+    }
+  }, [isZerodha])
+
   useEffect(() => {
     if (!isZerodha) {
       setAutomationRecent([])
+      setAutomationPriceModels(null)
       return
     }
     void loadAutomationRecent()
@@ -3162,6 +3297,11 @@ export function KiteInstrumentsPage() {
     if (!isZerodha || mainTab !== 'automation') return
     void loadAutomationRecent()
   }, [isZerodha, mainTab, loadAutomationRecent])
+
+  useEffect(() => {
+    if (!isZerodha || mainTab !== 'automation') return
+    void loadAutomationPriceModels()
+  }, [isZerodha, mainTab, loadAutomationPriceModels])
 
   const liveMarket = useLiveMarketTick(chartRow?.instrumentToken ?? null, isZerodha && mainTab === 'browse' && !!chartRow)
   const liveLtp = liveMarket.lastPrice
@@ -3327,7 +3467,10 @@ export function KiteInstrumentsPage() {
                   variant="outline-secondary"
                   size="sm"
                   disabled={automationRecentLoading || !isZerodha}
-                  onClick={() => void loadAutomationRecent()}
+                  onClick={() => {
+                    void loadAutomationRecent()
+                    void loadAutomationPriceModels()
+                  }}
                 >
                   {automationRecentLoading ? 'Loading…' : 'Refresh list'}
                 </Button>
@@ -3347,6 +3490,48 @@ export function KiteInstrumentsPage() {
                   {mlAutomationError}
                 </Alert>
               ) : null}
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+                <span className="small text-secondary text-uppercase mb-0">Direction filter</span>
+                <ButtonGroup size="sm" aria-label="Filter automation rows by predicted direction">
+                  <ToggleButton
+                    id={`${automationDirToggleIdPrefix}-up`}
+                    type="checkbox"
+                    variant={automationDirUp ? 'secondary' : 'outline-secondary'}
+                    value="up"
+                    checked={automationDirUp}
+                    onChange={(e) => setAutomationDirUp(e.currentTarget.checked)}
+                  >
+                    Up
+                  </ToggleButton>
+                  <ToggleButton
+                    id={`${automationDirToggleIdPrefix}-down`}
+                    type="checkbox"
+                    variant={automationDirDown ? 'secondary' : 'outline-secondary'}
+                    value="down"
+                    checked={automationDirDown}
+                    onChange={(e) => setAutomationDirDown(e.currentTarget.checked)}
+                  >
+                    Down
+                  </ToggleButton>
+                  <ToggleButton
+                    id={`${automationDirToggleIdPrefix}-neutral`}
+                    type="checkbox"
+                    variant={automationDirNeutral ? 'secondary' : 'outline-secondary'}
+                    value="neutral"
+                    checked={automationDirNeutral}
+                    onChange={(e) => setAutomationDirNeutral(e.currentTarget.checked)}
+                  >
+                    Neutral
+                  </ToggleButton>
+                </ButtonGroup>
+                {automationModelsLoading ? (
+                  <span className="small text-muted">
+                    <Spinner animation="border" size="sm" className="me-1 align-middle" role="status" />
+                    Model registry…
+                  </span>
+                ) : null}
+              </div>
+              <MlAutomationOutcomesPieGrid rows={automationRecentDisplay} priceModels={automationPriceModels} />
               <div className="small text-secondary text-uppercase mb-1">Recent auto predictions</div>
               <Form.Control
                 size="sm"
@@ -3357,9 +3542,10 @@ export function KiteInstrumentsPage() {
                 onChange={(e) => setAutomationTableFilter(e.target.value)}
                 aria-label="Filter automation prediction rows"
               />
-              {automationTableFilter.trim() && automationRecent.length > 0 ? (
+              {automationRecent.length > 0 && automationRecentDisplay.length !== automationRecent.length ? (
                 <div className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
-                  Showing {automationRecentFiltered.length} of {automationRecent.length}
+                  Showing {automationRecentDisplay.length} of {automationRecent.length} row
+                  {automationRecent.length === 1 ? '' : 's'} (search + direction)
                 </div>
               ) : null}
               <div
@@ -3388,14 +3574,14 @@ export function KiteInstrumentsPage() {
                           No automation rows yet.
                         </td>
                       </tr>
-                    ) : automationRecentFiltered.length === 0 && automationRecent.length > 0 ? (
+                    ) : automationRecentDisplay.length === 0 && automationRecent.length > 0 ? (
                       <tr>
                         <td colSpan={7} className="text-secondary small fst-italic">
                           No rows match this filter.
                         </td>
                       </tr>
                     ) : (
-                      automationRecentFiltered.map((r) => (
+                      automationRecentDisplay.map((r) => (
                         <tr key={r.id}>
                           <td className="small">{formatLocalDateTime(r.predictedAt)}</td>
                           <td title={`Instrument token ${r.instrumentToken}`}>
