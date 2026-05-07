@@ -38,6 +38,7 @@ import { api } from '../api/client'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
 import { CandlestickChart } from '../components/CandlestickChart'
+import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import type { MarketTickBatchItem } from '../services/marketHub'
 import type { ChartPointOhlc } from '../utils/liveCandleMerge'
@@ -603,6 +604,8 @@ function ChartZoomControls({
   onZoomOut,
   onReset,
   compact,
+  onToggleFullscreen,
+  fullscreenActive,
 }: {
   idPrefix: string
   totalBars: number
@@ -611,8 +614,33 @@ function ChartZoomControls({
   onZoomOut: () => void
   onReset: () => void
   compact?: boolean
+  onToggleFullscreen?: () => void
+  fullscreenActive?: boolean
 }) {
-  if (totalBars < 2) return null
+  const fullscreenBtn = onToggleFullscreen ? (
+    <Button
+      type="button"
+      variant="outline-secondary"
+      size="sm"
+      id={`${idPrefix}-fullscreen`}
+      className={compact ? 'py-0 px-2' : undefined}
+      onClick={onToggleFullscreen}
+      title={fullscreenActive ? 'Exit full screen' : 'Full screen chart'}
+      aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen chart'}
+    >
+      {fullscreenActive ? (compact ? 'Exit' : 'Exit full screen') : compact ? 'Full' : 'Full screen'}
+    </Button>
+  ) : null
+
+  if (totalBars < 2) {
+    if (!fullscreenBtn) return null
+    return (
+      <div className={`d-flex flex-wrap align-items-center gap-2 ${compact ? 'mb-1' : 'mb-2'}`}>
+        {fullscreenBtn}
+      </div>
+    )
+  }
+
   const showing = visibleBarCount ?? totalBars
   const zoomed = visibleBarCount != null && visibleBarCount < totalBars
   const canZoomIn = showing > CHART_ZOOM_MIN_BARS
@@ -661,6 +689,7 @@ function ChartZoomControls({
           {visibleBarCount} / {totalBars} bars
         </span>
       ) : null}
+      {fullscreenBtn}
     </div>
   )
 }
@@ -1376,6 +1405,8 @@ function CompactPriceChart({
 
   const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
 
+  const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
+
   return (
     <>
       {candleRange && !loading && !error ? (
@@ -1388,89 +1419,117 @@ function CompactPriceChart({
       ) : null}
       <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact candleSeries={seriesWithCustom} />
       {!loading && !error && series.length > 0 ? (
-        <ChartZoomControls
-          idPrefix={`fav-chart-${row.instrumentToken}`}
-          totalBars={series.length}
-          visibleBarCount={zoomVisibleBars}
-          onZoomIn={onChartZoomIn}
-          onZoomOut={onChartZoomOut}
-          onReset={onChartZoomReset}
-          compact
-        />
-      ) : null}
-      <div style={{ height: heightPx }}>
-        {error ? (
-          <Alert variant="danger" className="py-1 small mb-0">
-            {error}
-          </Alert>
-        ) : loading ? (
-          <div className="d-flex align-items-center justify-content-center gap-2 text-secondary small h-100">
-            <Spinner animation="border" size="sm" role="status" />
-            Loading…
-          </div>
-        ) : series.length === 0 ? (
-          <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
-        ) : graphType === 'candlestick' ? (
-          <div className="w-100 h-100">
-            <CandlestickChart
-              data={chartData}
-              maLineVisibility={maLineVisibility}
-              customEmaPeriod={customEmaApplied}
-            />
-          </div>
-        ) : (
-          <div className="position-relative w-100 h-100">
-            <ResponsiveContainer width="100%" height="100%">
-              {graphType === 'line' ? (
-                <LineChart data={chartData} margin={CHART_MARGINS}>
-                  <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-                  <YAxis
-                    stroke="#adb5bd"
-                    tick={{ fontSize: 10 }}
-                    domain={rechartsYDomain ?? ['auto', 'auto']}
-                    width={48}
-                  />
-                  <Tooltip
-                    content={(props) => (
-                      <ChartTooltipContent
-                        active={props.active}
-                        payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                        maLineVisibility={maLineVisibility}
-                        customEmaLinePeriod={customEmaApplied}
+        <div
+          ref={panelRef}
+          className={fullscreenActive ? 'd-flex flex-column' : undefined}
+          style={
+            fullscreenActive
+              ? {
+                  minHeight: '100vh',
+                  height: '100%',
+                  background: 'var(--bs-body-bg)',
+                  padding: '0.35rem',
+                }
+              : undefined
+          }
+        >
+          <ChartZoomControls
+            idPrefix={`fav-chart-${row.instrumentToken}`}
+            totalBars={series.length}
+            visibleBarCount={zoomVisibleBars}
+            onZoomIn={onChartZoomIn}
+            onZoomOut={onChartZoomOut}
+            onReset={onChartZoomReset}
+            compact
+            onToggleFullscreen={toggleFullscreen}
+            fullscreenActive={fullscreenActive}
+          />
+          <div
+            className={fullscreenActive ? 'flex-grow-1 w-100' : 'w-100'}
+            style={{
+              height: fullscreenActive ? '100%' : heightPx,
+              flex: fullscreenActive ? '1 1 auto' : undefined,
+              minHeight: fullscreenActive ? 0 : undefined,
+            }}
+          >
+            {graphType === 'candlestick' ? (
+              <div className="w-100 h-100">
+                <CandlestickChart
+                  data={chartData}
+                  maLineVisibility={maLineVisibility}
+                  customEmaPeriod={customEmaApplied}
+                />
+              </div>
+            ) : (
+              <div className="position-relative w-100 h-100">
+                <ResponsiveContainer width="100%" height="100%">
+                  {graphType === 'line' ? (
+                    <LineChart data={chartData} margin={CHART_MARGINS}>
+                      <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+                      <YAxis
+                        stroke="#adb5bd"
+                        tick={{ fontSize: 10 }}
+                        domain={rechartsYDomain ?? ['auto', 'auto']}
+                        width={48}
                       />
-                    )}
-                  />
-                  <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
-                  <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                </LineChart>
-              ) : (
-                <ComposedChart data={chartData} margin={CHART_MARGINS}>
-                  <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-                  <YAxis
-                    stroke="#adb5bd"
-                    tick={{ fontSize: 10 }}
-                    domain={rechartsYDomain ?? ['auto', 'auto']}
-                    width={48}
-                  />
-                  <Tooltip
-                    content={(props) => (
-                      <ChartTooltipContent
-                        active={props.active}
-                        payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                        maLineVisibility={maLineVisibility}
-                        customEmaLinePeriod={customEmaApplied}
+                      <Tooltip
+                        content={(props) => (
+                          <ChartTooltipContent
+                            active={props.active}
+                            payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                            maLineVisibility={maLineVisibility}
+                            customEmaLinePeriod={customEmaApplied}
+                          />
+                        )}
                       />
-                    )}
-                  />
-                  <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
-                  <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                </ComposedChart>
-              )}
-            </ResponsiveContainer>
-            <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                      <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                      <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                    </LineChart>
+                  ) : (
+                    <ComposedChart data={chartData} margin={CHART_MARGINS}>
+                      <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+                      <YAxis
+                        stroke="#adb5bd"
+                        tick={{ fontSize: 10 }}
+                        domain={rechartsYDomain ?? ['auto', 'auto']}
+                        width={48}
+                      />
+                      <Tooltip
+                        content={(props) => (
+                          <ChartTooltipContent
+                            active={props.active}
+                            payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                            maLineVisibility={maLineVisibility}
+                            customEmaLinePeriod={customEmaApplied}
+                          />
+                        )}
+                      />
+                      <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
+                      <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                    </ComposedChart>
+                  )}
+                </ResponsiveContainer>
+                <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div style={{ height: heightPx }}>
+          {error ? (
+            <Alert variant="danger" className="py-1 small mb-0">
+              {error}
+            </Alert>
+          ) : loading ? (
+            <div className="d-flex align-items-center justify-content-center gap-2 text-secondary small h-100">
+              <Spinner animation="border" size="sm" role="status" />
+              Loading…
+            </div>
+          ) : (
+            <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
+          )}
+        </div>
+      )}
     </>
   )
 }
@@ -1612,6 +1671,7 @@ function InstrumentChartCard({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
+  const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
   useEffect(() => {
     if (!selection) {
@@ -1763,14 +1823,98 @@ function InstrumentChartCard({
               candleSeries={displayWithMa}
             />
             {!loading && !error && displayWithMa.length > 0 ? (
-              <ChartZoomControls
-                idPrefix="browse-chart-zoom"
-                totalBars={displayWithMa.length}
-                visibleBarCount={zoomVisibleBars}
-                onZoomIn={onChartZoomIn}
-                onZoomOut={onChartZoomOut}
-                onReset={onChartZoomReset}
-              />
+              <div
+                ref={panelRef}
+                className={fullscreenActive ? 'd-flex flex-column mb-2' : undefined}
+                style={
+                  fullscreenActive
+                    ? {
+                        minHeight: '100vh',
+                        height: '100%',
+                        background: 'var(--bs-body-bg)',
+                        padding: '0.35rem',
+                      }
+                    : undefined
+                }
+              >
+                <ChartZoomControls
+                  idPrefix="browse-chart-zoom"
+                  totalBars={displayWithMa.length}
+                  visibleBarCount={zoomVisibleBars}
+                  onZoomIn={onChartZoomIn}
+                  onZoomOut={onChartZoomOut}
+                  onReset={onChartZoomReset}
+                  onToggleFullscreen={toggleFullscreen}
+                  fullscreenActive={fullscreenActive}
+                />
+                <div
+                  className={fullscreenActive ? 'flex-grow-1 w-100' : undefined}
+                  style={{
+                    height: fullscreenActive ? '100%' : '18rem',
+                    flex: fullscreenActive ? '1 1 auto' : undefined,
+                    minHeight: fullscreenActive ? 0 : undefined,
+                  }}
+                >
+                  {graphType === 'candlestick' ? (
+                    <CandlestickChart
+                      data={chartData}
+                      maLineVisibility={maLineVisibility}
+                      customEmaPeriod={customEmaApplied}
+                    />
+                  ) : (
+                    <div className="position-relative w-100 h-100">
+                      <ResponsiveContainer width="100%" height="100%">
+                        {graphType === 'line' ? (
+                          <LineChart data={chartData} margin={CHART_MARGINS}>
+                            <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                            <YAxis
+                              stroke="#adb5bd"
+                              tick={{ fontSize: 11 }}
+                              domain={rechartsYDomain ?? ['auto', 'auto']}
+                              width={56}
+                            />
+                            <Tooltip
+                              content={(props) => (
+                                <ChartTooltipContent
+                                  active={props.active}
+                                  payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                                  maLineVisibility={maLineVisibility}
+                                  customEmaLinePeriod={customEmaApplied}
+                                />
+                              )}
+                            />
+                            <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                            <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                          </LineChart>
+                        ) : (
+                          <ComposedChart data={chartData} margin={CHART_MARGINS}>
+                            <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                            <YAxis
+                              stroke="#adb5bd"
+                              tick={{ fontSize: 11 }}
+                              domain={rechartsYDomain ?? ['auto', 'auto']}
+                              width={56}
+                            />
+                            <Tooltip
+                              content={(props) => (
+                                <ChartTooltipContent
+                                  active={props.active}
+                                  payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                                  maLineVisibility={maLineVisibility}
+                                  customEmaLinePeriod={customEmaApplied}
+                                />
+                              )}
+                            />
+                            <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
+                            <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                          </ComposedChart>
+                        )}
+                      </ResponsiveContainer>
+                      <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : null}
             <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
               Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
@@ -1786,73 +1930,18 @@ function InstrumentChartCard({
                 {error}
               </Alert>
             ) : null}
-            <div style={{ height: '18rem' }}>
-              {loading ? (
-                <div className="d-flex align-items-center gap-2 text-secondary small py-5 justify-content-center">
-                  <Spinner animation="border" size="sm" role="status" />
-                  Loading candles…
-                </div>
-              ) : displayWithMa.length === 0 ? (
-                <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
-              ) : graphType === 'candlestick' ? (
-                <CandlestickChart
-                  data={chartData}
-                  maLineVisibility={maLineVisibility}
-                  customEmaPeriod={customEmaApplied}
-                />
-              ) : (
-                <div className="position-relative w-100 h-100">
-                  <ResponsiveContainer width="100%" height="100%">
-                    {graphType === 'line' ? (
-                      <LineChart data={chartData} margin={CHART_MARGINS}>
-                        <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                        <YAxis
-                          stroke="#adb5bd"
-                          tick={{ fontSize: 11 }}
-                          domain={rechartsYDomain ?? ['auto', 'auto']}
-                          width={56}
-                        />
-                        <Tooltip
-                          content={(props) => (
-                            <ChartTooltipContent
-                              active={props.active}
-                              payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                              maLineVisibility={maLineVisibility}
-                              customEmaLinePeriod={customEmaApplied}
-                            />
-                          )}
-                        />
-                        <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
-                        <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                      </LineChart>
-                    ) : (
-                      <ComposedChart data={chartData} margin={CHART_MARGINS}>
-                        <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                        <YAxis
-                          stroke="#adb5bd"
-                          tick={{ fontSize: 11 }}
-                          domain={rechartsYDomain ?? ['auto', 'auto']}
-                          width={56}
-                        />
-                        <Tooltip
-                          content={(props) => (
-                            <ChartTooltipContent
-                              active={props.active}
-                              payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                              maLineVisibility={maLineVisibility}
-                              customEmaLinePeriod={customEmaApplied}
-                            />
-                          )}
-                        />
-                        <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
-                        <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                      </ComposedChart>
-                    )}
-                  </ResponsiveContainer>
-                  <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                </div>
-              )}
-            </div>
+            {loading || displayWithMa.length === 0 ? (
+              <div style={{ height: '18rem' }}>
+                {loading ? (
+                  <div className="d-flex align-items-center gap-2 text-secondary small py-5 justify-content-center">
+                    <Spinner animation="border" size="sm" role="status" />
+                    Loading candles…
+                  </div>
+                ) : (
+                  <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
+                )}
+              </div>
+            ) : null}
           </>
         )}
       </Card.Body>
