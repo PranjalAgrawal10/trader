@@ -9,6 +9,8 @@ export type ChartPointWithMa = ChartPointOhlc & {
   sma20: number | null
   ema9: number | null
   ema21: number | null
+  /** User-chosen EMA period (values filled by `addCustomEmaToChartPoints`). */
+  emaCustom: number | null
 }
 
 /** Stroke colors aligned across Recharts and SVG candlestick. */
@@ -16,6 +18,7 @@ export const MA_LINE_COLORS = {
   sma20: '#fbbf24',
   ema9: '#a78bfa',
   ema21: '#38bdf8',
+  emaCustom: '#fb923c',
 } as const
 
 /** Toggles for SMA / EMA overlays on line, bar, and candle charts. */
@@ -23,13 +26,19 @@ export type MaLineVisibility = {
   showSma20: boolean
   showEma9: boolean
   showEma21: boolean
+  showCustomEma: boolean
 }
 
 export const DEFAULT_MA_LINE_VISIBILITY: MaLineVisibility = {
   showSma20: true,
   showEma9: true,
   showEma21: true,
+  showCustomEma: false,
 }
+
+export const CUSTOM_EMA_PERIOD_MIN = 2
+export const CUSTOM_EMA_PERIOD_MAX = 500
+export const CUSTOM_EMA_DEFAULT_PERIOD = 50
 
 export function computeSma(values: readonly number[], period: number): (number | null)[] {
   const out: (number | null)[] = values.map(() => null)
@@ -62,6 +71,56 @@ export function computeEma(values: readonly number[], period: number): (number |
   return out
 }
 
+/** Min/max for Recharts Y axis so MA lines stay visible with OHLC (line / bar / candle data). */
+export function yDomainForOhlcAndVisibleMas(
+  data: ChartPointWithMa[],
+  visibility: MaLineVisibility,
+): [number, number] | undefined {
+  if (data.length === 0) return undefined
+  let min = Infinity
+  let max = -Infinity
+  for (const c of data) {
+    min = Math.min(min, c.low, c.high, c.close)
+    max = Math.max(max, c.low, c.high, c.close)
+    if (visibility.showSma20) {
+      const v = c.sma20
+      if (v != null && Number.isFinite(v)) {
+        min = Math.min(min, v)
+        max = Math.max(max, v)
+      }
+    }
+    if (visibility.showEma9) {
+      const v = c.ema9
+      if (v != null && Number.isFinite(v)) {
+        min = Math.min(min, v)
+        max = Math.max(max, v)
+      }
+    }
+    if (visibility.showEma21) {
+      const v = c.ema21
+      if (v != null && Number.isFinite(v)) {
+        min = Math.min(min, v)
+        max = Math.max(max, v)
+      }
+    }
+    if (visibility.showCustomEma) {
+      const v = c.emaCustom
+      if (v != null && Number.isFinite(v)) {
+        min = Math.min(min, v)
+        max = Math.max(max, v)
+      }
+    }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return undefined
+  if (min === max) {
+    const pad = min === 0 ? 1 : Math.abs(min) * 0.001
+    return [min - pad, max + pad]
+  }
+  const span = max - min
+  const pad = span * 0.02
+  return [min - pad, max + pad]
+}
+
 export function attachMovingAverages(points: ChartPointOhlc[]): ChartPointWithMa[] {
   if (points.length === 0) return []
 
@@ -75,5 +134,21 @@ export function attachMovingAverages(points: ChartPointOhlc[]): ChartPointWithMa
     sma20: sma20[i],
     ema9: ema9[i],
     ema21: ema21[i],
+    emaCustom: null,
   }))
+}
+
+/** Add or clear the custom EMA column (closes-only; same seeding as other EMAs). */
+export function addCustomEmaToChartPoints(points: ChartPointWithMa[], period: number | null): ChartPointWithMa[] {
+  if (points.length === 0) return []
+  if (period == null || !Number.isFinite(period)) {
+    return points.map((p) => ({ ...p, emaCustom: null }))
+  }
+  const pInt = Math.floor(period)
+  if (pInt < CUSTOM_EMA_PERIOD_MIN || pInt > CUSTOM_EMA_PERIOD_MAX) {
+    return points.map((p) => ({ ...p, emaCustom: null }))
+  }
+  const closes = points.map((x) => x.close)
+  const emaC = computeEma(closes, pInt)
+  return points.map((pt, i) => ({ ...pt, emaCustom: emaC[i] }))
 }

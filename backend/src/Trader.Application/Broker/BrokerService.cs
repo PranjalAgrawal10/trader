@@ -1,5 +1,7 @@
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Persistence;
@@ -10,6 +12,13 @@ namespace Trader.Application.Broker;
 
 public sealed class BrokerService : IBrokerService
 {
+    private const int ChartZoomMinBars = 24;
+    private const int ChartZoomMaxBars = 500_000;
+    private static readonly JsonSerializerOptions ChartZoomJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
+
     private const string PendingStateCachePrefix = "Trader.KiteOAuth.PendingState:";
     private static readonly TimeSpan PendingStateTtl = TimeSpan.FromMinutes(20);
 
@@ -217,34 +226,35 @@ public sealed class BrokerService : IBrokerService
         var code = NormalizeUiChartInterval(interval);
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
 
-        var end = toUtc ?? DateTimeOffset.UtcNow;
-        var start = fromUtc ?? end - DefaultChartLookback(code);
-        if (start >= end)
+        var requestEnd = toUtc ?? DateTimeOffset.UtcNow;
+        var requestStart = fromUtc ?? requestEnd - DefaultChartLookback(code);
+        if (requestStart >= requestEnd)
             throw new InvalidOperationException("Start time must be before end time.");
 
+        var fetchStart = ComputeMaWarmupFetchStart(requestStart, code);
         var token = instrumentToken.Trim();
 
         if (code is "2m" or "4m")
         {
             var period = code == "2m" ? 2 : 4;
             var fetch = await _kiteInstruments
-                .FetchHistoricalCandlesAsync(token, "minute", apiKey, accessToken, start, end, continuous: false, ct)
+                .FetchHistoricalCandlesAsync(token, "minute", apiKey, accessToken, fetchStart, requestEnd, continuous: false, ct)
                 .ConfigureAwait(false);
             if (!fetch.Success)
                 throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load candles from Kite.");
 
             var merged = MergeMinuteCandles(fetch.Candles, period);
-            return new KiteHistoricalCandlesDto(merged, code, start, end);
+            return FinalizeChartHistoricalCandles(merged, code, requestStart, requestEnd);
         }
 
         var kiteInterval = MapUiIntervalToKite(code);
         var raw = await _kiteInstruments
-            .FetchHistoricalCandlesAsync(token, kiteInterval, apiKey, accessToken, start, end, continuous: false, ct)
+            .FetchHistoricalCandlesAsync(token, kiteInterval, apiKey, accessToken, fetchStart, requestEnd, continuous: false, ct)
             .ConfigureAwait(false);
         if (!raw.Success)
             throw new InvalidOperationException(raw.ErrorMessage ?? "Could not load candles from Kite.");
 
-        return new KiteHistoricalCandlesDto(raw.Candles, code, start, end);
+        return FinalizeChartHistoricalCandles(raw.Candles, code, requestStart, requestEnd);
     }
 
     public async Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(
@@ -327,7 +337,58 @@ public sealed class BrokerService : IBrokerService
         if (row is null)
             throw new InvalidOperationException("User not found.");
 
-        return new KiteInstrumentsChartSettingsDto(row.Interval, row.RangePreset, row.GraphType);
+        return new KiteInstrumentsChartSettingsDto(row.Interval, row.RangePreset, row.GraphType, ParseChartZoomMap(row.ChartZoomByInstrumentTokenJson));
+    }
+
+    public async Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        if (string.IsNullOrWhiteSpace(body.InstrumentToken) || !body.InstrumentToken.Trim().All(char.IsAsciiDigit))
+            throw new InvalidOperationException("A numeric instrument token is required.");
+
+        var token = body.InstrumentToken.Trim();
+        if (body.VisibleBars is int vb && (vb < ChartZoomMinBars || vb > ChartZoomMaxBars))
+        {
+            throw new InvalidOperationException(
+                $"visibleBars must be between {ChartZoomMinBars} and {ChartZoomMaxBars}, or null to clear.");
+        }
+
+        var row = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false);
+        if (row is null)
+            throw new InvalidOperationException("User not found.");
+
+        var dict = ParseChartZoomDict(row.ChartZoomByInstrumentTokenJson);
+        if (body.VisibleBars is null)
+            dict.Remove(token);
+        else
+            dict[token] = body.VisibleBars.Value;
+
+        var json = dict.Count == 0 ? null : JsonSerializer.Serialize(dict, ChartZoomJsonOptions);
+        await _kiteChartSettings.SaveChartZoomJsonAsync(userId, json, ct).ConfigureAwait(false);
+    }
+
+    private static Dictionary<string, int>? ParseChartZoomMap(string? json)
+    {
+        var d = ParseChartZoomDict(json);
+        return d.Count == 0 ? null : d;
+    }
+
+    private static Dictionary<string, int> ParseChartZoomDict(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+
+        try
+        {
+            var d = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+            return d is null
+                ? new Dictionary<string, int>(StringComparer.Ordinal)
+                : new Dictionary<string, int>(d, StringComparer.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, int>(StringComparer.Ordinal);
+        }
     }
 
     public async Task SaveKiteInstrumentsChartSettingsAsync(
@@ -347,7 +408,7 @@ public sealed class BrokerService : IBrokerService
 
         await _kiteChartSettings.SaveAsync(
                 userId,
-                new KiteInstrumentsChartSettingsState(interval, range, graph),
+                new KiteInstrumentsChartSettingsState(interval, range, graph, null),
                 ct)
             .ConfigureAwait(false);
     }
@@ -411,6 +472,42 @@ public sealed class BrokerService : IBrokerService
             _ => throw new InvalidOperationException("graphType must be line, bar, or candlestick."),
         };
     }
+
+    private static DateTimeOffset ComputeMaWarmupFetchStart(DateTimeOffset requestStart, string code)
+    {
+        var bar = ChartBarDuration(code);
+        var delta = TimeSpan.FromTicks(bar.Ticks * ChartMovingAverages.WarmupBarCount);
+        return requestStart - delta;
+    }
+
+    private static KiteHistoricalCandlesDto FinalizeChartHistoricalCandles(
+        IReadOnlyList<KiteHistoricalCandlePointDto> candles,
+        string intervalCode,
+        DateTimeOffset requestStart,
+        DateTimeOffset requestEnd)
+    {
+        var ordered = candles.OrderBy(c => c.Time).ToList();
+        var withMa = ChartMovingAverages.Attach(ordered);
+        var trimmed = withMa.Where(c => c.Time >= requestStart).ToList();
+        return new KiteHistoricalCandlesDto(trimmed, intervalCode, requestStart, requestEnd);
+    }
+
+    /// <summary>One chart bar length for the UI interval (used to extend Kite fetch for MA warmup).</summary>
+    private static TimeSpan ChartBarDuration(string code) =>
+        code switch
+        {
+            "1m" => TimeSpan.FromMinutes(1),
+            "2m" => TimeSpan.FromMinutes(2),
+            "3m" => TimeSpan.FromMinutes(3),
+            "4m" => TimeSpan.FromMinutes(4),
+            "5m" => TimeSpan.FromMinutes(5),
+            "10m" => TimeSpan.FromMinutes(10),
+            "15m" => TimeSpan.FromMinutes(15),
+            "30m" => TimeSpan.FromMinutes(30),
+            "1h" => TimeSpan.FromHours(1),
+            "1d" => TimeSpan.FromDays(1),
+            _ => TimeSpan.FromMinutes(5),
+        };
 
     private static TimeSpan DefaultChartLookback(string code) =>
         code switch

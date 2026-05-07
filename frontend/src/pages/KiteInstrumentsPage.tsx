@@ -1,5 +1,6 @@
 import axios from 'axios'
 import {
+  Fragment,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -42,12 +43,31 @@ import type { MarketTickBatchItem } from '../services/marketHub'
 import type { ChartPointOhlc } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
+  CHART_ZOOM_MIN_BARS,
+  sliceChartForZoom,
+  zoomInBarCount,
+  zoomOutBarCount,
+} from '../utils/chartZoom'
+import {
+  appendMlPrediction,
+  historiesEqual,
+  loadMlHistory,
+  resolveMlHistory,
+  saveMlHistory,
+  type MlPredictionLogEntry,
+} from '../utils/mlPredictionHistory'
+import {
+  addCustomEmaToChartPoints,
   attachMovingAverages,
+  CUSTOM_EMA_DEFAULT_PERIOD,
+  CUSTOM_EMA_PERIOD_MAX,
+  CUSTOM_EMA_PERIOD_MIN,
   DEFAULT_MA_LINE_VISIBILITY,
   MA_EMA_FAST_PERIOD,
   MA_EMA_SLOW_PERIOD,
   MA_LINE_COLORS,
   MA_SMA_PERIOD,
+  yDomainForOhlcAndVisibleMas,
   type ChartPointWithMa,
   type MaLineVisibility,
 } from '../utils/movingAverages'
@@ -90,6 +110,9 @@ interface HistoricalCandlesResponse {
     low: number
     close: number
     volume: number
+    sma20?: number | null
+    ema9?: number | null
+    ema21?: number | null
   }[]
   interval: string
   from: string
@@ -112,6 +135,7 @@ interface KiteInstrumentsChartSettingsDto {
   interval: string | null
   rangePreset: string | null
   graphType: string | null
+  zoomByInstrumentToken?: Record<string, number> | null
 }
 
 const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
@@ -535,10 +559,120 @@ function problemDetail(err: unknown): string {
   return 'Request failed.'
 }
 
+const CUSTOM_EMA_PREFS_STORAGE_KEY = 'trader.kiteChart.customEma.v1'
+
+function loadCustomEmaPrefs(): { period: number; show: boolean } {
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_EMA_PREFS_STORAGE_KEY)
+    if (!raw) return { period: CUSTOM_EMA_DEFAULT_PERIOD, show: false }
+    const j = JSON.parse(raw) as { period?: unknown; show?: unknown }
+    const periodRaw = Math.round(Number(j.period))
+    const period = Number.isFinite(periodRaw)
+      ? Math.min(CUSTOM_EMA_PERIOD_MAX, Math.max(CUSTOM_EMA_PERIOD_MIN, periodRaw))
+      : CUSTOM_EMA_DEFAULT_PERIOD
+    return { period, show: Boolean(j.show) }
+  } catch {
+    return { period: CUSTOM_EMA_DEFAULT_PERIOD, show: false }
+  }
+}
+
+function saveCustomEmaPrefs(prefs: { period: number; show: boolean }): void {
+  try {
+    window.localStorage.setItem(CUSTOM_EMA_PREFS_STORAGE_KEY, JSON.stringify(prefs))
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/** When toggle is on and period is valid, return integer period for series; otherwise <c>null</c> (skip column). */
+function effectiveCustomEmaPeriod(visibility: MaLineVisibility, period: number): number | null {
+  if (!visibility.showCustomEma) return null
+  const n = Math.floor(period)
+  if (!Number.isFinite(n) || n < CUSTOM_EMA_PERIOD_MIN || n > CUSTOM_EMA_PERIOD_MAX) return null
+  return n
+}
+
 const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
+/** Fewer bars visible (most recent on the right); reindexed for chart axes. */
+function ChartZoomControls({
+  idPrefix,
+  totalBars,
+  visibleBarCount,
+  onZoomIn,
+  onZoomOut,
+  onReset,
+  compact,
+}: {
+  idPrefix: string
+  totalBars: number
+  visibleBarCount: number | null
+  onZoomIn: () => void
+  onZoomOut: () => void
+  onReset: () => void
+  compact?: boolean
+}) {
+  if (totalBars < 2) return null
+  const showing = visibleBarCount ?? totalBars
+  const zoomed = visibleBarCount != null && visibleBarCount < totalBars
+  const canZoomIn = showing > CHART_ZOOM_MIN_BARS
+  const canZoomOut = zoomed
+  const canReset = zoomed
+  return (
+    <div className={`d-flex flex-wrap align-items-center gap-2 ${compact ? 'mb-1' : 'mb-2'}`}>
+      <span className={`small text-secondary text-uppercase ${compact ? '' : 'me-1'}`}>Zoom</span>
+      <ButtonGroup size="sm">
+        <Button
+          type="button"
+          variant="outline-secondary"
+          id={`${idPrefix}-zoom-in`}
+          disabled={!canZoomIn}
+          onClick={onZoomIn}
+          title="Zoom in (fewer bars, latest on the right)"
+          aria-label="Zoom chart in"
+        >
+          +
+        </Button>
+        <Button
+          type="button"
+          variant="outline-secondary"
+          id={`${idPrefix}-zoom-out`}
+          disabled={!canZoomOut}
+          onClick={onZoomOut}
+          title="Zoom out"
+          aria-label="Zoom chart out"
+        >
+          −
+        </Button>
+        <Button
+          type="button"
+          variant="outline-secondary"
+          id={`${idPrefix}-zoom-reset`}
+          disabled={!canReset}
+          onClick={onReset}
+          title="Show full downloaded range"
+          aria-label="Reset chart zoom"
+        >
+          Reset
+        </Button>
+      </ButtonGroup>
+      {zoomed ? (
+        <span className="small text-muted" style={{ fontSize: compact ? '0.7rem' : undefined }}>
+          {visibleBarCount} / {totalBars} bars
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 /** SMA + EMA overlays for Recharts (same colors as candlestick chart). */
-function MovingAverageOverlays({ visibility }: { visibility: MaLineVisibility }) {
+function MovingAverageOverlays({
+  visibility,
+  customEmaLinePeriod,
+}: {
+  visibility: MaLineVisibility
+  customEmaLinePeriod: number | null
+}) {
   return (
     <>
       {visibility.showSma20 ? (
@@ -574,7 +708,53 @@ function MovingAverageOverlays({ visibility }: { visibility: MaLineVisibility })
           name={`EMA ${MA_EMA_SLOW_PERIOD}`}
         />
       ) : null}
+      {visibility.showCustomEma && customEmaLinePeriod != null && customEmaLinePeriod >= 2 ? (
+        <Line
+          type="monotone"
+          dataKey="emaCustom"
+          stroke={MA_LINE_COLORS.emaCustom}
+          dot={false}
+          strokeWidth={1.5}
+          connectNulls
+          name={`EMA ${customEmaLinePeriod}`}
+        />
+      ) : null}
     </>
+  )
+}
+
+/** Matches candle chart: colored SMA/EMA key on top-right of Recharts line/bar. */
+function MaChartCornerLegend({
+  visibility,
+  customEmaLinePeriod,
+}: {
+  visibility: MaLineVisibility
+  customEmaLinePeriod: number | null
+}) {
+  const items: { key: string; label: string; color: string }[] = []
+  if (visibility.showSma20) items.push({ key: 'sma', label: `SMA${MA_SMA_PERIOD}`, color: MA_LINE_COLORS.sma20 })
+  if (visibility.showEma9) items.push({ key: 'e9', label: `EMA${MA_EMA_FAST_PERIOD}`, color: MA_LINE_COLORS.ema9 })
+  if (visibility.showEma21) items.push({ key: 'e21', label: `EMA${MA_EMA_SLOW_PERIOD}`, color: MA_LINE_COLORS.ema21 })
+  if (visibility.showCustomEma && customEmaLinePeriod != null && customEmaLinePeriod >= 2) {
+    items.push({
+      key: 'ecust',
+      label: `EMA${customEmaLinePeriod}`,
+      color: MA_LINE_COLORS.emaCustom,
+    })
+  }
+  if (items.length === 0) return null
+  return (
+    <div
+      className="position-absolute small text-secondary"
+      style={{ right: 8, top: 4, fontSize: '0.65rem', pointerEvents: 'none', zIndex: 2 }}
+    >
+      {items.map((item, i) => (
+        <Fragment key={item.key}>
+          {i > 0 ? <span className="text-muted"> · </span> : null}
+          <span style={{ color: item.color }}>{item.label}</span>
+        </Fragment>
+      ))}
+    </div>
   )
 }
 
@@ -594,6 +774,24 @@ function historicalCandlesToChartPoints(data: HistoricalCandlesResponse): ChartP
     volume: Number(c.volume),
     ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
   }))
+}
+
+/** Prefer server SMA/EMA (computed after Kite warmup fetch); otherwise match in-browser. Custom EMA column is added in UI. */
+function chartPointsFromHistoricalResponse(data: HistoricalCandlesResponse): ChartPointWithMa[] {
+  const pts = historicalCandlesToChartPoints(data)
+  const serverMa =
+    data.candles.length === pts.length &&
+    data.candles.some((c) => c.sma20 != null || c.ema9 != null || c.ema21 != null)
+  const base: ChartPointWithMa[] = !serverMa
+    ? attachMovingAverages(pts)
+    : pts.map((p, i) => ({
+        ...p,
+        sma20: data.candles[i].sma20 != null ? Number(data.candles[i].sma20) : null,
+        ema9: data.candles[i].ema9 != null ? Number(data.candles[i].ema9) : null,
+        ema21: data.candles[i].ema21 != null ? Number(data.candles[i].ema21) : null,
+        emaCustom: null,
+      }))
+  return addCustomEmaToChartPoints(base, null)
 }
 
 type CandleRangeMeta = { interval: string; from: string; to: string }
@@ -632,10 +830,12 @@ function ChartTooltipContent({
   active,
   payload,
   maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
+  customEmaLinePeriod = null,
 }: {
   active?: boolean
   payload?: readonly { payload?: ChartPointWithMa }[]
   maLineVisibility?: MaLineVisibility
+  customEmaLinePeriod?: number | null
 }) {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
@@ -665,6 +865,14 @@ function ChartTooltipContent({
           EMA{MA_EMA_SLOW_PERIOD} {p.ema21.toFixed(4)}
         </div>
       ) : null}
+      {maLineVisibility.showCustomEma &&
+      customEmaLinePeriod != null &&
+      customEmaLinePeriod >= 2 &&
+      p.emaCustom != null ? (
+        <div className="font-monospace" style={{ color: MA_LINE_COLORS.emaCustom }}>
+          EMA{customEmaLinePeriod} {p.emaCustom.toFixed(4)}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -679,6 +887,8 @@ function ChartSettingsToolbar({
   onGraphTypeChange,
   maLineVisibility,
   onMaLineVisibilityChange,
+  customEmaPeriod,
+  onCustomEmaPeriodChange,
 }: {
   idPrefix: string
   rangePreset: ChartRangePreset
@@ -689,6 +899,8 @@ function ChartSettingsToolbar({
   onGraphTypeChange: (v: ChartGraphType) => void
   maLineVisibility: MaLineVisibility
   onMaLineVisibilityChange: (patch: Partial<MaLineVisibility>) => void
+  customEmaPeriod: number
+  onCustomEmaPeriodChange: (n: number) => void
 }) {
   return (
     <>
@@ -808,30 +1020,71 @@ function ChartSettingsToolbar({
           >
             EMA {MA_EMA_SLOW_PERIOD}
           </ToggleButton>
+          <ToggleButton
+            id={`${idPrefix}-ind-emacust`}
+            type="checkbox"
+            variant={maLineVisibility.showCustomEma ? 'secondary' : 'outline-secondary'}
+            value="emacust"
+            checked={maLineVisibility.showCustomEma}
+            onChange={(e) => onMaLineVisibilityChange({ showCustomEma: e.currentTarget.checked })}
+          >
+            Custom EMA
+          </ToggleButton>
         </ButtonGroup>
+        <InputGroup size="sm" style={{ width: '7.5rem' }} className="flex-nowrap">
+          <InputGroup.Text className="py-0 px-2 small">Period</InputGroup.Text>
+          <Form.Control
+            type="number"
+            className="py-0"
+            min={CUSTOM_EMA_PERIOD_MIN}
+            max={CUSTOM_EMA_PERIOD_MAX}
+            value={customEmaPeriod}
+            disabled={!maLineVisibility.showCustomEma}
+            onChange={(e) => {
+              const v = Math.round(Number(e.target.value))
+              if (!Number.isFinite(v)) return
+              onCustomEmaPeriodChange(Math.min(CUSTOM_EMA_PERIOD_MAX, Math.max(CUSTOM_EMA_PERIOD_MIN, v)))
+            }}
+            aria-label="Custom EMA period"
+          />
+        </InputGroup>
       </div>
     </>
   )
 }
 
-/** ML next-bar direction (same API as browse detail chart); `compact` tightens spacing for favorite tiles. */
+/** ML next-bar direction; logs last 10 predictions (local) and colors rows green/red once the next bar resolves. */
 function MlNextBarBiasBar({
   instrumentToken,
   interval,
   compact,
+  candleSeries,
 }: {
   instrumentToken: string
   interval: ChartInterval
   compact?: boolean
+  candleSeries: ChartPointWithMa[]
 }) {
   const [mlPred, setMlPred] = useState<PriceDirectionApiResponse | null>(null)
   const [mlLoading, setMlLoading] = useState(false)
   const [mlError, setMlError] = useState<string | null>(null)
+  const [history, setHistory] = useState<MlPredictionLogEntry[]>([])
 
   useEffect(() => {
     setMlPred(null)
     setMlError(null)
+    setHistory(loadMlHistory(instrumentToken, interval))
   }, [instrumentToken, interval])
+
+  useEffect(() => {
+    if (candleSeries.length === 0) return
+    setHistory((prev) => {
+      const resolved = resolveMlHistory(prev, candleSeries)
+      if (historiesEqual(prev, resolved)) return prev
+      saveMlHistory(instrumentToken, interval, resolved)
+      return resolved
+    })
+  }, [instrumentToken, interval, candleSeries])
 
   const fetchMlBias = useCallback(async () => {
     setMlLoading(true)
@@ -841,15 +1094,25 @@ function MlNextBarBiasBar({
         params: { instrumentToken, interval },
       })
       setMlPred(data)
+      const last = candleSeries.length > 0 ? candleSeries[candleSeries.length - 1] : null
+      if (last) {
+        setHistory((prev) => {
+          const extended = appendMlPrediction(prev, data, { t: last.t, close: last.close })
+          const resolved = resolveMlHistory(extended, candleSeries)
+          saveMlHistory(instrumentToken, interval, resolved)
+          return resolved
+        })
+      }
     } catch (err) {
       setMlPred(null)
       setMlError(problemDetail(err))
     } finally {
       setMlLoading(false)
     }
-  }, [instrumentToken, interval])
+  }, [instrumentToken, interval, candleSeries])
 
   const gapClass = compact ? 'mb-1' : 'mb-2'
+  const historyNewestFirst = useMemo(() => [...history].reverse(), [history])
 
   return (
     <>
@@ -899,6 +1162,65 @@ function MlNextBarBiasBar({
           {mlPred.detail}
         </p>
       ) : null}
+      {history.length > 0 ? (
+        <div
+          className={`rounded border border-secondary overflow-hidden ${gapClass}`}
+          style={{ maxHeight: compact ? '10rem' : '14rem', overflowY: 'auto' }}
+        >
+          <div className="px-2 py-1 bg-body-secondary text-secondary text-uppercase border-bottom border-secondary">
+            <span style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
+              ML log (last {history.length}) · green = correct next-bar move, red = wrong (local only)
+            </span>
+          </div>
+          <ul className="list-unstyled mb-0">
+            {historyNewestFirst.map((e) => (
+              <li
+                key={e.id}
+                className="px-2 py-1 border-top border-secondary"
+                style={{
+                  fontSize: compact ? '0.65rem' : '0.72rem',
+                  borderLeft: '4px solid',
+                  borderLeftColor:
+                    e.outcome === 'pending' ? '#6c757d' : e.outcome === 'correct' ? '#198754' : '#dc3545',
+                  backgroundColor:
+                    e.outcome === 'pending'
+                      ? undefined
+                      : e.outcome === 'correct'
+                        ? 'rgba(25, 135, 84, 0.09)'
+                        : 'rgba(220, 53, 69, 0.09)',
+                }}
+              >
+                <div className="text-secondary">{new Date(e.predictedAt).toLocaleString()}</div>
+                <div className="font-monospace">
+                  <span
+                    className={
+                      e.direction === 'up' ? 'text-success' : e.direction === 'down' ? 'text-danger' : 'text-secondary'
+                    }
+                  >
+                    {e.direction.toUpperCase()}
+                  </span>{' '}
+                  {e.confidence}% · ref close {e.refClose.toFixed(4)}{' '}
+                  <span className="text-muted">@ {new Date(e.refBarTime).toLocaleString()}</span>
+                </div>
+                <div className="text-muted text-truncate" title={`${e.modelId}: ${e.detail}`}>
+                  {e.modelId} · {e.detail}
+                </div>
+                {e.outcome === 'pending' ? (
+                  <div className="text-muted fst-italic">Awaiting next candle in series…</div>
+                ) : (
+                  <div className="font-monospace">
+                    Next bar {e.nextBarTime ? new Date(e.nextBarTime).toLocaleString() : '—'} · close{' '}
+                    {e.nextClose != null ? e.nextClose.toFixed(4) : '—'} ·{' '}
+                    <span className={e.outcome === 'correct' ? 'text-success' : 'text-danger'}>
+                      {e.outcome === 'correct' ? 'true' : 'false'}
+                    </span>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </>
   )
 }
@@ -910,6 +1232,9 @@ function CompactPriceChart({
   graphType,
   heightPx,
   maLineVisibility,
+  customEmaPeriod,
+  zoomVisibleBars,
+  onZoomVisibleBarsChange,
 }: {
   row: KiteInstrumentRow
   rangePreset: ChartRangePreset
@@ -917,11 +1242,20 @@ function CompactPriceChart({
   graphType: ChartGraphType
   heightPx: number
   maLineVisibility: MaLineVisibility
+  customEmaPeriod: number
+  zoomVisibleBars: number | null
+  onZoomVisibleBarsChange: (bars: number | null) => void
 }) {
-  const [series, setSeries] = useState<ChartPoint[]>([])
+  const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
+
+  useEffect(() => {
+    if (zoomVisibleBars != null && series.length > 0 && zoomVisibleBars > series.length) {
+      onZoomVisibleBarsChange(null)
+    }
+  }, [series.length, zoomVisibleBars, onZoomVisibleBarsChange])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -940,7 +1274,7 @@ function CompactPriceChart({
           params,
           signal: ac.signal,
         })
-        const pts = historicalCandlesToChartPoints(data)
+        const pts = chartPointsFromHistoricalResponse(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
         if (initial) setError(null)
@@ -969,7 +1303,32 @@ function CompactPriceChart({
     }
   }, [row.instrumentToken, interval, rangePreset])
 
-  const seriesWithMa = useMemo(() => attachMovingAverages(series), [series])
+  const customEmaApplied = useMemo(
+    () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
+    [maLineVisibility, customEmaPeriod],
+  )
+
+  const seriesWithCustom = useMemo(
+    () => addCustomEmaToChartPoints(series, customEmaApplied),
+    [series, customEmaApplied],
+  )
+
+  const chartData = useMemo(() => sliceChartForZoom(seriesWithCustom, zoomVisibleBars), [seriesWithCustom, zoomVisibleBars])
+
+  const rechartsYDomain = useMemo(
+    () => yDomainForOhlcAndVisibleMas(chartData, maLineVisibility),
+    [chartData, maLineVisibility],
+  )
+
+  const onChartZoomIn = useCallback(() => {
+    onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, series.length))
+  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+
+  const onChartZoomOut = useCallback(() => {
+    onZoomVisibleBarsChange(zoomOutBarCount(zoomVisibleBars, series.length))
+  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+
+  const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
 
   return (
     <>
@@ -981,7 +1340,18 @@ function CompactPriceChart({
           toIso={candleRange.to}
         />
       ) : null}
-      <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact />
+      <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact candleSeries={seriesWithCustom} />
+      {!loading && !error && series.length > 0 ? (
+        <ChartZoomControls
+          idPrefix={`fav-chart-${row.instrumentToken}`}
+          totalBars={series.length}
+          visibleBarCount={zoomVisibleBars}
+          onZoomIn={onChartZoomIn}
+          onZoomOut={onChartZoomOut}
+          onReset={onChartZoomReset}
+          compact
+        />
+      ) : null}
       <div style={{ height: heightPx }}>
         {error ? (
           <Alert variant="danger" className="py-1 small mb-0">
@@ -996,44 +1366,63 @@ function CompactPriceChart({
           <p className="text-secondary small mb-0 text-center py-4">No candles.</p>
         ) : graphType === 'candlestick' ? (
           <div className="w-100 h-100">
-            <CandlestickChart data={seriesWithMa} maLineVisibility={maLineVisibility} />
+            <CandlestickChart
+              data={chartData}
+              maLineVisibility={maLineVisibility}
+              customEmaPeriod={customEmaApplied}
+            />
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            {graphType === 'line' ? (
-              <LineChart data={seriesWithMa} margin={CHART_MARGINS}>
-                <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-                <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
-                <Tooltip
-                  content={(props) => (
-                    <ChartTooltipContent
-                      active={props.active}
-                      payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                      maLineVisibility={maLineVisibility}
-                    />
-                  )}
-                />
-                <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
-                <MovingAverageOverlays visibility={maLineVisibility} />
-              </LineChart>
-            ) : (
-              <ComposedChart data={seriesWithMa} margin={CHART_MARGINS}>
-                <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-                <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} domain={['auto', 'auto']} width={48} />
-                <Tooltip
-                  content={(props) => (
-                    <ChartTooltipContent
-                      active={props.active}
-                      payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                      maLineVisibility={maLineVisibility}
-                    />
-                  )}
-                />
-                <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
-                <MovingAverageOverlays visibility={maLineVisibility} />
-              </ComposedChart>
-            )}
-          </ResponsiveContainer>
+          <div className="position-relative w-100 h-100">
+            <ResponsiveContainer width="100%" height="100%">
+              {graphType === 'line' ? (
+                <LineChart data={chartData} margin={CHART_MARGINS}>
+                  <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+                  <YAxis
+                    stroke="#adb5bd"
+                    tick={{ fontSize: 10 }}
+                    domain={rechartsYDomain ?? ['auto', 'auto']}
+                    width={48}
+                  />
+                  <Tooltip
+                    content={(props) => (
+                      <ChartTooltipContent
+                        active={props.active}
+                        payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                        maLineVisibility={maLineVisibility}
+                        customEmaLinePeriod={customEmaApplied}
+                      />
+                    )}
+                  />
+                  <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                  <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                </LineChart>
+              ) : (
+                <ComposedChart data={chartData} margin={CHART_MARGINS}>
+                  <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
+                  <YAxis
+                    stroke="#adb5bd"
+                    tick={{ fontSize: 10 }}
+                    domain={rechartsYDomain ?? ['auto', 'auto']}
+                    width={48}
+                  />
+                  <Tooltip
+                    content={(props) => (
+                      <ChartTooltipContent
+                        active={props.active}
+                        payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                        maLineVisibility={maLineVisibility}
+                        customEmaLinePeriod={customEmaApplied}
+                      />
+                    )}
+                  />
+                  <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
+                  <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                </ComposedChart>
+              )}
+            </ResponsiveContainer>
+            <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+          </div>
         )}
       </div>
     </>
@@ -1050,7 +1439,11 @@ function FavoritesChartsGrid({
   onGraphTypeChange,
   maLineVisibility,
   onMaLineVisibilityChange,
+  customEmaPeriod,
+  onCustomEmaPeriodChange,
   onToggleFavorite,
+  chartZoomByInstrumentToken,
+  onInstrumentChartZoomChange,
 }: {
   favorites: KiteInstrumentRow[]
   rangePreset: ChartRangePreset
@@ -1061,7 +1454,11 @@ function FavoritesChartsGrid({
   onGraphTypeChange: (v: ChartGraphType) => void
   maLineVisibility: MaLineVisibility
   onMaLineVisibilityChange: (patch: Partial<MaLineVisibility>) => void
+  customEmaPeriod: number
+  onCustomEmaPeriodChange: (n: number) => void
   onToggleFavorite: (r: KiteInstrumentRow) => void
+  chartZoomByInstrumentToken: Record<string, number>
+  onInstrumentChartZoomChange: (instrumentToken: string, bars: number | null) => void
 }) {
   if (favorites.length === 0) return null
 
@@ -1085,6 +1482,8 @@ function FavoritesChartsGrid({
         onGraphTypeChange={onGraphTypeChange}
         maLineVisibility={maLineVisibility}
         onMaLineVisibilityChange={onMaLineVisibilityChange}
+        customEmaPeriod={customEmaPeriod}
+        onCustomEmaPeriodChange={onCustomEmaPeriodChange}
       />
       <Row className="g-3">
         {favorites.map((row) => (
@@ -1113,6 +1512,9 @@ function FavoritesChartsGrid({
                   graphType={graphType}
                   heightPx={220}
                   maLineVisibility={maLineVisibility}
+                  customEmaPeriod={customEmaPeriod}
+                  zoomVisibleBars={chartZoomByInstrumentToken[row.instrumentToken] ?? null}
+                  onZoomVisibleBarsChange={(bars) => onInstrumentChartZoomChange(row.instrumentToken, bars)}
                 />
               </Card.Body>
             </Card>
@@ -1133,10 +1535,14 @@ function InstrumentChartCard({
   onGraphTypeChange,
   maLineVisibility,
   onMaLineVisibilityChange,
+  customEmaPeriod,
+  onCustomEmaPeriodChange,
   isFavorite,
   onToggleFavorite,
   liveLastPrice,
   liveLastTick,
+  zoomVisibleBars,
+  onZoomVisibleBarsChange,
 }: {
   selection: KiteInstrumentRow | null
   rangePreset: ChartRangePreset
@@ -1147,12 +1553,16 @@ function InstrumentChartCard({
   onGraphTypeChange: (v: ChartGraphType) => void
   maLineVisibility: MaLineVisibility
   onMaLineVisibilityChange: (patch: Partial<MaLineVisibility>) => void
+  customEmaPeriod: number
+  onCustomEmaPeriodChange: (n: number) => void
   isFavorite: boolean
   onToggleFavorite?: () => void
   liveLastPrice?: number | null
   liveLastTick?: MarketTickBatchItem | null
+  zoomVisibleBars: number | null
+  onZoomVisibleBarsChange: (bars: number | null) => void
 }) {
-  const [series, setSeries] = useState<ChartPoint[]>([])
+  const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
@@ -1169,6 +1579,7 @@ function InstrumentChartCard({
     const ac = new AbortController()
     setLoading(true)
     setError(null)
+    setSeries([])
 
     const fetchOnce = async (initial: boolean) => {
       const params = {
@@ -1181,7 +1592,7 @@ function InstrumentChartCard({
           params,
           signal: ac.signal,
         })
-        const pts = historicalCandlesToChartPoints(data)
+        const pts = chartPointsFromHistoricalResponse(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
         if (initial) setError(null)
@@ -1215,7 +1626,38 @@ function InstrumentChartCard({
     [series, liveLastTick, interval, graphType],
   )
 
-  const displayWithMa = useMemo(() => attachMovingAverages(displaySeries), [displaySeries])
+  const customEmaApplied = useMemo(
+    () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
+    [maLineVisibility, customEmaPeriod],
+  )
+
+  const displayWithMa = useMemo(
+    () => addCustomEmaToChartPoints(attachMovingAverages(displaySeries), customEmaApplied),
+    [displaySeries, customEmaApplied],
+  )
+
+  useEffect(() => {
+    if (zoomVisibleBars != null && displayWithMa.length > 0 && zoomVisibleBars > displayWithMa.length) {
+      onZoomVisibleBarsChange(null)
+    }
+  }, [displayWithMa.length, zoomVisibleBars, onZoomVisibleBarsChange])
+
+  const chartData = useMemo(() => sliceChartForZoom(displayWithMa, zoomVisibleBars), [displayWithMa, zoomVisibleBars])
+
+  const rechartsYDomain = useMemo(
+    () => yDomainForOhlcAndVisibleMas(chartData, maLineVisibility),
+    [chartData, maLineVisibility],
+  )
+
+  const onChartZoomIn = useCallback(() => {
+    onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, displayWithMa.length))
+  }, [onZoomVisibleBarsChange, zoomVisibleBars, displayWithMa.length])
+
+  const onChartZoomOut = useCallback(() => {
+    onZoomVisibleBarsChange(zoomOutBarCount(zoomVisibleBars, displayWithMa.length))
+  }, [onZoomVisibleBarsChange, zoomVisibleBars, displayWithMa.length])
+
+  const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
 
   return (
     <Card className="border-secondary mt-4">
@@ -1266,13 +1708,30 @@ function InstrumentChartCard({
               onGraphTypeChange={onGraphTypeChange}
               maLineVisibility={maLineVisibility}
               onMaLineVisibilityChange={onMaLineVisibilityChange}
+              customEmaPeriod={customEmaPeriod}
+              onCustomEmaPeriodChange={onCustomEmaPeriodChange}
             />
-            <MlNextBarBiasBar instrumentToken={selection.instrumentToken} interval={interval} />
+            <MlNextBarBiasBar
+              instrumentToken={selection.instrumentToken}
+              interval={interval}
+              candleSeries={displayWithMa}
+            />
+            {!loading && !error && displayWithMa.length > 0 ? (
+              <ChartZoomControls
+                idPrefix="browse-chart-zoom"
+                totalBars={displayWithMa.length}
+                visibleBarCount={zoomVisibleBars}
+                onZoomIn={onChartZoomIn}
+                onZoomOut={onChartZoomOut}
+                onReset={onChartZoomReset}
+              />
+            ) : null}
             <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
               Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
-              Charts include <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong> on line, bar, and
-              candle views. Live <strong>LTP</strong> and in-progress <strong>candle</strong> (Candles view) use SignalR + Kite
-              WebSocket when a row is selected (market hours / session). <strong>ML next-bar bias</strong> calls{' '}
+              Charts include <strong>SMA 20</strong>, <strong>EMA 9</strong>, <strong>EMA 21</strong>, and an optional
+              custom-period <strong>EMA</strong> on line, bar, and candle views. Live <strong>LTP</strong> and in-progress{' '}
+              <strong>candle</strong> (Candles view) use SignalR + Kite WebSocket when a row is selected (market hours /
+              session). <strong>ML next-bar bias</strong> calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> (ML.NET on the server — not
               financial advice).
             </p>
@@ -1290,43 +1749,62 @@ function InstrumentChartCard({
               ) : displayWithMa.length === 0 ? (
                 <p className="text-secondary small mb-0 py-5 text-center">No candles returned for this range.</p>
               ) : graphType === 'candlestick' ? (
-                <CandlestickChart data={displayWithMa} maLineVisibility={maLineVisibility} />
+                <CandlestickChart
+                  data={chartData}
+                  maLineVisibility={maLineVisibility}
+                  customEmaPeriod={customEmaApplied}
+                />
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  {graphType === 'line' ? (
-                    <LineChart data={displayWithMa} margin={CHART_MARGINS}>
-                      <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                      <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
-                      <Tooltip
-                        content={(props) => (
-                          <ChartTooltipContent
-                            active={props.active}
-                            payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                            maLineVisibility={maLineVisibility}
-                          />
-                        )}
-                      />
-                      <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
-                      <MovingAverageOverlays visibility={maLineVisibility} />
-                    </LineChart>
-                  ) : (
-                    <ComposedChart data={displayWithMa} margin={CHART_MARGINS}>
-                      <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                      <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} width={56} />
-                      <Tooltip
-                        content={(props) => (
-                          <ChartTooltipContent
-                            active={props.active}
-                            payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                            maLineVisibility={maLineVisibility}
-                          />
-                        )}
-                      />
-                      <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
-                      <MovingAverageOverlays visibility={maLineVisibility} />
-                    </ComposedChart>
-                  )}
-                </ResponsiveContainer>
+                <div className="position-relative w-100 h-100">
+                  <ResponsiveContainer width="100%" height="100%">
+                    {graphType === 'line' ? (
+                      <LineChart data={chartData} margin={CHART_MARGINS}>
+                        <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                        <YAxis
+                          stroke="#adb5bd"
+                          tick={{ fontSize: 11 }}
+                          domain={rechartsYDomain ?? ['auto', 'auto']}
+                          width={56}
+                        />
+                        <Tooltip
+                          content={(props) => (
+                            <ChartTooltipContent
+                              active={props.active}
+                              payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                              maLineVisibility={maLineVisibility}
+                              customEmaLinePeriod={customEmaApplied}
+                            />
+                          )}
+                        />
+                        <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                        <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                      </LineChart>
+                    ) : (
+                      <ComposedChart data={chartData} margin={CHART_MARGINS}>
+                        <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                        <YAxis
+                          stroke="#adb5bd"
+                          tick={{ fontSize: 11 }}
+                          domain={rechartsYDomain ?? ['auto', 'auto']}
+                          width={56}
+                        />
+                        <Tooltip
+                          content={(props) => (
+                            <ChartTooltipContent
+                              active={props.active}
+                              payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                              maLineVisibility={maLineVisibility}
+                              customEmaLinePeriod={customEmaApplied}
+                            />
+                          )}
+                        />
+                        <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
+                        <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                      </ComposedChart>
+                    )}
+                  </ResponsiveContainer>
+                  <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                </div>
               )}
             </div>
           </>
@@ -1417,13 +1895,48 @@ export function KiteInstrumentsPage() {
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
   const [chartRangePreset, setChartRangePreset] = useState<ChartRangePreset>('auto')
   const [chartGraphType, setChartGraphType] = useState<ChartGraphType>('line')
-  const [maLineVisibility, setMaLineVisibility] = useState<MaLineVisibility>(() => ({
-    ...DEFAULT_MA_LINE_VISIBILITY,
-  }))
+  const [customEmaPeriod, setCustomEmaPeriod] = useState(() => loadCustomEmaPrefs().period)
+  const [maLineVisibility, setMaLineVisibility] = useState<MaLineVisibility>(() => {
+    const p = loadCustomEmaPrefs()
+    return { ...DEFAULT_MA_LINE_VISIBILITY, showCustomEma: p.show }
+  })
   const patchMaLineVisibility = useCallback((patch: Partial<MaLineVisibility>) => {
     setMaLineVisibility((p) => ({ ...p, ...patch }))
   }, [])
+  useEffect(() => {
+    saveCustomEmaPrefs({ period: customEmaPeriod, show: maLineVisibility.showCustomEma })
+  }, [customEmaPeriod, maLineVisibility.showCustomEma])
+
   const [chartPrefsHydrated, setChartPrefsHydrated] = useState(false)
+  const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
+  const chartZoomSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
+  const persistInstrumentChartZoom = useCallback((instrumentToken: string, visibleBars: number | null) => {
+    setChartZoomByToken((prev) => {
+      const next = { ...prev }
+      if (visibleBars == null) delete next[instrumentToken]
+      else next[instrumentToken] = visibleBars
+      return next
+    })
+    const timers = chartZoomSaveTimersRef.current
+    const existing = timers[instrumentToken]
+    if (existing) window.clearTimeout(existing)
+    timers[instrumentToken] = window.setTimeout(() => {
+      void api
+        .put('/broker/kite/instruments/chart-zoom', { instrumentToken, visibleBars })
+        .catch(() => {
+          /* non-fatal */
+        })
+      delete timers[instrumentToken]
+    }, 400)
+  }, [])
+
+  useEffect(
+    () => () => {
+      Object.values(chartZoomSaveTimersRef.current).forEach((tid) => window.clearTimeout(tid))
+    },
+    [],
+  )
 
   const loadChartSettings = useCallback(async () => {
     try {
@@ -1431,6 +1944,11 @@ export function KiteInstrumentsPage() {
       setChartInterval(coerceChartInterval(data.interval))
       setChartRangePreset(coerceChartRangePreset(data.rangePreset))
       setChartGraphType(coerceChartGraphType(data.graphType))
+      setChartZoomByToken(
+        data.zoomByInstrumentToken && typeof data.zoomByInstrumentToken === 'object'
+          ? { ...data.zoomByInstrumentToken }
+          : {},
+      )
     } catch {
       // keep defaults
     } finally {
@@ -1638,6 +2156,10 @@ export function KiteInstrumentsPage() {
                   onGraphTypeChange={setChartGraphType}
                   maLineVisibility={maLineVisibility}
                   onMaLineVisibilityChange={patchMaLineVisibility}
+                  customEmaPeriod={customEmaPeriod}
+                  onCustomEmaPeriodChange={setCustomEmaPeriod}
+                  chartZoomByInstrumentToken={chartZoomByToken}
+                  onInstrumentChartZoomChange={persistInstrumentChartZoom}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
                 />
               </>
@@ -1654,12 +2176,20 @@ export function KiteInstrumentsPage() {
                 onGraphTypeChange={setChartGraphType}
                 maLineVisibility={maLineVisibility}
                 onMaLineVisibilityChange={patchMaLineVisibility}
+                customEmaPeriod={customEmaPeriod}
+                onCustomEmaPeriodChange={setCustomEmaPeriod}
                 isFavorite={chartRow ? favoriteKeySet.has(favoriteRowKey(chartRow)) : false}
                 onToggleFavorite={
                   chartRow ? () => void toggleFavorite(chartRow) : undefined
                 }
                 liveLastPrice={liveLtp}
                 liveLastTick={liveLastTick}
+                zoomVisibleBars={
+                  chartRow ? chartZoomByToken[chartRow.instrumentToken] ?? null : null
+                }
+                onZoomVisibleBarsChange={(bars) => {
+                  if (chartRow) persistInstrumentChartZoom(chartRow.instrumentToken, bars)
+                }}
               />
             ) : null}
           </Card.Body>

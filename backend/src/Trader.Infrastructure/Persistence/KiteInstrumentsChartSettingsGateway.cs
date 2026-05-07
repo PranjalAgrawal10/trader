@@ -18,7 +18,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
             .Select(u => new KiteInstrumentsChartSettingsState(
                 u.KiteInstrumentsChartInterval,
                 u.KiteInstrumentsChartRangePreset,
-                u.KiteInstrumentsChartGraphType))
+                u.KiteInstrumentsChartGraphType,
+                u.KiteInstrumentsChartZoomJson))
             .FirstOrDefaultAsync(ct);
 
     public async Task SaveAsync(Guid userId, KiteInstrumentsChartSettingsState settings, CancellationToken ct = default)
@@ -29,6 +30,14 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         user.KiteInstrumentsChartInterval = settings.Interval;
         user.KiteInstrumentsChartRangePreset = settings.RangePreset;
         user.KiteInstrumentsChartGraphType = settings.GraphType;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveChartZoomJsonAsync(Guid userId, string? chartZoomByInstrumentTokenJson, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+                   ?? throw new InvalidOperationException("User not found.");
+        user.KiteInstrumentsChartZoomJson = chartZoomByInstrumentTokenJson;
         await _db.SaveChangesAsync(ct);
     }
 }

@@ -20,7 +20,7 @@ const CANDLE = {
   text: '#adb5bd',
 }
 
-type MaKey = keyof Pick<ChartPointWithMa, 'sma20' | 'ema9' | 'ema21'>
+type MaKey = keyof Pick<ChartPointWithMa, 'sma20' | 'ema9' | 'ema21' | 'emaCustom'>
 
 function buildMaPath(key: MaKey, data: ChartPointWithMa[], slotW: number, yPrice: (p: number) => number): string {
   let d = ''
@@ -105,9 +105,12 @@ function useContainerPixelSize<T extends HTMLElement>() {
 export function CandlestickChart({
   data,
   maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
+  customEmaPeriod = null,
 }: {
   data: ChartPointWithMa[]
   maLineVisibility?: MaLineVisibility
+  /** Period label in the corner legend (values come from <code>data[].emaCustom</code>). */
+  customEmaPeriod?: number | null
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
@@ -146,6 +149,13 @@ export function CandlestickChart({
           max = Math.max(max, v)
         }
       }
+      if (maLineVisibility.showCustomEma) {
+        const v = c.emaCustom
+        if (v != null && Number.isFinite(v)) {
+          min = Math.min(min, v)
+          max = Math.max(max, v)
+        }
+      }
     }
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null
     if (min === max) {
@@ -162,6 +172,7 @@ export function CandlestickChart({
     const pathSma = buildMaPath('sma20', data, slotW, yPrice)
     const pathEma9 = buildMaPath('ema9', data, slotW, yPrice)
     const pathEma21 = buildMaPath('ema21', data, slotW, yPrice)
+    const pathEmaCustom = buildMaPath('emaCustom', data, slotW, yPrice)
 
     const shortDay = isIntradayRange(data)
     const targetXTicks = Math.min(6, Math.max(2, Math.floor(plotW / 72)))
@@ -186,10 +197,11 @@ export function CandlestickChart({
       pathSma,
       pathEma9,
       pathEma21,
+      pathEmaCustom,
       xTicks,
       plotBottomY,
     }
-  }, [data, w, h, maLineVisibility])
+  }, [data, w, h, maLineVisibility, customEmaPeriod])
 
   const yTicks = useMemo(() => {
     if (!layout) return []
@@ -289,6 +301,17 @@ export function CandlestickChart({
               d={layout.pathSma}
               fill="none"
               stroke={MA_LINE_COLORS.sma20}
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ pointerEvents: 'none' }}
+            />
+          ) : null}
+          {layout.pathEmaCustom && maLineVisibility.showCustomEma && customEmaPeriod != null && customEmaPeriod >= 2 ? (
+            <path
+              d={layout.pathEmaCustom}
+              fill="none"
+              stroke={MA_LINE_COLORS.emaCustom}
               strokeWidth={1.5}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -396,6 +419,14 @@ export function CandlestickChart({
                     EMA{MA_EMA_SLOW_PERIOD} {p.ema21.toFixed(4)}
                   </div>
                 ) : null}
+                {maLineVisibility.showCustomEma &&
+                customEmaPeriod != null &&
+                customEmaPeriod >= 2 &&
+                p.emaCustom != null ? (
+                  <div className="font-monospace" style={{ color: MA_LINE_COLORS.emaCustom }}>
+                    EMA{customEmaPeriod} {p.emaCustom.toFixed(4)}
+                  </div>
+                ) : null}
               </>
             )
           })()}
@@ -414,6 +445,12 @@ export function CandlestickChart({
               items.push({ key: 'e9', label: `EMA${MA_EMA_FAST_PERIOD}`, color: MA_LINE_COLORS.ema9 })
             if (maLineVisibility.showEma21)
               items.push({ key: 'e21', label: `EMA${MA_EMA_SLOW_PERIOD}`, color: MA_LINE_COLORS.ema21 })
+            if (maLineVisibility.showCustomEma && customEmaPeriod != null && customEmaPeriod >= 2)
+              items.push({
+                key: 'ecust',
+                label: `EMA${customEmaPeriod}`,
+                color: MA_LINE_COLORS.emaCustom,
+              })
             return items.map((item, i) => (
               <Fragment key={item.key}>
                 {i > 0 ? <span className="text-muted"> · </span> : null}

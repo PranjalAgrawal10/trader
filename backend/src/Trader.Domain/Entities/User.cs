@@ -32,6 +32,9 @@ public class User
     /// <summary>Saved chart style: <c>line</c> or <c>bar</c>.</summary>
     public string? KiteInstrumentsChartGraphType { get; set; }
 
+    /// <summary>JSON object: instrument token → visible bar count when chart zoom is applied (same keys as Kite token strings).</summary>
+    public string? KiteInstrumentsChartZoomJson { get; set; }
+
     /// <summary>Authenticator (TOTP) enabled for this account.</summary>
     public bool TwoFactorEnabled { get; set; }
 

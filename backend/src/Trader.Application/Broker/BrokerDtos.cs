@@ -50,10 +50,21 @@ public sealed record KiteHistoricalCandlePointDto(
     decimal High,
     decimal Low,
     decimal Close,
-    long Volume);
+    long Volume,
+    /// <summary>SMA(20) on close; null when insufficient left history (client chart uses extended Kite fetch to warm up).</summary>
+    decimal? Sma20 = null,
+    decimal? Ema9 = null,
+    decimal? Ema21 = null);
 
 /// <summary>Saved Kite instruments for the signed-in user (F&amp;O / MCX).</summary>
 public sealed record KiteFavoriteInstrumentsListDto(IReadOnlyList<KiteInstrumentListItemDto> Items);
 
-/// <summary>Persisted Kite instruments page chart controls (interval, range preset, line vs bar).</summary>
-public sealed record KiteInstrumentsChartSettingsDto(string? Interval, string? RangePreset, string? GraphType);
+/// <summary>Persisted Kite instruments page chart controls (interval, range preset, chart type, optional per-instrument zoom).</summary>
+public sealed record KiteInstrumentsChartSettingsDto(
+    string? Interval,
+    string? RangePreset,
+    string? GraphType,
+    Dictionary<string, int>? ZoomByInstrumentToken = null);
+
+/// <summary>Updates saved visible bar count for one instrument; <c>null</c> <see cref="VisibleBars"/> clears zoom for that token.</summary>
+public sealed record KiteInstrumentsChartZoomPutDto(string InstrumentToken, int? VisibleBars);

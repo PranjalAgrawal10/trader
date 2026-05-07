@@ -86,7 +86,7 @@ public sealed class BrokerController : ControllerBase
         return Ok(dto);
     }
 
-    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1d</c> (see SPA). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply.</summary>
+    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1d</c> (see SPA). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply. Responses include <c>sma20</c>, <c>ema9</c>, <c>ema21</c> (nullable); the server requests extra history before <c>from</c> so overlays are warmed for the visible window.</summary>
     [Authorize]
     [HttpGet("kite/historical-candles")]
     public async Task<ActionResult<KiteHistoricalCandlesDto>> KiteHistoricalCandles(
@@ -221,7 +221,7 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
-    /// <summary>Persisted Kite instruments page chart toolbar (interval, range, line/bar). Requires Bearer auth.</summary>
+    /// <summary>Persisted Kite instruments page chart toolbar (interval, range, line/bar) and optional per-instrument zoom map. Requires Bearer auth.</summary>
     [Authorize]
     [HttpGet("kite/instruments/chart-settings")]
     public async Task<ActionResult<KiteInstrumentsChartSettingsDto>> GetKiteInstrumentsChartSettings(CancellationToken ct)
@@ -254,6 +254,31 @@ public sealed class BrokerController : ControllerBase
         try
         {
             await _broker.SaveKiteInstrumentsChartSettingsAsync(User.GetUserId(), body, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPut("kite/instruments/chart-zoom")]
+    public async Task<IActionResult> PutKiteInstrumentsChartZoom(
+        [FromBody] KiteInstrumentsChartZoomPutDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with instrumentToken and optional visibleBars (null to clear zoom for that token).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.SaveKiteInstrumentsChartZoomAsync(User.GetUserId(), body, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)
