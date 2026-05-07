@@ -267,6 +267,8 @@ On older MySQL, run a plain **`ADD COLUMN`** once, or use **`SHOW COLUMNS FROM U
 
 **Troubleshooting — App Platform / Heroku build: `MSB4018` / `GenerateDepsFile` / `deps.json` in use:** The buildpack runs **`dotnet publish`** with a shared **`--artifacts-path`**, which can deadlock or race when MSBuild compiles shared projects on multiple nodes. This repo sets **`BuildInParallel=false`** in **`backend/Directory.Build.props`** so publish is single-threaded (slightly slower, stable on App Platform).
 
+**Troubleshooting — `DllNotFoundException: libSkiaSharp` (manual / EOD automation email pie charts):** The API needs the SkiaSharp **native** Linux library in the publish output. This repo references **`SkiaSharp.NativeAssets.Linux`** next to **`SkiaSharp`** (see **`Trader.Infrastructure.csproj`**). **Docker** publish uses **`-r linux-x64`** so the native `.so` lands next to the DLL; buildpacks usually still work with a portable publish because **`runtimes/linux-x64/native/libSkiaSharp.so`** is included once that package is referenced. Redeploy after pulling the dependency change.
+
 **Troubleshooting — 404 on the app URL:** The main **HTTPS URL** usually serves the **SPA** at **`/`**. Real API routes are under **`/api/v1/...`**. **`/swagger`** is disabled in Production unless you set **`Swagger__Enabled=true`** (see `appsettings.Production.json`). Hitting **`GET /`** on the API (when the platform routes it) returns a small JSON index; **`GET /api/health`** should return **`{"status":"ok"}`** when ingress sends **`/api`** to the API with **`preserve_path_prefix`**.
 
 ## Testing

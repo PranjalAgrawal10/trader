@@ -3,7 +3,7 @@ WORKDIR /src
 COPY Trader.sln ./
 COPY src/ ./src/
 COPY tests/ ./tests/
-RUN dotnet publish src/Trader.Api/Trader.Api.csproj -c Release -o /app/publish /p:RunEfMigrationsOnBuild=false
+RUN dotnet publish src/Trader.Api/Trader.Api.csproj -c Release -o /app/publish -r linux-x64 --self-contained false /p:RunEfMigrationsOnBuild=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
