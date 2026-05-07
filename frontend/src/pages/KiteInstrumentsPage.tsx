@@ -278,6 +278,7 @@ function InstrumentListPanel({
   loading,
   emptyHint,
   searchSegment,
+  kiteLiveSegmentScope = 'panel',
   selectedRowKey,
   onSelectRow,
   enableKiteLiveSearch = true,
@@ -290,6 +291,8 @@ function InstrumentListPanel({
   loading: boolean
   emptyHint: string
   searchSegment: 'fno' | 'mcx'
+  /** `panel`: one server scan for this panel's segment. `all`: F&O + MCX (e.g. favorites). */
+  kiteLiveSegmentScope?: 'panel' | 'all'
   selectedRowKey: string | null
   onSelectRow: (row: KiteInstrumentRow) => void
   enableKiteLiveSearch?: boolean
@@ -314,12 +317,6 @@ function InstrumentListPanel({
     if (!q) return rows
     return rows.filter((r) => rowSearchHaystack(r).includes(q))
   }, [rows, deferredSearch, serverMode, serverHits])
-
-  const localHasMatchForTypedQuery = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return false
-    return rows.some((r) => rowSearchHaystack(r).includes(q))
-  }, [search, rows])
 
   useEffect(() => {
     setVisibleCount(INSTRUMENT_PAGE_SIZE)
@@ -349,16 +346,30 @@ function InstrumentListPanel({
     if (!enableKiteLiveSearch) return
     const q = search.trim()
     if (!q || loading || liveSearchLoading) return
-    if (localHasMatchForTypedQuery) return
 
     setLiveSearchLoading(true)
     setLiveSearchError(null)
     try {
-      const { data } = await api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', {
-        params: { q, segment: searchSegment },
-      })
-      setServerHits(data.items)
-      setServerScanTruncated(data.scanTruncated)
+      const segments: Array<'fno' | 'mcx'> =
+        kiteLiveSegmentScope === 'all' ? ['fno', 'mcx'] : [searchSegment]
+      const responses = await Promise.all(
+        segments.map((segment) =>
+          api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', {
+            params: { q, segment },
+          }),
+        ),
+      )
+      const mergedByKey = new Map<string, KiteInstrumentRow>()
+      let scanTruncated = false
+      for (const { data } of responses) {
+        if (data.scanTruncated) scanTruncated = true
+        for (const item of data.items) {
+          const key = favoriteRowKey(item)
+          if (!mergedByKey.has(key)) mergedByKey.set(key, item)
+        }
+      }
+      setServerHits([...mergedByKey.values()])
+      setServerScanTruncated(scanTruncated)
       setServerMode(true)
     } catch (err) {
       setLiveSearchError(problemDetail(err))
@@ -368,7 +379,14 @@ function InstrumentListPanel({
     } finally {
       setLiveSearchLoading(false)
     }
-  }, [search, loading, liveSearchLoading, localHasMatchForTypedQuery, searchSegment, enableKiteLiveSearch])
+  }, [
+    search,
+    loading,
+    liveSearchLoading,
+    searchSegment,
+    kiteLiveSegmentScope,
+    enableKiteLiveSearch,
+  ])
 
   const onSearchChange = (value: string) => {
     setSearch(value)
@@ -417,9 +435,7 @@ function InstrumentListPanel({
               <Button
                 type="submit"
                 variant="outline-secondary"
-                disabled={
-                  combinedLoading || !search.trim() || localHasMatchForTypedQuery
-                }
+                disabled={combinedLoading || !search.trim()}
               >
                 {liveSearchLoading ? (
                   <>
@@ -458,7 +474,7 @@ function InstrumentListPanel({
                     : showing >= totalFiltered
                       ? serverMode
                         ? `Full Kite search: ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}.`
-                        : `Showing all ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${rows.length.toLocaleString()} in preview).`
+                        : `Showing all ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'} (${rows.length.toLocaleString()} in preview). Use Search Kite for the full file.`
                       : `Showing ${showing.toLocaleString()} of ${totalFiltered.toLocaleString()} match${totalFiltered === 1 ? '' : 'es'}. Scroll for 100 more.`}
       </p>
       {liveSearchError ? (
@@ -2192,9 +2208,10 @@ export function KiteInstrumentsPage() {
               <Col>
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
-                  Preview loads 100 rows per exchange. Filter as you type. If nothing matches the preview, press{' '}
-                  <strong>Enter</strong> or <strong>Search Kite</strong> to scan the full instrument file on the
-                  server. Favorites are saved to <strong>your account on the server</strong> (not just this browser).
+                  Preview loads 100 rows per exchange. Filter as you type. Press <strong>Enter</strong> or{' '}
+                  <strong>Search Kite</strong> to scan the full instrument files on the server (including when the preview
+                  already shows matches). On <strong>All favorites</strong>, Search Kite queries <strong>F&amp;O and MCX</strong>{' '}
+                  together. Favorites are saved to <strong>your account on the server</strong> (not just this browser).
                   Chart range, interval, and chart style (line / bar / candles) use the <strong>same server account</strong>;
                   all charts overlay <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong>. Use the{' '}
                   <strong>star column</strong> (☆ / ★); open <strong>All favorites</strong> for the list and a{' '}
@@ -2275,7 +2292,7 @@ export function KiteInstrumentsPage() {
                   loading={false}
                   emptyHint="No favorites yet. Open Browse and tap the star (☆) on any contract row."
                   searchSegment="fno"
-                  enableKiteLiveSearch={false}
+                  kiteLiveSegmentScope="all"
                   selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
