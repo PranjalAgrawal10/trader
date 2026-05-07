@@ -82,6 +82,11 @@ import {
   type ChartPointWithMa,
   type MaLineVisibility,
 } from '../utils/movingAverages'
+import {
+  attachLinearTrendToChartPoints,
+  LINEAR_CLOSE_TREND_COLOR,
+  yDomainForTrendRecharts,
+} from '../utils/closeLinearTrend'
 
 interface BrokerStatusResponse {
   connected: boolean
@@ -281,7 +286,7 @@ function historicalRangeQueryParams(preset: ChartRangePreset): { from?: string; 
   return { from: from.toISOString(), to: to.toISOString() }
 }
 
-type ChartGraphType = 'line' | 'bar' | 'candlestick'
+type ChartGraphType = 'line' | 'bar' | 'candlestick' | 'trend'
 
 function coerceChartInterval(v: string | null | undefined): ChartInterval {
   if (v && (CHART_INTERVALS as readonly string[]).includes(v)) return v as ChartInterval
@@ -306,7 +311,7 @@ function coerceChartRangePreset(v: string | null | undefined): ChartRangePreset 
 }
 
 function coerceChartGraphType(v: string | null | undefined): ChartGraphType {
-  if (v === 'bar' || v === 'line' || v === 'candlestick') return v
+  if (v === 'bar' || v === 'line' || v === 'candlestick' || v === 'trend') return v
   return 'line'
 }
 
@@ -931,11 +936,16 @@ function MovingAverageOverlays({
 function MaChartCornerLegend({
   visibility,
   customEmaLinePeriod,
+  linearTrendShown = false,
 }: {
   visibility: MaLineVisibility
   customEmaLinePeriod: number | null
+  linearTrendShown?: boolean
 }) {
   const items: { key: string; label: string; color: string }[] = []
+  if (linearTrendShown) {
+    items.push({ key: 'tlr', label: 'Trend LR', color: LINEAR_CLOSE_TREND_COLOR })
+  }
   if (visibility.showSma20) items.push({ key: 'sma', label: `SMA${MA_SMA_PERIOD}`, color: MA_LINE_COLORS.sma20 })
   if (visibility.showEma9) items.push({ key: 'e9', label: `EMA${MA_EMA_FAST_PERIOD}`, color: MA_LINE_COLORS.ema9 })
   if (visibility.showEma21) items.push({ key: 'e21', label: `EMA${MA_EMA_SLOW_PERIOD}`, color: MA_LINE_COLORS.ema21 })
@@ -1041,11 +1051,13 @@ function ChartTooltipContent({
   payload,
   maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
   customEmaLinePeriod = null,
+  showLinearTrend = false,
 }: {
   active?: boolean
-  payload?: readonly { payload?: ChartPointWithMa }[]
+  payload?: readonly { payload?: ChartPointWithMa & { trendLine?: number | null } }[]
   maLineVisibility?: MaLineVisibility
   customEmaLinePeriod?: number | null
+  showLinearTrend?: boolean
 }) {
   if (!active || !payload?.length) return null
   const p = payload[0].payload
@@ -1091,6 +1103,11 @@ function ChartTooltipContent({
       {maLineVisibility.showSupportResistance && p.srResistance != null ? (
         <div className="font-monospace" style={{ color: SR_LINE_COLORS.resistance }}>
           Res{SR_SWING_PERIOD} {p.srResistance.toFixed(4)}
+        </div>
+      ) : null}
+      {showLinearTrend && p.trendLine != null && Number.isFinite(p.trendLine) ? (
+        <div className="font-monospace mt-1" style={{ color: LINEAR_CLOSE_TREND_COLOR }}>
+          Trend LR {Number(p.trendLine).toFixed(4)}
         </div>
       ) : null}
     </div>
@@ -1204,6 +1221,18 @@ function ChartSettingsToolbar({
             onChange={() => onGraphTypeChange('candlestick')}
           >
             Candles
+          </ToggleButton>
+          <ToggleButton
+            id={`${idPrefix}-graph-trend`}
+            type="radio"
+            variant="outline-secondary"
+            name={`${idPrefix}-chart-graph`}
+            value="trend"
+            checked={graphType === 'trend'}
+            title="Close + linear regression trend (least squares)"
+            onChange={() => onGraphTypeChange('trend')}
+          >
+            Trend
           </ToggleButton>
         </ButtonGroup>
       </div>
@@ -1811,10 +1840,19 @@ function CompactPriceChart({
 
   const chartData = useMemo(() => sliceChartForZoom(seriesWithCustom, zoomVisibleBars), [seriesWithCustom, zoomVisibleBars])
 
-  const rechartsYDomain = useMemo(
-    () => yDomainForOhlcAndVisibleMas(chartData, maLineVisibility),
-    [chartData, maLineVisibility],
+  const chartDataWithTrend = useMemo(
+    () => (graphType === 'trend' ? attachLinearTrendToChartPoints(chartData) : null),
+    [graphType, chartData],
   )
+
+  const rechartsData = chartDataWithTrend ?? chartData
+
+  const rechartsYDomain = useMemo(() => {
+    if (graphType === 'trend' && chartDataWithTrend && chartDataWithTrend.length > 0) {
+      return yDomainForTrendRecharts(chartDataWithTrend, maLineVisibility)
+    }
+    return yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
+  }, [graphType, chartData, chartDataWithTrend, maLineVisibility])
 
   const onChartZoomIn = useCallback(() => {
     onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, series.length))
@@ -1929,8 +1967,8 @@ function CompactPriceChart({
             ) : (
               <div className="position-relative w-100 h-100">
                 <ResponsiveContainer width="100%" height="100%">
-                  {graphType === 'line' ? (
-                    <LineChart data={chartData} margin={CHART_MARGINS}>
+                  {graphType === 'line' || graphType === 'trend' ? (
+                    <LineChart data={rechartsData} margin={CHART_MARGINS}>
                       <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
                       <YAxis
                         stroke="#adb5bd"
@@ -1942,13 +1980,30 @@ function CompactPriceChart({
                         content={(props) => (
                           <ChartTooltipContent
                             active={props.active}
-                            payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
+                            payload={
+                              props.payload as readonly {
+                                payload?: ChartPointWithMa & { trendLine?: number | null }
+                              }[] | undefined
+                            }
                             maLineVisibility={maLineVisibility}
                             customEmaLinePeriod={customEmaApplied}
+                            showLinearTrend={graphType === 'trend'}
                           />
                         )}
                       />
                       <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                      {graphType === 'trend' ? (
+                        <Line
+                          type="monotone"
+                          dataKey="trendLine"
+                          stroke={LINEAR_CLOSE_TREND_COLOR}
+                          dot={false}
+                          strokeWidth={2}
+                          strokeDasharray="6 4"
+                          connectNulls
+                          name="Trend (linear regression)"
+                        />
+                      ) : null}
                       <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                     </LineChart>
                   ) : (
@@ -1975,7 +2030,11 @@ function CompactPriceChart({
                     </ComposedChart>
                   )}
                 </ResponsiveContainer>
-                <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                <MaChartCornerLegend
+                  visibility={maLineVisibility}
+                  customEmaLinePeriod={customEmaApplied}
+                  linearTrendShown={graphType === 'trend'}
+                />
               </div>
             )}
           </div>
@@ -2239,10 +2298,19 @@ function InstrumentChartCard({
 
   const chartData = useMemo(() => sliceChartForZoom(displayWithMa, zoomVisibleBars), [displayWithMa, zoomVisibleBars])
 
-  const rechartsYDomain = useMemo(
-    () => yDomainForOhlcAndVisibleMas(chartData, maLineVisibility),
-    [chartData, maLineVisibility],
+  const chartDataWithTrend = useMemo(
+    () => (graphType === 'trend' ? attachLinearTrendToChartPoints(chartData) : null),
+    [graphType, chartData],
   )
+
+  const rechartsData = chartDataWithTrend ?? chartData
+
+  const rechartsYDomain = useMemo(() => {
+    if (graphType === 'trend' && chartDataWithTrend && chartDataWithTrend.length > 0) {
+      return yDomainForTrendRecharts(chartDataWithTrend, maLineVisibility)
+    }
+    return yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
+  }, [graphType, chartData, chartDataWithTrend, maLineVisibility])
 
   const onChartZoomIn = useCallback(() => {
     onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, displayWithMa.length))
@@ -2314,9 +2382,10 @@ function InstrumentChartCard({
         <Card.Title className="h6 mb-2">Price chart</Card.Title>
         {!selection ? (
           <p className="text-secondary small mb-0">
-            Click a row in either list to plot prices from Kite (historical OHLCV). Choose <strong>Candles</strong> for
-            green/red candlesticks with <strong>SMA 20</strong>, <strong>EMA 9</strong>, and <strong>EMA 21</strong>; live
-            ticks update the current bar while subscribed.
+            Choose <strong>Candles</strong> for OHLC candles, <strong>Trend</strong> for close plus a dashed linear regression
+            line over the visible window, or line/bar views. Charts support <strong>SMA 20</strong>,{' '}
+            <strong>EMA 9</strong>, <strong>EMA 21</strong>; live ticks update the current bar in <strong>Candles</strong>{' '}
+            while subscribed.
           </p>
         ) : (
           <>
@@ -2391,54 +2460,77 @@ function InstrumentChartCard({
                     />
                   ) : (
                     <div className="position-relative w-100 h-100">
-                      <ResponsiveContainer width="100%" height="100%">
-                        {graphType === 'line' ? (
-                          <LineChart data={chartData} margin={CHART_MARGINS}>
-                            <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                            <YAxis
-                              stroke="#adb5bd"
-                              tick={{ fontSize: 11 }}
-                              domain={rechartsYDomain ?? ['auto', 'auto']}
-                              width={56}
-                            />
-                            <Tooltip
-                              content={(props) => (
-                                <ChartTooltipContent
-                                  active={props.active}
-                                  payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                                  maLineVisibility={maLineVisibility}
-                                  customEmaLinePeriod={customEmaApplied}
+                        <ResponsiveContainer width="100%" height="100%">
+                          {graphType === 'line' || graphType === 'trend' ? (
+                            <LineChart data={rechartsData} margin={CHART_MARGINS}>
+                              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                              <YAxis
+                                stroke="#adb5bd"
+                                tick={{ fontSize: 11 }}
+                                domain={rechartsYDomain ?? ['auto', 'auto']}
+                                width={56}
+                              />
+                              <Tooltip
+                                content={(props) => (
+                                  <ChartTooltipContent
+                                    active={props.active}
+                                    payload={
+                                      props.payload as readonly {
+                                        payload?: ChartPointWithMa & { trendLine?: number | null }
+                                      }[] | undefined
+                                    }
+                                    maLineVisibility={maLineVisibility}
+                                    customEmaLinePeriod={customEmaApplied}
+                                    showLinearTrend={graphType === 'trend'}
+                                  />
+                                )}
+                              />
+                              <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                              {graphType === 'trend' ? (
+                                <Line
+                                  type="monotone"
+                                  dataKey="trendLine"
+                                  stroke={LINEAR_CLOSE_TREND_COLOR}
+                                  dot={false}
+                                  strokeWidth={2}
+                                  strokeDasharray="6 4"
+                                  connectNulls
+                                  name="Trend (linear regression)"
                                 />
-                              )}
-                            />
-                            <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
-                            <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                          </LineChart>
-                        ) : (
-                          <ComposedChart data={chartData} margin={CHART_MARGINS}>
-                            <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                            <YAxis
-                              stroke="#adb5bd"
-                              tick={{ fontSize: 11 }}
-                              domain={rechartsYDomain ?? ['auto', 'auto']}
-                              width={56}
-                            />
-                            <Tooltip
-                              content={(props) => (
-                                <ChartTooltipContent
-                                  active={props.active}
-                                  payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                                  maLineVisibility={maLineVisibility}
-                                  customEmaLinePeriod={customEmaApplied}
-                                />
-                              )}
-                            />
-                            <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
-                            <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                          </ComposedChart>
-                        )}
-                      </ResponsiveContainer>
-                      <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                              ) : null}
+                              <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                            </LineChart>
+                          ) : (
+                            <ComposedChart data={chartData} margin={CHART_MARGINS}>
+                              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
+                              <YAxis
+                                stroke="#adb5bd"
+                                tick={{ fontSize: 11 }}
+                                domain={rechartsYDomain ?? ['auto', 'auto']}
+                                width={56}
+                              />
+                              <Tooltip
+                                content={(props) => (
+                                  <ChartTooltipContent
+                                    active={props.active}
+                                    payload={
+                                      props.payload as readonly { payload?: ChartPointWithMa }[] | undefined
+                                    }
+                                    maLineVisibility={maLineVisibility}
+                                    customEmaLinePeriod={customEmaApplied}
+                                  />
+                                )}
+                              />
+                              <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
+                              <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                            </ComposedChart>
+                          )}
+                        </ResponsiveContainer>
+                        <MaChartCornerLegend
+                          visibility={maLineVisibility}
+                          customEmaLinePeriod={customEmaApplied}
+                          linearTrendShown={graphType === 'trend'}
+                        />
                     </div>
                   )}
                 </div>
@@ -2446,8 +2538,9 @@ function InstrumentChartCard({
             ) : null}
             <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
               Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
-              Charts include <strong>SMA 20</strong>, <strong>EMA 9</strong>, <strong>EMA 21</strong>, and an optional
-              custom-period <strong>EMA</strong> on line, bar, and candle views. Live <strong>LTP</strong> and in-progress{' '}
+              Charts include <strong>SMA 20</strong>, <strong>EMA 9</strong>, <strong>EMA 21</strong>, optional S/R bands,
+              and an optional custom-period <strong>EMA</strong> on line, bar, candles, and <strong>Trend</strong>{' '}
+              (linear regression on close over the zoomed bars). Live <strong>LTP</strong> and in-progress{' '}
               <strong>candle</strong> (Candles view) use SignalR + Kite WebSocket when a row is selected (market hours /
               session). <strong>ML next-bar bias</strong> calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}

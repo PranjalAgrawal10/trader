@@ -585,8 +585,8 @@ public sealed class BrokerService : IBrokerService
         var t = graphType.Trim().ToLowerInvariant();
         return t switch
         {
-            "line" or "bar" or "candlestick" => t,
-            _ => throw new InvalidOperationException("graphType must be line, bar, or candlestick."),
+            "line" or "bar" or "candlestick" or "trend" => t,
+            _ => throw new InvalidOperationException("graphType must be line, bar, candlestick, or trend."),
         };
     }
 
