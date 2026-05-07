@@ -25,9 +25,13 @@ import {
 } from 'react-bootstrap'
 import {
   Bar,
+  Cell,
   ComposedChart,
+  Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -626,6 +630,10 @@ const CHART_FULLSCREEN_META_WRAP_STYLE: { maxHeight: string; overflowY: 'auto'; 
   WebkitOverflowScrolling: 'touch',
 }
 
+/** Caption strip + sticky thead + ~5 tbody rows; additional rows scroll inside the box. */
+const ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT = 'calc(1.85rem + 2.1rem + (5 * 2rem))'
+const ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT = 'calc(2rem + 2.35rem + (5 * 2.15rem))'
+
 /** Fewer bars visible (most recent on the right); reindexed for chart axes. */
 function ChartZoomControls({
   idPrefix,
@@ -1144,6 +1152,57 @@ function ChartSettingsToolbar({
   )
 }
 
+/** Correct / wrong / pending counts for ML prediction history (pie chart). */
+type MlOutcomeCounts = { correct: number; wrong: number; pending: number }
+
+function MlOutcomePieChart({ counts, height }: { counts: MlOutcomeCounts; height: number }) {
+  const { correct, wrong, pending } = counts
+  const pieData = useMemo(() => {
+    const rows: { name: string; value: number; fill: string }[] = []
+    if (correct > 0) rows.push({ name: 'Correct', value: correct, fill: '#198754' })
+    if (wrong > 0) rows.push({ name: 'Wrong', value: wrong, fill: '#dc3545' })
+    if (pending > 0) rows.push({ name: 'Pending', value: pending, fill: '#6c757d' })
+    return rows
+  }, [correct, wrong, pending])
+
+  const total = correct + wrong + pending
+  if (total === 0) {
+    return (
+      <div
+        className="d-flex align-items-center justify-content-center border border-secondary rounded bg-body-secondary text-secondary small"
+        style={{ height, maxWidth: 360 }}
+      >
+        No predictions to chart
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ width: '100%', maxWidth: 400, height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <PieChart>
+          <Pie
+            data={pieData}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            outerRadius={height > 240 ? 110 : 85}
+            paddingAngle={pieData.length > 1 ? 1.5 : 0}
+            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+          >
+            {pieData.map((d) => (
+              <Cell key={d.name} fill={d.fill} />
+            ))}
+          </Pie>
+          <Tooltip formatter={(value: number) => [`${value} row(s)`, 'Count']} />
+          <Legend />
+        </PieChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 /** ML next-bar direction; predictions stored on the server (history + resolve); localStorage fallback if history GET fails. */
 function MlNextBarBiasBar({
   instrumentToken,
@@ -1162,6 +1221,19 @@ function MlNextBarBiasBar({
   const [history, setHistory] = useState<MlPredictionLogEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const historySourceRef = useRef<'api' | 'local'>('api')
+  const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
+
+  const outcomeCounts = useMemo(() => {
+    let correct = 0
+    let wrong = 0
+    let pending = 0
+    for (const e of history) {
+      if (e.outcome === 'correct') correct++
+      else if (e.outcome === 'wrong') wrong++
+      else pending++
+    }
+    return { correct, wrong, pending }
+  }, [history])
 
   const reloadHistory = useCallback(async () => {
     setHistoryLoading(true)
@@ -1258,8 +1330,21 @@ function MlNextBarBiasBar({
   const historyNewestFirst = useMemo(() => [...history].reverse(), [history])
 
   return (
-    <>
-      <div className={`d-flex flex-wrap align-items-center gap-2 ${gapClass}`}>
+    <div
+      ref={panelRef}
+      className={fullscreenActive ? 'd-flex flex-column' : undefined}
+      style={
+        fullscreenActive
+          ? {
+              minHeight: '100vh',
+              height: '100%',
+              background: 'var(--bs-body-bg)',
+              padding: '0.5rem',
+            }
+          : undefined
+      }
+    >
+      <div className={`d-flex flex-wrap align-items-center gap-2 ${fullscreenActive ? 'mb-2 flex-shrink-0' : gapClass}`}>
         <Button
           type="button"
           variant="outline-info"
@@ -1296,6 +1381,19 @@ function MlNextBarBiasBar({
             '↻ Predictions'
           )}
         </Button>
+        {history.length > 0 ? (
+          <Button
+            type="button"
+            variant="outline-secondary"
+            size="sm"
+            className="py-0 px-2"
+            onClick={() => void toggleFullscreen()}
+            title={fullscreenActive ? 'Exit full screen' : 'Full screen predictions and chart'}
+            aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen predictions'}
+          >
+            {fullscreenActive ? (compact ? 'Exit' : 'Exit full screen') : compact ? 'Full' : 'Full predictions'}
+          </Button>
+        ) : null}
         {mlPred ? (
           <span
             className={`small font-monospace fw-semibold ${
@@ -1318,24 +1416,47 @@ function MlNextBarBiasBar({
       ) : null}
       {mlPred ? (
         <p
-          className={`small text-muted ${gapClass}`}
+          className={`small text-muted ${fullscreenActive ? 'mb-2' : gapClass}`}
           style={{ fontSize: compact ? '0.72rem' : '0.75rem' }}
         >
           {mlPred.detail}
         </p>
       ) : null}
+      {fullscreenActive && history.length > 0 ? (
+        <div className="d-flex flex-column flex-md-row flex-wrap gap-3 mb-3 flex-shrink-0 align-items-md-start">
+          <MlOutcomePieChart counts={outcomeCounts} height={compact ? 240 : 280} />
+          <div className="small text-secondary pt-1">
+            <div className="fw-semibold text-uppercase mb-1" style={{ fontSize: '0.65rem' }}>
+              Outcomes (all {history.length} rows)
+            </div>
+            <ul className="mb-0 ps-3">
+              <li className="text-success">Correct: {outcomeCounts.correct}</li>
+              <li className="text-danger">Wrong: {outcomeCounts.wrong}</li>
+              <li className="text-muted">Pending: {outcomeCounts.pending}</li>
+            </ul>
+          </div>
+        </div>
+      ) : null}
       {history.length > 0 ? (
         <div
-          className={`rounded border border-secondary ${gapClass}`}
+          className={`rounded border border-secondary ${fullscreenActive ? 'mb-0 flex-grow-1 d-flex flex-column' : gapClass}`}
           style={{
-            maxHeight: compact ? 'min(50vh, 24rem)' : 'min(62vh, 34rem)',
+            maxHeight: fullscreenActive
+              ? undefined
+              : compact
+                ? ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT
+                : ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT,
+            flex: fullscreenActive ? '1 1 auto' : undefined,
+            minHeight: fullscreenActive ? 0 : undefined,
             overflow: 'auto',
             WebkitOverflowScrolling: 'touch',
           }}
         >
-          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary">
+          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
             <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              ML predictions ({history.length}, newest first) · scroll · green / red = correct / wrong · stored on your account
+              {fullscreenActive
+                ? `ML predictions (${history.length}, newest first) · scroll · green / red = correct / wrong · stored on your account`
+                : `ML predictions (${history.length}, newest first) · ~5 rows visible, then scroll · green / red = correct / wrong · stored on your account`}
             </span>
           </div>
           <Table
@@ -1429,7 +1550,7 @@ function MlNextBarBiasBar({
           </Table>
         </div>
       ) : null}
-    </>
+    </div>
   )
 }
 
