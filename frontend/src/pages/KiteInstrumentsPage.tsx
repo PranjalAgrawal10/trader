@@ -1317,21 +1317,60 @@ type MlOutcomeCounts = { correct: number; wrong: number; pending: number }
 const ML_FULLSCREEN_PIE_HEIGHT = { compact: 400, default: 480 } as const
 const ML_FULLSCREEN_PIE_MIN_COL_PX = 460
 
-/** Group history rows by <code>modelId</code> and tally outcomes (for per-model pies). */
-function outcomeCountsByModelId(rows: readonly MlPredictionLogEntry[]): Map<string, MlOutcomeCounts> {
-  const map = new Map<string, MlOutcomeCounts>()
+/** Group history rows by <code>modelId</code> and tally outcomes. */
+function outcomeCountsForModelId(rows: readonly MlPredictionLogEntry[], modelId: string): MlOutcomeCounts {
+  let correct = 0
+  let wrong = 0
+  let pending = 0
+  const id = modelId.trim()
   for (const e of rows) {
-    const key = e.modelId?.trim() || '(unknown model)'
-    let c = map.get(key)
-    if (!c) {
-      c = { correct: 0, wrong: 0, pending: 0 }
-      map.set(key, c)
-    }
-    if (e.outcome === 'correct') c.correct++
-    else if (e.outcome === 'wrong') c.wrong++
-    else c.pending++
+    if ((e.modelId?.trim() || '') !== id) continue
+    if (e.outcome === 'correct') correct++
+    else if (e.outcome === 'wrong') wrong++
+    else pending++
   }
-  return map
+  return { correct, wrong, pending }
+}
+
+function mergedOutcomeCountsForModel(
+  classic: readonly MlPredictionLogEntry[],
+  lgbm: readonly MlPredictionLogEntry[],
+  modelId: string,
+): MlOutcomeCounts {
+  const a = outcomeCountsForModelId(classic, modelId)
+  const b = outcomeCountsForModelId(lgbm, modelId)
+  return {
+    correct: a.correct + b.correct,
+    wrong: a.wrong + b.wrong,
+    pending: a.pending + b.pending,
+  }
+}
+
+/** Server registry order first, then any extra model IDs seen in histories. */
+function orderedModelIdsForFullscreenPies(
+  priceModels: PriceDirectionModelsApiResponse | null,
+  classic: readonly MlPredictionLogEntry[],
+  lgbm: readonly MlPredictionLogEntry[],
+): string[] {
+  const fromApi = priceModels?.models?.map((m) => m.id.trim()).filter((id) => id.length > 0) ?? []
+  const seen = new Set(fromApi)
+  const extras: string[] = []
+  for (const e of classic) {
+    const id = e.modelId?.trim()
+    if (id && !seen.has(id)) {
+      seen.add(id)
+      extras.push(id)
+    }
+  }
+  for (const e of lgbm) {
+    const id = e.modelId?.trim()
+    if (id && !seen.has(id)) {
+      seen.add(id)
+      extras.push(id)
+    }
+  }
+  extras.sort((a, b) => a.localeCompare(b))
+  return [...fromApi, ...extras]
 }
 
 function MlOutcomePieChart({
@@ -1405,33 +1444,40 @@ function MlOutcomePieChart({
   )
 }
 
-/** Fullscreen: one outcome pie per distinct <code>modelId</code> in a responsive grid. */
-function MlModelPieChartGrid({
-  sectionTitle,
-  rows,
+/** Fullscreen: one pie per registered model (API order), merging classic + LightGBM history rows. */
+function MlFullscreenAllModelsPies({
+  priceModels,
+  history,
+  lightGbmHistory,
   compact,
 }: {
-  sectionTitle: string
-  rows: readonly MlPredictionLogEntry[]
+  priceModels: PriceDirectionModelsApiResponse | null
+  history: readonly MlPredictionLogEntry[]
+  lightGbmHistory: readonly MlPredictionLogEntry[]
   compact?: boolean
 }) {
-  const modelsSorted = useMemo(() => {
-    const grouped = outcomeCountsByModelId(rows)
-    const entries = [...grouped.entries()].map(([modelId, counts]) => ({
-      modelId,
-      counts,
-      n: counts.correct + counts.wrong + counts.pending,
-    }))
-    entries.sort((a, b) => b.n - a.n || a.modelId.localeCompare(b.modelId))
-    return entries
-  }, [rows])
+  const modelIds = useMemo(
+    () => orderedModelIdsForFullscreenPies(priceModels, history, lightGbmHistory),
+    [priceModels, history, lightGbmHistory],
+  )
+
+  const descById = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const x of priceModels?.models ?? []) {
+      const id = x.id?.trim()
+      if (id) m.set(id, x.description)
+    }
+    return m
+  }, [priceModels])
 
   const h = compact ? ML_FULLSCREEN_PIE_HEIGHT.compact : ML_FULLSCREEN_PIE_HEIGHT.default
+
+  if (modelIds.length === 0) return null
 
   return (
     <div className="flex-shrink-0 overflow-visible mb-4">
       <div className="small text-muted text-uppercase mb-2" style={{ fontSize: compact ? '0.62rem' : '0.68rem' }}>
-        {sectionTitle} — by model ({modelsSorted.length})
+        Prediction outcomes — all models ({modelIds.length})
       </div>
       <div
         className="d-grid gap-4"
@@ -1439,25 +1485,81 @@ function MlModelPieChartGrid({
           gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${ML_FULLSCREEN_PIE_MIN_COL_PX}px), 1fr))`,
         }}
       >
-        {modelsSorted.map(({ modelId, counts, n }) => (
-          <div key={modelId} className="flex-shrink-0 overflow-visible border border-secondary rounded p-3 bg-body-tertiary">
-            <div
-              className="small font-monospace text-secondary mb-2 fw-semibold"
-              style={{
-                wordBreak: 'break-all',
-                lineHeight: 1.3,
-              }}
-              title={`${modelId} — ${n} prediction row(s)`}
-            >
-              {modelId}
-              <span className="text-muted fw-normal ms-1">({n})</span>
+        {modelIds.map((modelId) => {
+          const counts = mergedOutcomeCountsForModel(history, lightGbmHistory, modelId)
+          const n = counts.correct + counts.wrong + counts.pending
+          const desc = descById.get(modelId)
+          return (
+            <div key={modelId} className="flex-shrink-0 overflow-visible border border-secondary rounded p-3 bg-body-tertiary">
+              <div
+                className="small font-monospace text-secondary mb-1 fw-semibold"
+                style={{
+                  wordBreak: 'break-all',
+                  lineHeight: 1.3,
+                }}
+                title={`${modelId} — ${n} prediction row(s)`}
+              >
+                {modelId}
+                <span className="text-muted fw-normal ms-1">({n})</span>
+              </div>
+              {desc ? (
+                <div
+                  className="text-muted mb-3"
+                  style={{ fontSize: compact ? '0.72rem' : '0.78rem', lineHeight: 1.35 }}
+                >
+                  {desc}
+                </div>
+              ) : null}
+              <MlOutcomePieChart counts={counts} height={h} />
             </div>
-            <MlOutcomePieChart counts={counts} height={h} />
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
+}
+
+function MlAutomationRecentRowMatchesFilter(r: MlAutomationRecentRow, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const sym = r.tradingsymbol ?? ''
+  const exch = r.exchange ?? ''
+  const chunks = [
+    r.id,
+    r.instrumentToken,
+    sym,
+    exch,
+    r.engineModelId,
+    r.interval,
+    r.direction,
+    String(r.confidence),
+    r.outcome,
+    formatLocalDateTime(r.predictedAt),
+    formatLocalDateTime(r.refBarTime),
+    r.nextBarTime ? formatLocalDateTime(r.nextBarTime) : '',
+  ]
+  return chunks.some((c) => String(c).toLowerCase().includes(q))
+}
+
+/** Case-insensitive match on model id, outcomes, timestamps, numeric fields, detail. */
+function predictionHistoryMatchesFilter(e: MlPredictionLogEntry, query: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const chunks = [
+    e.id,
+    e.modelId,
+    e.engineModelId ?? '',
+    e.direction,
+    e.outcome,
+    e.detail,
+    String(e.confidence),
+    formatLocalDateTime(e.predictedAt),
+    formatLocalDateTime(e.refBarTime),
+    e.nextBarTime ? formatLocalDateTime(e.nextBarTime) : '',
+    String(e.refClose),
+    e.nextClose != null ? String(e.nextClose) : '',
+  ]
+  return chunks.some((c) => String(c).toLowerCase().includes(q))
 }
 
 function MlPredictionHistoryTableBody({
@@ -1551,6 +1653,48 @@ function MlPredictionHistoryTableBody({
         ))}
       </tbody>
     </Table>
+  )
+}
+
+/** Search box + filtered prediction history table (classic or LightGBM panel). */
+function MlPredictionHistoryTableWithFilter({
+  rows,
+  compact,
+}: {
+  rows: MlPredictionLogEntry[]
+  compact?: boolean
+}) {
+  const [filterQuery, setFilterQuery] = useState('')
+  const filteredRows = useMemo(
+    () => rows.filter((e) => predictionHistoryMatchesFilter(e, filterQuery)),
+    [rows, filterQuery],
+  )
+  const q = filterQuery.trim()
+
+  return (
+    <>
+      <div className="px-2 py-2 bg-body-secondary border-bottom border-secondary flex-shrink-0">
+        <Form.Control
+          size="sm"
+          type="search"
+          className={compact ? 'py-0' : undefined}
+          placeholder="Filter (model id, outcome, dates, confidence, detail…)"
+          value={filterQuery}
+          onChange={(e) => setFilterQuery(e.target.value)}
+          aria-label="Filter prediction history rows"
+        />
+        {q ? (
+          <div className="small text-muted mt-1" style={{ fontSize: compact ? '0.62rem' : '0.7rem' }}>
+            Showing {filteredRows.length} of {rows.length}
+          </div>
+        ) : null}
+      </div>
+      {filteredRows.length === 0 && rows.length > 0 ? (
+        <div className="py-4 px-2 text-secondary small text-center fst-italic">No rows match this filter.</div>
+      ) : (
+        <MlPredictionHistoryTableBody rows={filteredRows} compact={compact} />
+      )}
+    </>
   )
 }
 
@@ -1836,7 +1980,9 @@ function MlNextBarBiasBar({
             '↻ Predictions'
           )}
         </Button>
-        {history.length > 0 || lightGbmHistory.length > 0 ? (
+        {history.length > 0 ||
+        lightGbmHistory.length > 0 ||
+        (priceModels != null && priceModels.models.length > 0) ? (
           <Button
             type="button"
             variant="outline-secondary"
@@ -1877,18 +2023,14 @@ function MlNextBarBiasBar({
           {mlPred.detail}
         </p>
       ) : null}
-      {fullscreenActive && (history.length > 0 || lightGbmHistory.length > 0) ? (
+      {fullscreenActive ? (
         <div className="flex-shrink-0 overflow-visible mb-2">
-          {history.length > 0 ? (
-            <MlModelPieChartGrid sectionTitle="Classic models" rows={history} compact={compact} />
-          ) : null}
-          {lightGbmHistory.length > 0 ? (
-            <MlModelPieChartGrid
-              sectionTitle="LightGBM triple-barrier"
-              rows={lightGbmHistory}
-              compact={compact}
-            />
-          ) : null}
+          <MlFullscreenAllModelsPies
+            priceModels={priceModels}
+            history={history}
+            lightGbmHistory={lightGbmHistory}
+            compact={compact}
+          />
         </div>
       ) : null}
       {history.length > 0 ? (
@@ -1911,7 +2053,7 @@ function MlNextBarBiasBar({
               ML history — classic ({history.length})
             </span>
           </div>
-          <MlPredictionHistoryTableBody rows={mlHistoryTableRows} compact={compact} />
+          <MlPredictionHistoryTableWithFilter rows={mlHistoryTableRows} compact={compact} />
         </div>
       ) : null}
       {lightGbmHistory.length > 0 ? (
@@ -1934,7 +2076,7 @@ function MlNextBarBiasBar({
               ML history — LightGBM triple-barrier ({lightGbmHistory.length})
             </span>
           </div>
-          <MlPredictionHistoryTableBody rows={mlLightGbmHistoryTableRows} compact={compact} />
+          <MlPredictionHistoryTableWithFilter rows={mlLightGbmHistoryTableRows} compact={compact} />
         </div>
       ) : null}
     </div>
@@ -2829,6 +2971,11 @@ export function KiteInstrumentsPage() {
     () => sortByPredictedAtNewestFirst(automationRecent),
     [automationRecent],
   )
+  const [automationTableFilter, setAutomationTableFilter] = useState('')
+  const automationRecentFiltered = useMemo(
+    () => automationRecentSorted.filter((r) => MlAutomationRecentRowMatchesFilter(r, automationTableFilter)),
+    [automationRecentSorted, automationTableFilter],
+  )
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
   const [chartIntervalByToken, setChartIntervalByToken] = useState<Record<string, ChartInterval>>({})
   const chartZoomSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -3146,6 +3293,20 @@ export function KiteInstrumentsPage() {
                 </Alert>
               ) : null}
               <div className="small text-secondary text-uppercase mb-1">Recent auto predictions</div>
+              <Form.Control
+                size="sm"
+                type="search"
+                className="mb-2"
+                placeholder="Filter rows (symbol, engine, interval, outcome, …)"
+                value={automationTableFilter}
+                onChange={(e) => setAutomationTableFilter(e.target.value)}
+                aria-label="Filter automation prediction rows"
+              />
+              {automationTableFilter.trim() && automationRecent.length > 0 ? (
+                <div className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
+                  Showing {automationRecentFiltered.length} of {automationRecent.length}
+                </div>
+              ) : null}
               <div className="table-responsive" style={{ maxHeight: '220px', overflowY: 'auto' }}>
                 <Table striped bordered size="sm" className="mb-0 align-middle">
                   <thead className="table-light">
@@ -3166,8 +3327,14 @@ export function KiteInstrumentsPage() {
                           No automation rows yet.
                         </td>
                       </tr>
+                    ) : automationRecentFiltered.length === 0 && automationRecent.length > 0 ? (
+                      <tr>
+                        <td colSpan={7} className="text-secondary small fst-italic">
+                          No rows match this filter.
+                        </td>
+                      </tr>
                     ) : (
-                      automationRecentSorted.map((r) => (
+                      automationRecentFiltered.map((r) => (
                         <tr key={r.id}>
                           <td className="small">{formatLocalDateTime(r.predictedAt)}</td>
                           <td>
