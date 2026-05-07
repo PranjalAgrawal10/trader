@@ -1,0 +1,12 @@
+---
+description: EF Core — never rewrite applied migrations; add new ones only
+alwaysApply: true
+---
+
+# EF Core migrations (immutable history)
+
+- **Do not edit** existing files under `**/Migrations/**` once they represent shipped or shared history (including `*.Designer.cs` and manual tweaks to `BuildTargetModel` **after** the migration id exists in team/ prod DBs). Treat applied migrations like version control for the schema: **append-only**.
+- **Schema changes**: update `TraderDbContext` / entity configuration, then add a **new** migration with `dotnet ef migrations add <Name> --project src/Trader.Infrastructure --startup-project src/Trader.Api` (from `backend/`). Let the tool update **`TraderDbContextModelSnapshot`** and designers.
+- **Do not**: rename migration ids, reorder timestamps, delete migrations already applied, or “fix” drift by rewriting old `Up`/`Down` bodies—those break `__EFMigrationsHistory` and environments that already ran them.
+- **Production drift** (column/table missing but history says applied): repair with **DDL on the database** (or a clearly documented one-off), or a **new** forward-only migration that uses conditional SQL if the team standard allows—**not** by changing prior migration files.
+- **Exceptions** are rare (e.g. greenfield branch never deployed): prefer `dotnet ef migrations remove` on the **latest** migration only if it was never applied anywhere, never hand-delete random historical files.

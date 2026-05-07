@@ -244,6 +244,15 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 
   Use the same **`Database__*`** (or alias) variables as production so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
 
+**Troubleshooting — `Unknown column '...KiteInstrumentsChartZoomJson'` (login/register/forgot-password 500):** The model includes **`AddKiteInstrumentsChartZoomJson`**, but the live **`Users`** table in the catalog the API uses (logs show **`TABLE_SCHEMA='defaultdb'`**) never got the column while **`__EFMigrationsHistory`** already lists that migration—so **`Migrate()`** reports *already up to date* and does nothing. Repair on that database (DigitalOcean MySQL console or any client), idempotent on MySQL 8+:
+
+```sql
+ALTER TABLE `Users`
+  ADD COLUMN IF NOT EXISTS `KiteInstrumentsChartZoomJson` longtext NULL;
+```
+
+On older MySQL, run a plain **`ADD COLUMN`** once, or use **`SHOW COLUMNS FROM Users LIKE 'KiteInstrumentsChartZoomJson';`** to confirm before adding. Ensure you are connected to the **same** schema as **`Database__Name`** (managed clusters often use **`defaultdb`**).
+
 ### 7. Smoke test
 
 - **`GET /api/health`** (or **`GET /health`** if you call the API service directly). On a **single hostname** with ingress, **`/health`** alone often hits the **static site**, so prefer **`/api/health`** for checks through the edge.

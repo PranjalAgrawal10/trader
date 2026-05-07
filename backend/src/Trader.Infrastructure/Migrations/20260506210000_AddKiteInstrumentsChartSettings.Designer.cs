@@ -55,6 +55,48 @@ namespace Trader.Infrastructure.Migrations
                     b.ToTable("Bots");
                 });
 
+            modelBuilder.Entity("Trader.Domain.Entities.BrokerAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<string>("AccessTokenProtected")
+                        .HasColumnType("longtext");
+
+                    b.Property<string>("ApiKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("BrokerName")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<DateTimeOffset?>("ConnectedAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("ExternalUserId")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<string>("RefreshTokenProtected")
+                        .HasColumnType("longtext");
+
+                    b.Property<DateTimeOffset?>("TokenExpiresAt")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("char(36)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "BrokerName")
+                        .IsUnique();
+
+                    b.ToTable("BrokerAccounts");
+                });
+
             modelBuilder.Entity("Trader.Domain.Entities.EmailOtpChallenge", b =>
                 {
                     b.Property<Guid>("Id")
@@ -88,6 +130,54 @@ namespace Trader.Infrastructure.Migrations
                     b.HasIndex("NormalizedEmail", "IsConsumed");
 
                     b.ToTable("EmailOtpChallenges");
+                });
+
+            modelBuilder.Entity("Trader.Domain.Entities.HistoricalCandle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("char(36)");
+
+                    b.Property<decimal>("Close")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<decimal>("High")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<string>("InstrumentToken")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
+                    b.Property<decimal>("Low")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<decimal>("Open")
+                        .HasPrecision(28, 8)
+                        .HasColumnType("decimal(28,8)");
+
+                    b.Property<string>("Timeframe")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("varchar(16)");
+
+                    b.Property<DateTimeOffset>("TimestampUtc")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<long>("Volume")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InstrumentToken", "TimestampUtc");
+
+                    b.HasIndex("InstrumentToken", "Timeframe", "TimestampUtc")
+                        .IsUnique();
+
+                    b.ToTable("HistoricalCandles");
                 });
 
             modelBuilder.Entity("Trader.Domain.Entities.KiteFavoriteInstrument", b =>
@@ -248,13 +338,6 @@ namespace Trader.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("char(36)");
 
-                    b.Property<DateTimeOffset?>("BrokerConnectedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<string>("BrokerProvider")
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetime(6)");
 
@@ -272,16 +355,6 @@ namespace Trader.Infrastructure.Migrations
 
                     b.Property<DateTimeOffset?>("EmailVerifiedAtUtc")
                         .HasColumnType("datetime(6)");
-
-                    b.Property<string>("KiteAccessTokenProtected")
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("KiteRefreshTokenProtected")
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("KiteUserId")
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
 
                     b.Property<string>("KiteInstrumentsChartGraphType")
                         .HasMaxLength(16)
@@ -359,6 +432,28 @@ namespace Trader.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Trader.Domain.Entities.BrokerAccount", b =>
+                {
+                    b.HasOne("Trader.Domain.Entities.User", "User")
+                        .WithMany("BrokerAccounts")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Trader.Domain.Entities.KiteFavoriteInstrument", b =>
+                {
+                    b.HasOne("Trader.Domain.Entities.User", "User")
+                        .WithMany("KiteFavoriteInstruments")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Trader.Domain.Entities.Strategy", b =>
                 {
                     b.HasOne("Trader.Domain.Entities.User", "User")
@@ -392,17 +487,6 @@ namespace Trader.Infrastructure.Migrations
                     b.Navigation("Bot");
                 });
 
-            modelBuilder.Entity("Trader.Domain.Entities.KiteFavoriteInstrument", b =>
-                {
-                    b.HasOne("Trader.Domain.Entities.User", "User")
-                        .WithMany("KiteFavoriteInstruments")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("Trader.Domain.Entities.Bot", b =>
                 {
                     b.Navigation("Orders");
@@ -418,6 +502,8 @@ namespace Trader.Infrastructure.Migrations
             modelBuilder.Entity("Trader.Domain.Entities.User", b =>
                 {
                     b.Navigation("Bots");
+
+                    b.Navigation("BrokerAccounts");
 
                     b.Navigation("KiteFavoriteInstruments");
 

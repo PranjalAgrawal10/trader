@@ -12,8 +12,8 @@ using Trader.Infrastructure.Persistence;
 namespace Trader.Infrastructure.Migrations
 {
     [DbContext(typeof(TraderDbContext))]
-    [Migration("20260506200947_AddBrokerAccountsAndHistoricalCandles")]
-    partial class AddBrokerAccountsAndHistoricalCandles
+    [Migration("20260507140000_AddKiteInstrumentsChartZoomJson")]
+    partial class AddKiteInstrumentsChartZoomJson
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -355,6 +355,21 @@ namespace Trader.Infrastructure.Migrations
 
                     b.Property<DateTimeOffset?>("EmailVerifiedAtUtc")
                         .HasColumnType("datetime(6)");
+
+                    b.Property<string>("KiteInstrumentsChartGraphType")
+                        .HasMaxLength(16)
+                        .HasColumnType("varchar(16)");
+
+                    b.Property<string>("KiteInstrumentsChartInterval")
+                        .HasMaxLength(16)
+                        .HasColumnType("varchar(16)");
+
+                    b.Property<string>("KiteInstrumentsChartRangePreset")
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)");
+
+                    b.Property<string>("KiteInstrumentsChartZoomJson")
+                        .HasColumnType("longtext");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
