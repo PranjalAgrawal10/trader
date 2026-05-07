@@ -30,10 +30,11 @@ public sealed class FavoriteMlAutomationOptions
     /// <summary>IANA or Windows TZ id (e.g. <c>Asia/Kolkata</c>, <c>India Standard Time</c>).</summary>
     public string ReportTimeZoneId { get; set; } = "Asia/Kolkata";
 
-    /// <summary>Local time of day to send the daily CSV + pie chart (same timezone as <see cref="ReportTimeZoneId"/>).</summary>
-    public int ReportLocalHour { get; set; } = 20;
+    /// <summary>Local hour (0–23) to start the daily CSV + pie send window (same timezone as <see cref="ReportTimeZoneId"/>; default 23 = 11 PM).</summary>
+    public int ReportLocalHour { get; set; } = 23;
 
-    public int ReportLocalMinute { get; set; }
+    /// <summary>Local minute (0–59); default 30 → 11:30 PM when <see cref="ReportTimeZoneId"/> is IST.</summary>
+    public int ReportLocalMinute { get; set; } = 30;
 
     /// <summary>Fallback chart interval when user has never saved instruments chart settings.</summary>
     public string DefaultChartInterval { get; set; } = "5m";
