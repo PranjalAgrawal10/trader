@@ -28,6 +28,12 @@
     <ProjectReference Include="..\Trader.Infrastructure\Trader.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="ml-calibration\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <Target Name="ApplyEfMigrationsAfterBuild" AfterTargets="Build" Condition="'$(RunEfMigrationsOnBuild)' == 'true' AND '$(DesignTimeBuild)' != 'true'">
     <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\.."
           Command='dotnet ef database update --project "src/Trader.Infrastructure/Trader.Infrastructure.csproj" --startup-project "src/Trader.Api/Trader.Api.csproj" --configuration "$(Configuration)" --no-build' />

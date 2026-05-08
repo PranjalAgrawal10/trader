@@ -112,6 +112,12 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.Source).HasMaxLength(32);
             e.Property(x => x.NextBarTimeUtc).HasColumnType("datetime(6)");
             e.Property(x => x.NextClose).HasPrecision(28, 8);
+            e.Property(x => x.LabelThresholdFractionApplied).HasPrecision(28, 10);
+            e.Property(x => x.CensorReason).HasMaxLength(32);
+            e.Property(x => x.NextBarTimeUtcN3).HasColumnType("datetime(6)");
+            e.Property(x => x.NextCloseN3).HasPrecision(28, 8);
+            e.Property(x => x.NextBarTimeUtcN5).HasColumnType("datetime(6)");
+            e.Property(x => x.NextCloseN5).HasPrecision(28, 8);
             e.HasIndex(x => new { x.UserId, x.InstrumentToken, x.Interval, x.PredictedAtUtc });
             e.HasOne(x => x.User).WithMany(u => u.MlPriceDirectionPredictions).HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
@@ -132,6 +138,12 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.Source).HasMaxLength(32);
             e.Property(x => x.NextBarTimeUtc).HasColumnType("datetime(6)");
             e.Property(x => x.NextClose).HasPrecision(28, 8);
+            e.Property(x => x.LabelThresholdFractionApplied).HasPrecision(28, 10);
+            e.Property(x => x.CensorReason).HasMaxLength(32);
+            e.Property(x => x.NextBarTimeUtcN3).HasColumnType("datetime(6)");
+            e.Property(x => x.NextCloseN3).HasPrecision(28, 8);
+            e.Property(x => x.NextBarTimeUtcN5).HasColumnType("datetime(6)");
+            e.Property(x => x.NextCloseN5).HasPrecision(28, 8);
             e.HasIndex(x => new { x.UserId, x.InstrumentToken, x.Interval, x.PredictedAtUtc });
             e.HasOne(x => x.User).WithMany(u => u.MlLightGbmTripleBarrierPredictions).HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);

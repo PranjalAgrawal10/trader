@@ -116,6 +116,7 @@ public static class DependencyInjection
 
         services.AddHostedService<FavoriteMlAutomationBackgroundService>();
 
+        services.AddSingleton<IPriceDirectionScoreCalibrator, JsonPiecewiseProbabilityCalibrator>();
         services.AddSingleton<MlNetPriceDirectionPredictionEngine>();
         services.AddSingleton<MlNetLightGbmTripleBarrierPredictionEngine>();
         services.AddSingleton<MomentumPriceDirectionPredictionEngine>();

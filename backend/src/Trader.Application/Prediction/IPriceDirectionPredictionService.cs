@@ -1,3 +1,5 @@
+using Trader.Application.Broker;
+
 namespace Trader.Application.Prediction;
 
 public interface IPriceDirectionPredictionService
@@ -54,5 +56,15 @@ public interface IPriceDirectionPredictionService
         Guid predictionId,
         DateTimeOffset nextBarTime,
         decimal nextClose,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Resolves a pending prediction using an already-loaded ascending candle stream (same path as automation — fills N-bar labels when available).
+    /// </summary>
+    Task ResolvePredictionFromCandlesAsync(
+        Guid userId,
+        Guid predictionId,
+        IReadOnlyList<KiteHistoricalCandlePointDto> candlesAsc,
+        string interval,
         CancellationToken ct = default);
 }

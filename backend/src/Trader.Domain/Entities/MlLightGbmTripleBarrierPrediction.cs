@@ -37,4 +37,21 @@ public class MlLightGbmTripleBarrierPrediction
 
     public DateTimeOffset? NextBarTimeUtc { get; set; }
     public decimal? NextClose { get; set; }
+
+    /// <summary>Threshold applied when this row was created (for reproducible labeling).</summary>
+    public decimal? LabelThresholdFractionApplied { get; set; }
+
+    /// <summary>Optional training filter flag (e.g. gap too large).</summary>
+    public string? CensorReason { get; set; }
+
+    /// <summary>Signed thresholded label vs next close (+1 up, −1 down, 0 neutral).</summary>
+    public sbyte? LabelNextBar { get; set; }
+
+    public sbyte? LabelN3 { get; set; }
+    public sbyte? LabelN5 { get; set; }
+
+    public DateTimeOffset? NextBarTimeUtcN3 { get; set; }
+    public decimal? NextCloseN3 { get; set; }
+    public DateTimeOffset? NextBarTimeUtcN5 { get; set; }
+    public decimal? NextCloseN5 { get; set; }
 }

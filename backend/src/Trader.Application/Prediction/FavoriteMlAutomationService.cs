@@ -372,7 +372,6 @@ public sealed class FavoriteMlAutomationService
                     userId,
                     row.InstrumentToken,
                     row.Interval,
-                    row.RefBarTimeUtc,
                     row.Id,
                     ct)
                     .ConfigureAwait(false);
@@ -399,7 +398,6 @@ public sealed class FavoriteMlAutomationService
                     userId,
                     row.InstrumentToken,
                     row.Interval,
-                    row.RefBarTimeUtc,
                     row.Id,
                     ct)
                     .ConfigureAwait(false);
@@ -470,19 +468,16 @@ public sealed class FavoriteMlAutomationService
         Guid userId,
         string instrumentToken,
         string interval,
-        DateTimeOffset refBarTimeUtc,
         Guid predictionId,
         CancellationToken ct)
     {
         var hist = await _broker
             .GetKiteHistoricalCandlesAsync(userId, instrumentToken, interval, null, null, ct)
             .ConfigureAwait(false);
-        var idx = FindRefBarIndex(hist.Candles, refBarTimeUtc);
-        if (idx < 0 || idx + 1 >= hist.Candles.Count)
+        if (hist.Candles.Count == 0)
             return;
-        var next = hist.Candles[idx + 1];
         await _predictionService
-            .ResolvePredictionAsync(userId, predictionId, next.Time, next.Close, ct)
+            .ResolvePredictionFromCandlesAsync(userId, predictionId, hist.Candles, hist.Interval, ct)
             .ConfigureAwait(false);
     }
 
@@ -765,19 +760,6 @@ public sealed class FavoriteMlAutomationService
         if (s.Contains(',', StringComparison.Ordinal) || s.Contains('\r') || s.Contains('\n'))
             return $"\"{s}\"";
         return string.IsNullOrEmpty(s) ? "\"\"" : s;
-    }
-
-    private static int FindRefBarIndex(
-        IReadOnlyList<KiteHistoricalCandlePointDto> candles,
-        DateTimeOffset refBar)
-    {
-        for (var i = 0; i < candles.Count; i++)
-        {
-            if (Math.Abs((candles[i].Time - refBar).TotalSeconds) < 1.5)
-                return i;
-        }
-
-        return -1;
     }
 
     private static TimeZoneInfo ResolveReportTimeZone(string? id)

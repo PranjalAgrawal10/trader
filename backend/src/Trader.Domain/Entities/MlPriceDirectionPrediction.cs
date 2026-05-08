@@ -33,4 +33,21 @@ public class MlPriceDirectionPrediction
 
     public DateTimeOffset? NextBarTimeUtc { get; set; }
     public decimal? NextClose { get; set; }
+
+    /// <summary>Threshold applied when this row was created (for reproducible labeling).</summary>
+    public decimal? LabelThresholdFractionApplied { get; set; }
+
+    /// <summary>e.g. <c>session_end</c>, <c>gap_too_large</c>; training pipelines should exclude when set.</summary>
+    public string? CensorReason { get; set; }
+
+    /// <summary>Signed thresholded label vs next close: +1 up, −1 down, 0 neutral.</summary>
+    public sbyte? LabelNextBar { get; set; }
+
+    public sbyte? LabelN3 { get; set; }
+    public sbyte? LabelN5 { get; set; }
+
+    public DateTimeOffset? NextBarTimeUtcN3 { get; set; }
+    public decimal? NextCloseN3 { get; set; }
+    public DateTimeOffset? NextBarTimeUtcN5 { get; set; }
+    public decimal? NextCloseN5 { get; set; }
 }

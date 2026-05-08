@@ -1,7 +1,9 @@
 using Microsoft.ML;
 using Microsoft.ML.Data;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Trader.Application.Broker;
+using Trader.Application.Configuration;
 using Trader.Application.Prediction;
 
 namespace Trader.Infrastructure.Prediction;
@@ -20,11 +22,18 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
 
     private const int FirstFeatureIndex = 14;
     private readonly ILogger<MlNetPriceDirectionPredictionEngine> _logger;
+    private readonly IOptionsMonitor<PriceDirectionPredictionOptions> _opts;
+    private readonly IPriceDirectionScoreCalibrator _calibrator;
     private readonly MLContext _ml;
 
-    public MlNetPriceDirectionPredictionEngine(ILogger<MlNetPriceDirectionPredictionEngine> logger)
+    public MlNetPriceDirectionPredictionEngine(
+        ILogger<MlNetPriceDirectionPredictionEngine> logger,
+        IOptionsMonitor<PriceDirectionPredictionOptions> opts,
+        IPriceDirectionScoreCalibrator calibrator)
     {
         _logger = logger;
+        _opts = opts;
+        _calibrator = calibrator;
         _ml = new MLContext(seed: 42);
     }
 
@@ -43,7 +52,7 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
 
         try
         {
-            var rows = BuildTrainingRows(closes);
+            var rows = BuildTrainingRows(closes, Math.Max(0m, _opts.CurrentValue.LabelThresholdFraction));
             if (rows.Count < 24)
                 return Heuristic(closes);
 
@@ -69,8 +78,10 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
                 return Heuristic(closes);
 
             var pred = engine.Predict(feat);
-            var pUp = pred.Probability;
+            var pUp = _calibrator.CalibratePUp(pred.Probability);
             var confidence = (int)Math.Clamp(Math.Round(Math.Max(pUp, 1f - pUp) * 100), 0, 100);
+
+            var isUp = pUp >= 0.5f;
 
             if (confidence < 53)
             {
@@ -81,7 +92,7 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
                     "Model output near 50% — no strong directional bias.");
             }
 
-            return pred.Prediction
+            return isUp
                 ? new PriceDirectionResult(
                     PriceDirectionLabel.Up,
                     confidence,
@@ -129,14 +140,22 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
             "Fallback: flat last bar.");
     }
 
-    private static List<DirectionExample> BuildTrainingRows(IReadOnlyList<decimal> closes)
+    private List<DirectionExample> BuildTrainingRows(IReadOnlyList<decimal> closes, decimal labelThresholdFraction)
     {
         var list = new List<DirectionExample>();
+        var thresh = Math.Max(0m, labelThresholdFraction);
         for (var i = FirstFeatureIndex; i < closes.Count - 1; i++)
         {
             var f = ExtractFeatures(closes, i);
             if (f is null)
                 continue;
+
+            var c0 = closes[i];
+            var c1 = closes[i + 1];
+            var lbl = PriceDirectionLabeling.ClassifySignedLabel(c0, c1, thresh);
+            if (lbl is not (1 or -1))
+                continue;
+
             list.Add(new DirectionExample
             {
                 F1 = f.F1,
@@ -145,7 +164,7 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
                 F4 = f.F4,
                 F5 = f.F5,
                 F6 = f.F6,
-                Label = closes[i + 1] > closes[i],
+                Label = lbl == 1,
             });
         }
 

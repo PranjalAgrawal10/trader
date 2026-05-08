@@ -83,6 +83,15 @@ export type MlPriceDirectionHistoryApiRow = {
   outcome: MlPredictionOutcome
   nextBarTime: string | null
   nextClose: number | null
+  labelThresholdFractionApplied?: number | null
+  censorReason?: string | null
+  labelNextBar?: number | null
+  labelN3?: number | null
+  labelN5?: number | null
+  nextBarTimeN3?: string | null
+  nextCloseN3?: number | null
+  nextBarTimeN5?: string | null
+  nextCloseN5?: number | null
 }
 
 function toIsoBarTime(s: string): string {

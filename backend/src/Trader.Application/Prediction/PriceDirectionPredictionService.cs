@@ -1,5 +1,7 @@
+using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Broker;
+using Trader.Application.Configuration;
 using Trader.Domain.Entities;
 
 namespace Trader.Application.Prediction;
@@ -22,17 +24,20 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     private readonly IPriceDirectionPredictionEngineRegistry _engines;
     private readonly IMlPriceDirectionPredictionRepository _predictions;
     private readonly IMlLightGbmTripleBarrierPredictionRepository _lightGbmPredictions;
+    private readonly IOptionsSnapshot<PriceDirectionPredictionOptions> _opts;
 
     public PriceDirectionPredictionService(
         IBrokerService broker,
         IPriceDirectionPredictionEngineRegistry engines,
         IMlPriceDirectionPredictionRepository predictions,
-        IMlLightGbmTripleBarrierPredictionRepository lightGbmPredictions)
+        IMlLightGbmTripleBarrierPredictionRepository lightGbmPredictions,
+        IOptionsSnapshot<PriceDirectionPredictionOptions> opts)
     {
         _broker = broker;
         _engines = engines;
         _predictions = predictions;
         _lightGbmPredictions = lightGbmPredictions;
+        _opts = opts;
     }
 
     public async Task<PriceDirectionPredictionEnvelope> PredictForInstrumentAsync(
@@ -79,6 +84,8 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             PriceDirectionModelIds.MlNetLightGbmTripleBarrierV1,
             StringComparison.OrdinalIgnoreCase);
 
+        var appliedThreshold = Math.Max(0m, _opts.Value.LabelThresholdFraction);
+
         if (persistLightGbm)
         {
             var gbm = new MlLightGbmTripleBarrierPrediction
@@ -97,6 +104,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
                 Detail = result.Detail,
                 Outcome = "pending",
                 Source = src,
+                LabelThresholdFractionApplied = appliedThreshold,
             };
             await _lightGbmPredictions.AddAsync(gbm, ct).ConfigureAwait(false);
             await _lightGbmPredictions.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -120,6 +128,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
                 Detail = result.Detail,
                 Outcome = "pending",
                 Source = src,
+                LabelThresholdFractionApplied = appliedThreshold,
             };
 
             await _predictions.AddAsync(entity, ct).ConfigureAwait(false);
@@ -220,14 +229,37 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var legacy = await _predictions.FindTrackedAsync(userId, predictionId, ct).ConfigureAwait(false);
         if (legacy is not null)
         {
+            await ResolveClassicWithBrokerVerifyAsync(userId, legacy, nextBarTime, nextClose, ct).ConfigureAwait(false);
+            return;
+        }
+
+        var gbmRow = await _lightGbmPredictions.FindTrackedAsync(userId, predictionId, ct).ConfigureAwait(false);
+        if (gbmRow is not null)
+        {
+            await ResolveGbmWithBrokerVerifyAsync(userId, gbmRow, nextBarTime, nextClose, ct).ConfigureAwait(false);
+            return;
+        }
+
+        throw new InvalidOperationException("Prediction not found.");
+    }
+
+    public async Task ResolvePredictionFromCandlesAsync(
+        Guid userId,
+        Guid predictionId,
+        IReadOnlyList<KiteHistoricalCandlePointDto> candlesAsc,
+        string interval,
+        CancellationToken ct = default)
+    {
+        var intervalNorm = NormalizeInterval(interval);
+
+        var legacy = await _predictions.FindTrackedAsync(userId, predictionId, ct).ConfigureAwait(false);
+        if (legacy is not null)
+        {
             if (!string.Equals(legacy.Outcome, "pending", StringComparison.Ordinal))
                 throw new InvalidOperationException("Prediction already resolved.");
-            if (nextBarTime <= legacy.RefBarTimeUtc)
-                throw new InvalidOperationException("Next bar time must be after the reference bar.");
 
-            legacy.Outcome = PriceDirectionOutcomeResolver.Resolve(legacy.Direction, legacy.RefClose, nextClose);
-            legacy.NextBarTimeUtc = nextBarTime;
-            legacy.NextClose = nextClose;
+            var thresh = legacy.LabelThresholdFractionApplied ?? Math.Max(0m, _opts.Value.LabelThresholdFraction);
+            ApplyResolutionSnapshot(legacy, candlesAsc, intervalNorm, thresh, null);
             await _predictions.SaveChangesAsync(ct).ConfigureAwait(false);
             return;
         }
@@ -237,17 +269,216 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         {
             if (!string.Equals(gbmRow.Outcome, "pending", StringComparison.Ordinal))
                 throw new InvalidOperationException("Prediction already resolved.");
-            if (nextBarTime <= gbmRow.RefBarTimeUtc)
-                throw new InvalidOperationException("Next bar time must be after the reference bar.");
 
-            gbmRow.Outcome = PriceDirectionOutcomeResolver.Resolve(gbmRow.Direction, gbmRow.RefClose, nextClose);
-            gbmRow.NextBarTimeUtc = nextBarTime;
-            gbmRow.NextClose = nextClose;
+            var thresh = gbmRow.LabelThresholdFractionApplied ?? Math.Max(0m, _opts.Value.LabelThresholdFraction);
+            ApplyResolutionSnapshot(gbmRow, candlesAsc, intervalNorm, thresh, null);
             await _lightGbmPredictions.SaveChangesAsync(ct).ConfigureAwait(false);
             return;
         }
 
         throw new InvalidOperationException("Prediction not found.");
+    }
+
+    private async Task ResolveClassicWithBrokerVerifyAsync(
+        Guid userId,
+        MlPriceDirectionPrediction legacy,
+        DateTimeOffset nextBarTime,
+        decimal nextClose,
+        CancellationToken ct)
+    {
+        if (!string.Equals(legacy.Outcome, "pending", StringComparison.Ordinal))
+            throw new InvalidOperationException("Prediction already resolved.");
+        if (nextBarTime <= legacy.RefBarTimeUtc)
+            throw new InvalidOperationException("Next bar time must be after the reference bar.");
+
+        var hist = await _broker
+            .GetKiteHistoricalCandlesAsync(
+                userId,
+                legacy.InstrumentToken,
+                legacy.Interval,
+                fromUtc: null,
+                toUtc: null,
+                ct)
+            .ConfigureAwait(false);
+
+        var thresh = legacy.LabelThresholdFractionApplied ?? Math.Max(0m, _opts.Value.LabelThresholdFraction);
+        ApplyResolutionSnapshot(legacy, hist.Candles, hist.Interval, thresh, new Verification(nextBarTime, nextClose));
+        await _predictions.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task ResolveGbmWithBrokerVerifyAsync(
+        Guid userId,
+        MlLightGbmTripleBarrierPrediction gbmRow,
+        DateTimeOffset nextBarTime,
+        decimal nextClose,
+        CancellationToken ct)
+    {
+        if (!string.Equals(gbmRow.Outcome, "pending", StringComparison.Ordinal))
+            throw new InvalidOperationException("Prediction already resolved.");
+        if (nextBarTime <= gbmRow.RefBarTimeUtc)
+            throw new InvalidOperationException("Next bar time must be after the reference bar.");
+
+        var hist = await _broker
+            .GetKiteHistoricalCandlesAsync(
+                userId,
+                gbmRow.InstrumentToken,
+                gbmRow.Interval,
+                fromUtc: null,
+                toUtc: null,
+                ct)
+            .ConfigureAwait(false);
+
+        var thresh = gbmRow.LabelThresholdFractionApplied ?? Math.Max(0m, _opts.Value.LabelThresholdFraction);
+        ApplyResolutionSnapshot(gbmRow, hist.Candles, hist.Interval, thresh, new Verification(nextBarTime, nextClose));
+        await _lightGbmPredictions.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    private readonly record struct Verification(DateTimeOffset Time, decimal Close);
+
+    private static void ApplyResolutionSnapshot(
+        MlPriceDirectionPrediction row,
+        IReadOnlyList<KiteHistoricalCandlePointDto> candlesAsc,
+        string intervalNorm,
+        decimal labelThresholdFraction,
+        Verification? verify)
+    {
+        var snap = ComputeResolutionSnapshot(
+            row.Direction,
+            row.RefClose,
+            row.RefBarTimeUtc,
+            candlesAsc,
+            intervalNorm,
+            labelThresholdFraction,
+            verify);
+        CopySnapshotTo(row, snap);
+    }
+
+    private static void ApplyResolutionSnapshot(
+        MlLightGbmTripleBarrierPrediction row,
+        IReadOnlyList<KiteHistoricalCandlePointDto> candlesAsc,
+        string intervalNorm,
+        decimal labelThresholdFraction,
+        Verification? verify)
+    {
+        var snap = ComputeResolutionSnapshot(
+            row.Direction,
+            row.RefClose,
+            row.RefBarTimeUtc,
+            candlesAsc,
+            intervalNorm,
+            labelThresholdFraction,
+            verify);
+        CopySnapshotTo(row, snap);
+    }
+
+    private readonly record struct ResolutionSnapshot(
+        string Outcome,
+        DateTimeOffset NextBarTimeUtc,
+        decimal NextClose,
+        sbyte? LabelNextBar,
+        string? CensorReason,
+        DateTimeOffset? NextBarTimeUtcN3,
+        decimal? NextCloseN3,
+        sbyte? LabelN3,
+        DateTimeOffset? NextBarTimeUtcN5,
+        decimal? NextCloseN5,
+        sbyte? LabelN5);
+
+    private static ResolutionSnapshot ComputeResolutionSnapshot(
+        string direction,
+        decimal refClose,
+        DateTimeOffset refBarTimeUtc,
+        IReadOnlyList<KiteHistoricalCandlePointDto> candlesAsc,
+        string intervalNorm,
+        decimal labelThresholdFraction,
+        Verification? verify)
+    {
+        var idx = MlResolutionCandleLocator.FindRefBarIndex(candlesAsc, refBarTimeUtc);
+        if (idx < 0 || idx + 1 >= candlesAsc.Count)
+            throw new InvalidOperationException("Historical candles missing the reference or next bar; cannot resolve.");
+
+        var nominal = MlChartIntervalDuration.FromNormalizedInterval(intervalNorm);
+        var next = candlesAsc[idx + 1];
+        VerifyNextMatchesKite(next, verify, refClose);
+
+        var censorReason = MlResolutionCandleLocator.LooksLikeSessionGap(nominal, candlesAsc[idx].Time, next.Time)
+            ? "gap_too_large"
+            : null;
+
+        var thresh = Math.Max(0m, labelThresholdFraction);
+        var outcome = PriceDirectionOutcomeResolver.Resolve(direction, refClose, next.Close, thresh);
+        var labelNext = PriceDirectionLabeling.ClassifySignedLabel(refClose, next.Close, thresh);
+
+        DateTimeOffset? n3t = null;
+        decimal? n3c = null;
+        sbyte? l3 = null;
+        if (idx + 3 < candlesAsc.Count)
+        {
+            var c3 = candlesAsc[idx + 3];
+            n3t = c3.Time;
+            n3c = c3.Close;
+            l3 = PriceDirectionLabeling.ClassifySignedLabel(refClose, c3.Close, thresh);
+        }
+
+        DateTimeOffset? n5t = null;
+        decimal? n5c = null;
+        sbyte? l5 = null;
+        if (idx + 5 < candlesAsc.Count)
+        {
+            var c5 = candlesAsc[idx + 5];
+            n5t = c5.Time;
+            n5c = c5.Close;
+            l5 = PriceDirectionLabeling.ClassifySignedLabel(refClose, c5.Close, thresh);
+        }
+
+        return new ResolutionSnapshot(outcome, next.Time, next.Close, labelNext, censorReason, n3t, n3c, l3, n5t, n5c, l5);
+    }
+
+    private static void CopySnapshotTo(MlPriceDirectionPrediction row, ResolutionSnapshot s)
+    {
+        row.Outcome = s.Outcome;
+        row.NextBarTimeUtc = s.NextBarTimeUtc;
+        row.NextClose = s.NextClose;
+        row.LabelNextBar = s.LabelNextBar;
+        row.CensorReason = s.CensorReason;
+        row.NextBarTimeUtcN3 = s.NextBarTimeUtcN3;
+        row.NextCloseN3 = s.NextCloseN3;
+        row.LabelN3 = s.LabelN3;
+        row.NextBarTimeUtcN5 = s.NextBarTimeUtcN5;
+        row.NextCloseN5 = s.NextCloseN5;
+        row.LabelN5 = s.LabelN5;
+    }
+
+    private static void CopySnapshotTo(MlLightGbmTripleBarrierPrediction row, ResolutionSnapshot s)
+    {
+        row.Outcome = s.Outcome;
+        row.NextBarTimeUtc = s.NextBarTimeUtc;
+        row.NextClose = s.NextClose;
+        row.LabelNextBar = s.LabelNextBar;
+        row.CensorReason = s.CensorReason;
+        row.NextBarTimeUtcN3 = s.NextBarTimeUtcN3;
+        row.NextCloseN3 = s.NextCloseN3;
+        row.LabelN3 = s.LabelN3;
+        row.NextBarTimeUtcN5 = s.NextBarTimeUtcN5;
+        row.NextCloseN5 = s.NextCloseN5;
+        row.LabelN5 = s.LabelN5;
+    }
+
+    private static void VerifyNextMatchesKite(
+        KiteHistoricalCandlePointDto nextFromHist,
+        Verification? verify,
+        decimal refClose)
+    {
+        if (verify is null)
+            return;
+
+        var v = verify.Value;
+        if (Math.Abs((nextFromHist.Time - v.Time).TotalSeconds) > 120)
+            throw new InvalidOperationException("Next candle from Kite does not match PATCH nextBarTime.");
+
+        var tol = Math.Max(Math.Abs(refClose) * 0.00001m, 0.005m);
+        if (Math.Abs(nextFromHist.Close - v.Close) > tol)
+            throw new InvalidOperationException("Next candle close from Kite does not match PATCH nextClose.");
     }
 
     private static MlPriceDirectionPredictionItemDto MapRow(MlPriceDirectionPrediction x) =>
@@ -264,7 +495,16 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             x.NextBarTimeUtc,
             x.NextClose,
             x.Source,
-            x.EngineModelId);
+            x.EngineModelId,
+            x.LabelThresholdFractionApplied,
+            x.CensorReason,
+            x.LabelNextBar,
+            x.LabelN3,
+            x.LabelN5,
+            x.NextBarTimeUtcN3,
+            x.NextCloseN3,
+            x.NextBarTimeUtcN5,
+            x.NextCloseN5);
 
     private static MlPriceDirectionPredictionItemDto MapLightGbmRow(MlLightGbmTripleBarrierPrediction x) =>
         new(
@@ -280,7 +520,16 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             x.NextBarTimeUtc,
             x.NextClose,
             x.Source,
-            x.EngineModelId);
+            x.EngineModelId,
+            x.LabelThresholdFractionApplied,
+            x.CensorReason,
+            x.LabelNextBar,
+            x.LabelN3,
+            x.LabelN5,
+            x.NextBarTimeUtcN3,
+            x.NextCloseN3,
+            x.NextBarTimeUtcN5,
+            x.NextCloseN5);
 
     private static string MapDirectionLabel(PriceDirectionLabel d) =>
         d switch
