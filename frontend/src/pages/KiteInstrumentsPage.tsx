@@ -39,8 +39,13 @@ import {
 } from 'recharts'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import {
+  fetchMergedHistoricalChartCandles,
+  type HistoricalChartCandlesResponse,
+} from '../api/kiteChartHistorical'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
+import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { CandlestickChart } from '../components/CandlestickChart'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
@@ -115,24 +120,7 @@ interface InstrumentSearchResponse {
   scanTruncated: boolean
 }
 
-interface HistoricalCandlesResponse {
-  candles: {
-    time: string
-    open: number
-    high: number
-    low: number
-    close: number
-    volume: number
-    sma20?: number | null
-    ema9?: number | null
-    ema21?: number | null
-    srSupport?: number | null
-    srResistance?: number | null
-  }[]
-  interval: string
-  from: string
-  to: string
-}
+type HistoricalCandlesResponse = HistoricalChartCandlesResponse
 
 /** GET /api/v1/predictions/price-direction */
 interface PriceDirectionApiResponse {
@@ -250,8 +238,31 @@ const CHART_INTERVALS = [
 ] as const
 type ChartInterval = (typeof CHART_INTERVALS)[number]
 
-/** Higher-timeframe trend presets (toolbar quick row); each value must exist in {@link CHART_INTERVALS}. */
-const TREND_ANALYSIS_INTERVALS = ['5m', '15m', '1h', '4h', '1d', '1w'] as const satisfies readonly ChartInterval[]
+const TRADER_TREND_ANALYSIS_INTERVALS_LS = 'trader-trend-analysis-intervals'
+
+/** Preserve chart order — only validated codes from storage. */
+function loadTrendAnalysisSelections(): ChartInterval[] {
+  try {
+    if (typeof window === 'undefined') return [...CHART_INTERVALS]
+    const raw = window.localStorage.getItem(TRADER_TREND_ANALYSIS_INTERVALS_LS)
+    if (!raw) return [...CHART_INTERVALS]
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed) || parsed.length === 0) return [...CHART_INTERVALS]
+    const next: ChartInterval[] = []
+    for (const entry of parsed) {
+      const s = String(entry ?? '')
+      if ((CHART_INTERVALS as readonly string[]).includes(s)) next.push(s as ChartInterval)
+    }
+    return next.length > 0 ? next : [...CHART_INTERVALS]
+  } catch {
+    return [...CHART_INTERVALS]
+  }
+}
+
+function orderTrendSelections(s: Iterable<ChartInterval>): ChartInterval[] {
+  const set = new Set(s)
+  return CHART_INTERVALS.filter((iv) => set.has(iv))
+}
 
 /** Sort automation row interval codes in chart order, then unknown codes alphabetically. */
 function sortMlAutomationIntervalCodes(intervals: string[]): string[] {
@@ -1088,8 +1099,8 @@ function HistoricalRangeCaption({
   toIso: string
   compact?: boolean
 }) {
-  const from = formatLocalDateTime(fromIso)
-  const to = formatLocalDateTime(toIso)
+  const from = formatLocalDateTime(fromIso, { includeMilliseconds: true })
+  const to = formatLocalDateTime(toIso, { includeMilliseconds: true })
   return (
     <div className={compact ? 'small text-secondary mb-2' : 'small text-secondary mb-3'}>
       <div className={compact ? 'mb-0' : 'mb-1'}>
@@ -1126,7 +1137,7 @@ function ChartTooltipContent({
       className="rounded border border-secondary p-2 small"
       style={{ background: '#212529', color: '#f8f9fa' }}
     >
-      <div>{formatLocalDateTime(p.t)}</div>
+      <div>{formatLocalDateTime(p.t, { includeMilliseconds: true })}</div>
       <div className="font-monospace mt-1">
         O {p.open} · H {p.high} · L {p.low} · C {p.close}
       </div>
@@ -1179,6 +1190,8 @@ function ChartSettingsToolbar({
   onRangePresetChange,
   interval,
   onIntervalChange,
+  trendAnalysisSelections,
+  onTrendAnalysisSelectionsChange,
   graphType,
   onGraphTypeChange,
   maLineVisibility,
@@ -1191,7 +1204,10 @@ function ChartSettingsToolbar({
   rangePreset: ChartRangePreset
   onRangePresetChange: (v: ChartRangePreset) => void
   interval: ChartInterval
+  /** Main chart OHLC timeframe (radio row below). */
   onIntervalChange: (v: ChartInterval) => void
+  trendAnalysisSelections: ChartInterval[]
+  onTrendAnalysisSelectionsChange: (next: ChartInterval[]) => void
   graphType: ChartGraphType
   onGraphTypeChange: (v: ChartGraphType) => void
   maLineVisibility: MaLineVisibility
@@ -1201,6 +1217,7 @@ function ChartSettingsToolbar({
   /** Tooltip for Trend analysis presets (e.g. All favorites = sync every chart). */
   trendPresetHint?: string
 }) {
+  const trendSet = useMemo(() => new Set(trendAnalysisSelections), [trendAnalysisSelections])
   return (
     <>
       <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
@@ -1232,21 +1249,52 @@ function ChartSettingsToolbar({
       <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
         <span className="small text-secondary text-uppercase me-1">Trend analysis</span>
         <ButtonGroup size="sm" className="flex-wrap">
-          {TREND_ANALYSIS_INTERVALS.map((iv) => (
+          {CHART_INTERVALS.map((iv) => (
             <ToggleButton
               key={`trend-${iv}`}
               id={`${idPrefix}-trend-${iv}`}
-              type="radio"
-              variant="outline-primary"
-              name={`${idPrefix}-chart-trend`}
+              type="checkbox"
+              variant={trendSet.has(iv) ? 'primary' : 'outline-primary'}
               value={iv}
-              checked={interval === iv}
-              onChange={() => onIntervalChange(iv)}
-              title={trendPresetHint ?? '5m–1w presets for multi-timeframe context'}
+              checked={trendSet.has(iv)}
+              title={
+                (trendPresetHint ?? '').length > 0
+                  ? trendPresetHint
+                  : 'Past-data multi-timeframe (LR on close — same Range as chart); check any combination'
+              }
+              onChange={(e) => {
+                const sel = e.currentTarget.checked
+                const nextSet = new Set(trendAnalysisSelections)
+                if (sel) nextSet.add(iv)
+                else nextSet.delete(iv)
+                onTrendAnalysisSelectionsChange(orderTrendSelections(nextSet))
+              }}
             >
               {iv}
             </ToggleButton>
           ))}
+        </ButtonGroup>
+        <ButtonGroup size="sm">
+          <Button
+            type="button"
+            variant="outline-primary"
+            size="sm"
+            className="py-1"
+            title="Analyze all chart intervals"
+            onClick={() => onTrendAnalysisSelectionsChange([...CHART_INTERVALS])}
+          >
+            All
+          </Button>
+          <Button
+            type="button"
+            variant="outline-secondary"
+            size="sm"
+            className="py-1"
+            title="Clear trend picks (tables ask you to re-select)"
+            onClick={() => onTrendAnalysisSelectionsChange([])}
+          >
+            Clear
+          </Button>
         </ButtonGroup>
       </div>
       <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
@@ -2464,16 +2512,13 @@ function CompactPriceChart({
     setCandleRange(null)
 
     const fetchOnce = async (initial: boolean) => {
-      const params = {
-        instrumentToken: row.instrumentToken,
-        interval,
-        ...historicalRangeQueryParams(rangePreset),
-      }
       try {
-        const { data } = await api.get<HistoricalCandlesResponse>('/broker/kite/historical-candles', {
-          params,
-          signal: ac.signal,
-        })
+        const data = await fetchMergedHistoricalChartCandles(
+          row.instrumentToken,
+          interval,
+          historicalRangeQueryParams(rangePreset),
+          ac.signal,
+        )
         const pts = chartPointsFromHistoricalResponse(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
@@ -2732,6 +2777,8 @@ function FavoritesChartsGrid({
   onMaLineVisibilityChange,
   customEmaPeriod,
   onCustomEmaPeriodChange,
+  trendAnalysisSelections,
+  onTrendAnalysisSelectionsChange,
   onToggleFavorite,
   chartZoomByInstrumentToken,
   onInstrumentChartZoomChange,
@@ -2749,10 +2796,13 @@ function FavoritesChartsGrid({
   onMaLineVisibilityChange: (patch: Partial<MaLineVisibility>) => void
   customEmaPeriod: number
   onCustomEmaPeriodChange: (n: number) => void
+  trendAnalysisSelections: ChartInterval[]
+  onTrendAnalysisSelectionsChange: (next: ChartInterval[]) => void
   onToggleFavorite: (r: KiteInstrumentRow) => void
   chartZoomByInstrumentToken: Record<string, number>
   onInstrumentChartZoomChange: (instrumentToken: string, bars: number | null) => void
 }) {
+  const favHistExtras = useMemo(() => historicalRangeQueryParams(rangePreset), [rangePreset])
   if (favorites.length === 0) return null
 
   return (
@@ -2764,20 +2814,22 @@ function FavoritesChartsGrid({
         onRangePresetChange={onRangePresetChange}
         interval={defaultInterval}
         onIntervalChange={onDefaultIntervalChange}
+        trendAnalysisSelections={trendAnalysisSelections}
+        onTrendAnalysisSelectionsChange={onTrendAnalysisSelectionsChange}
         graphType={graphType}
         onGraphTypeChange={onGraphTypeChange}
         maLineVisibility={maLineVisibility}
         onMaLineVisibilityChange={onMaLineVisibilityChange}
         customEmaPeriod={customEmaPeriod}
         onCustomEmaPeriodChange={onCustomEmaPeriodChange}
-        trendPresetHint="Sets this interval on every favorite chart (clears per-symbol overrides)"
+        trendPresetHint="Multi-select does not change the chart interval row; expand each tile for MTF trends"
       />
       <p className="small text-secondary mb-3" style={{ maxWidth: '48rem' }}>
-        <strong>Trend analysis</strong> and <strong>Interval</strong> above apply the same candle size to{' '}
-        <strong>every</strong> favorite chart and clear symbol-specific interval overrides (drop-down resets to Default).
-        Server <strong>Auto ML</strong> usually runs on <strong>1m</strong> candles (see{' '}
-        <span className="font-monospace text-body-secondary">FavoriteMlAutomation:PredictionIntervalOverride</span>) so it
-        is not slowed by slower bar closes unless you configure it to follow chart intervals.
+        <strong>Trend analysis</strong> checkboxes choose which candle sizes participate in{' '}
+        <strong>Multi-interval trend</strong> panels (least-squares on past closes — same{' '}
+        <strong>Range</strong> as charts). Use <strong>Interval</strong> to set bar size on every tile (clears symbol
+        drops). Server <strong>Auto ML</strong> often uses <strong>1m</strong> candles (see{' '}
+        <span className="font-monospace text-body-secondary">FavoriteMlAutomation:PredictionIntervalOverride</span>).
       </p>
       <Row className="g-3">
         {favorites.map((row) => (
@@ -2829,6 +2881,13 @@ function FavoritesChartsGrid({
                   zoomVisibleBars={chartZoomByInstrumentToken[row.instrumentToken] ?? null}
                   onZoomVisibleBarsChange={(bars) => onInstrumentChartZoomChange(row.instrumentToken, bars)}
                 />
+                <TrendAnalysisMultiPanel
+                  instrumentToken={row.instrumentToken}
+                  symbolLabel={row.tradingsymbol}
+                  historicalQueryExtra={favHistExtras}
+                  selectedIntervalsOrdered={orderTrendSelections(trendAnalysisSelections)}
+                  variant="favoriteLazy"
+                />
               </Card.Body>
             </Card>
           </Col>
@@ -2856,6 +2915,8 @@ function InstrumentChartCard({
   liveLastTick,
   zoomVisibleBars,
   onZoomVisibleBarsChange,
+  trendAnalysisSelections,
+  onTrendAnalysisSelectionsChange,
 }: {
   selection: KiteInstrumentRow | null
   rangePreset: ChartRangePreset
@@ -2874,7 +2935,10 @@ function InstrumentChartCard({
   liveLastTick?: MarketTickBatchItem | null
   zoomVisibleBars: number | null
   onZoomVisibleBarsChange: (bars: number | null) => void
+  trendAnalysisSelections: ChartInterval[]
+  onTrendAnalysisSelectionsChange: (next: ChartInterval[]) => void
 }) {
+  const browseHistExtras = useMemo(() => historicalRangeQueryParams(rangePreset), [rangePreset])
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -2897,16 +2961,13 @@ function InstrumentChartCard({
     setSeries([])
 
     const fetchOnce = async (initial: boolean) => {
-      const params = {
-        instrumentToken: selection.instrumentToken,
-        interval,
-        ...historicalRangeQueryParams(rangePreset),
-      }
       try {
-        const { data } = await api.get<HistoricalCandlesResponse>('/broker/kite/historical-candles', {
-          params,
-          signal: ac.signal,
-        })
+        const data = await fetchMergedHistoricalChartCandles(
+          selection.instrumentToken,
+          interval,
+          historicalRangeQueryParams(rangePreset),
+          ac.signal,
+        )
         const pts = chartPointsFromHistoricalResponse(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
@@ -3013,12 +3074,21 @@ function InstrumentChartCard({
           onRangePresetChange={onRangePresetChange}
           interval={interval}
           onIntervalChange={onIntervalChange}
+          trendAnalysisSelections={trendAnalysisSelections}
+          onTrendAnalysisSelectionsChange={onTrendAnalysisSelectionsChange}
           graphType={graphType}
           onGraphTypeChange={onGraphTypeChange}
           maLineVisibility={maLineVisibility}
           onMaLineVisibilityChange={onMaLineVisibilityChange}
           customEmaPeriod={customEmaPeriod}
           onCustomEmaPeriodChange={onCustomEmaPeriodChange}
+        />
+        <TrendAnalysisMultiPanel
+          instrumentToken={selection.instrumentToken}
+          symbolLabel={`${selection.tradingsymbol} · ${selection.exchange}`}
+          historicalQueryExtra={browseHistExtras}
+          selectedIntervalsOrdered={orderTrendSelections(trendAnalysisSelections)}
+          variant="browseAlways"
         />
         <MlNextBarBiasBar
           instrumentToken={selection.instrumentToken}
@@ -3313,6 +3383,8 @@ export function KiteInstrumentsPage() {
   const [todayTopError, setTodayTopError] = useState<string | null>(null)
   const [chartRow, setChartRow] = useState<KiteInstrumentRow | null>(null)
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
+  const [trendAnalysisSelections, setTrendAnalysisSelections] =
+    useState<ChartInterval[]>(loadTrendAnalysisSelections)
   const [chartRangePreset, setChartRangePreset] = useState<ChartRangePreset>('auto')
   const [chartGraphType, setChartGraphType] = useState<ChartGraphType>('line')
   const [customEmaPeriod, setCustomEmaPeriod] = useState(() => loadCustomEmaPrefs().period)
@@ -3326,6 +3398,14 @@ export function KiteInstrumentsPage() {
   useEffect(() => {
     saveCustomEmaPrefs({ period: customEmaPeriod, show: maLineVisibility.showCustomEma })
   }, [customEmaPeriod, maLineVisibility.showCustomEma])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TRADER_TREND_ANALYSIS_INTERVALS_LS, JSON.stringify(trendAnalysisSelections))
+    } catch {
+      /* ignore */
+    }
+  }, [trendAnalysisSelections])
 
   const [chartPrefsHydrated, setChartPrefsHydrated] = useState(false)
   const [favoriteMlAutomationEnabled, setFavoriteMlAutomationEnabled] = useState(false)
@@ -4350,6 +4430,8 @@ export function KiteInstrumentsPage() {
                   onMaLineVisibilityChange={patchMaLineVisibility}
                   customEmaPeriod={customEmaPeriod}
                   onCustomEmaPeriodChange={setCustomEmaPeriod}
+                  trendAnalysisSelections={trendAnalysisSelections}
+                  onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
                   chartZoomByInstrumentToken={chartZoomByToken}
                   onInstrumentChartZoomChange={persistInstrumentChartZoom}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
@@ -4382,6 +4464,8 @@ export function KiteInstrumentsPage() {
                 onZoomVisibleBarsChange={(bars) => {
                   if (chartRow) persistInstrumentChartZoom(chartRow.instrumentToken, bars)
                 }}
+                trendAnalysisSelections={trendAnalysisSelections}
+                onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
               />
             ) : null}
           </Card.Body>

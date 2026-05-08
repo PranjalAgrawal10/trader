@@ -33,6 +33,11 @@ public sealed class BrokerService : IBrokerService
     private const int MaxKiteFavoriteInstrumentsPerUser = 400;
 
     private const int KiteQuoteOhlcBatchSizeBroker = 140;
+
+    /// <summary>Shared server-side cache TTL for trimmed chart composites (avoid duplicate slow Kite calls when SPA parallel-fetches).</summary>
+    private static readonly TimeSpan ChartHistoricalCacheTtl = TimeSpan.FromSeconds(25);
+
+    private static readonly TimeSpan LiveQuoteCacheTtl = TimeSpan.FromSeconds(5);
     private const int KiteTodayTopPerformersMaxTake = 30;
 
     private readonly IBrokerSetupGateway _brokerSetup;
@@ -308,19 +313,110 @@ public sealed class BrokerService : IBrokerService
         DateTimeOffset? toUtc,
         CancellationToken ct = default)
     {
+        return await GetOrComposeChartHistoricalCandlesCachedAsync(userId, instrumentToken, interval, fromUtc, toUtc, ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<KiteHistoricalOhlcvOnlyDto> GetKiteHistoricalChartOhlcvAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        CancellationToken ct = default)
+    {
+        var full = await GetOrComposeChartHistoricalCandlesCachedAsync(userId, instrumentToken, interval, fromUtc, toUtc, ct)
+            .ConfigureAwait(false);
+        return ProjectToOhlcvOnly(full);
+    }
+
+    public async Task<KiteHistoricalOverlaysDto> GetKiteHistoricalChartOverlaysAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        CancellationToken ct = default)
+    {
+        var full = await GetOrComposeChartHistoricalCandlesCachedAsync(userId, instrumentToken, interval, fromUtc, toUtc, ct)
+            .ConfigureAwait(false);
+        return ProjectToOverlays(full);
+    }
+
+    public async Task<KiteInstrumentLiveQuoteDto> GetKiteInstrumentLiveQuoteAsync(
+        Guid userId,
+        string exchange,
+        string tradingsymbol,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(exchange) || string.IsNullOrWhiteSpace(tradingsymbol))
+            throw new InvalidOperationException("exchange and tradingsymbol are required.");
+
+        var ex = exchange.Trim().ToUpperInvariant();
+        var ts = tradingsymbol.Trim();
+        var iq = $"{ex}:{ts}";
+        var cacheKey = $"Trader.LiveQuote:v1:{userId:N}:{ex}:{ts}";
+        if (_memoryCache.TryGetValue(cacheKey, out KiteInstrumentLiveQuoteDto? cachedQuote) && cachedQuote is not null)
+            return cachedQuote;
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var fetch = await _kiteInstruments.FetchQuoteOhlcAsync([iq], apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!fetch.Success || fetch.ByKey is null || !fetch.ByKey.TryGetValue(iq, out var tick))
+        {
+            throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load live quote.");
+        }
+
+        var dto = new KiteInstrumentLiveQuoteDto(ex, ts, tick.LastPrice, tick.OhlcClose);
+        _memoryCache.Set(
+            cacheKey,
+            dto,
+            new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = LiveQuoteCacheTtl });
+        return dto;
+    }
+
+    /// <summary>Validated composite; cache hit skips Kite + session churn when parallel chart routes share the window.</summary>
+    private async Task<KiteHistoricalCandlesDto> GetOrComposeChartHistoricalCandlesCachedAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(instrumentToken) || !instrumentToken.Trim().All(char.IsAsciiDigit))
             throw new InvalidOperationException("A numeric instrument token from Kite is required.");
 
+        var token = instrumentToken.Trim();
         var code = NormalizeUiChartInterval(interval);
-        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
-
         var requestEnd = toUtc ?? DateTimeOffset.UtcNow;
         var requestStart = fromUtc ?? requestEnd - DefaultChartLookback(code);
         if (requestStart >= requestEnd)
             throw new InvalidOperationException("Start time must be before end time.");
 
         var fetchStart = ComputeMaWarmupFetchStart(requestStart, code);
-        var token = instrumentToken.Trim();
+        var cacheKey = $"Trader.ChartHist:v2:{userId:N}:{token}:{code}:{fetchStart.UtcTicks}:{requestEnd.UtcTicks}";
+        if (_memoryCache.TryGetValue(cacheKey, out KiteHistoricalCandlesDto? hit) && hit is not null)
+            return hit;
+
+        var dto = await FetchHistoricalCandlesFreshAsync(userId, token, code, requestStart, requestEnd, fetchStart, ct)
+            .ConfigureAwait(false);
+        _memoryCache.Set(
+            cacheKey,
+            dto,
+            new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = ChartHistoricalCacheTtl });
+        return dto;
+    }
+
+    private async Task<KiteHistoricalCandlesDto> FetchHistoricalCandlesFreshAsync(
+        Guid userId,
+        string token,
+        string code,
+        DateTimeOffset requestStart,
+        DateTimeOffset requestEnd,
+        DateTimeOffset fetchStart,
+        CancellationToken ct)
+    {
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
 
         if (code is "2m" or "4m")
         {
@@ -367,6 +463,28 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(raw.ErrorMessage ?? "Could not load candles from Kite.");
 
         return FinalizeChartHistoricalCandles(raw.Candles, code, requestStart, requestEnd);
+    }
+
+    private static KiteHistoricalOhlcvOnlyDto ProjectToOhlcvOnly(KiteHistoricalCandlesDto dto)
+    {
+        var candles = dto.Candles
+            .Select(c => new KiteHistoricalOhlcvOnlyCandleDto(c.Time, c.Open, c.High, c.Low, c.Close, c.Volume))
+            .ToList();
+        return new KiteHistoricalOhlcvOnlyDto(candles, dto.Interval, dto.From, dto.To);
+    }
+
+    private static KiteHistoricalOverlaysDto ProjectToOverlays(KiteHistoricalCandlesDto dto)
+    {
+        var pts = dto.Candles
+            .Select(c => new KiteHistoricalOverlayPointDto(
+                c.Time,
+                c.Sma20,
+                c.Ema9,
+                c.Ema21,
+                c.SrSupport,
+                c.SrResistance))
+            .ToList();
+        return new KiteHistoricalOverlaysDto(pts, dto.Interval, dto.From, dto.To);
     }
 
     public async Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(

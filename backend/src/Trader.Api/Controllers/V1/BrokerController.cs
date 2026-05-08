@@ -104,7 +104,7 @@ public sealed class BrokerController : ControllerBase
         return Ok(dto);
     }
 
-    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1w</c> (includes <c>4h</c> / <c>1w</c> derived server-side from Kite 60m/d candles; see README). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply. Responses include <c>sma20</c>, <c>ema9</c>, <c>ema21</c>, <c>srSupport</c>, <c>srResistance</c> (nullable); the server requests extra history before <c>from</c> so overlays are warmed for the visible window.</summary>
+    /// <summary>Historical OHLCV + SMA/EMA/SR overlays (combined). For smaller parallel responses call <see cref="KiteHistoricalChartOhlcv"/> + <see cref="KiteHistoricalChartOverlays"/> (~25s server-side composite cache).</summary>
     [Authorize]
     [HttpGet("kite/historical-candles")]
     public async Task<ActionResult<KiteHistoricalCandlesDto>> KiteHistoricalCandles(
@@ -114,58 +114,103 @@ public sealed class BrokerController : ControllerBase
         [FromQuery] string? to,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(instrumentToken))
-        {
-            return Problem(
-                title: "Invalid instrument",
-                detail: "Provide instrumentToken from the Kite instrument list.",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
-        if (string.IsNullOrWhiteSpace(interval))
-        {
-            return Problem(
-                title: "Invalid interval",
-                detail: "Provide interval (e.g. 5m, 1d).",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
-        DateTimeOffset? fromUtc = null;
-        DateTimeOffset? toUtc = null;
-        if (!string.IsNullOrWhiteSpace(from))
-        {
-            if (!DateTimeOffset.TryParse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var f))
-            {
-                return Problem(
-                    title: "Invalid from",
-                    detail: "Use an ISO 8601 instant for from.",
-                    statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            fromUtc = f;
-        }
-
-        if (!string.IsNullOrWhiteSpace(to))
-        {
-            if (!DateTimeOffset.TryParse(to, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var t))
-            {
-                return Problem(
-                    title: "Invalid to",
-                    detail: "Use an ISO 8601 instant for to.",
-                    statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            toUtc = t;
-        }
+        var binding = BindKiteHistoricalInstrumentRequest(instrumentToken, interval, from, to);
+        if (binding.Error != null)
+            return binding.Error;
 
         try
         {
             var dto = await _broker.GetKiteHistoricalCandlesAsync(
                 User.GetUserId(),
-                instrumentToken,
-                interval,
-                fromUtc,
-                toUtc,
+                binding.Query!.InstrumentToken,
+                binding.Query!.Interval,
+                binding.Query!.FromUtc,
+                binding.Query!.ToUtc,
+                ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>OHLC+V only — pair with historical-overlays using the same query for parallel chart loads.</summary>
+    [Authorize]
+    [HttpGet("kite/chart/historical-ohlc")]
+    public async Task<ActionResult<KiteHistoricalOhlcvOnlyDto>> KiteHistoricalChartOhlcv(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        [FromQuery] string? interval,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        CancellationToken ct)
+    {
+        var binding = BindKiteHistoricalInstrumentRequest(instrumentToken, interval, from, to);
+        if (binding.Error != null)
+            return binding.Error;
+
+        try
+        {
+            var dto = await _broker.GetKiteHistoricalChartOhlcvAsync(
+                User.GetUserId(),
+                binding.Query!.InstrumentToken,
+                binding.Query!.Interval,
+                binding.Query!.FromUtc,
+                binding.Query!.ToUtc,
+                ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>Smoothing/support-resistance overlays for the trimmed window (same semantics as candles endpoint).</summary>
+    [Authorize]
+    [HttpGet("kite/chart/historical-overlays")]
+    public async Task<ActionResult<KiteHistoricalOverlaysDto>> KiteHistoricalChartOverlays(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        [FromQuery] string? interval,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        CancellationToken ct)
+    {
+        var binding = BindKiteHistoricalInstrumentRequest(instrumentToken, interval, from, to);
+        if (binding.Error != null)
+            return binding.Error;
+
+        try
+        {
+            var dto = await _broker.GetKiteHistoricalChartOverlaysAsync(
+                User.GetUserId(),
+                binding.Query!.InstrumentToken,
+                binding.Query!.Interval,
+                binding.Query!.FromUtc,
+                binding.Query!.ToUtc,
+                ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>LTP vs prior-session close (~5s server cache).</summary>
+    [Authorize]
+    [HttpGet("kite/chart/live-quote")]
+    public async Task<ActionResult<KiteInstrumentLiveQuoteDto>> KiteChartLiveQuote(
+        [FromQuery] string? exchange,
+        [FromQuery] string? tradingsymbol,
+        CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetKiteInstrumentLiveQuoteAsync(
+                User.GetUserId(),
+                exchange ?? "",
+                tradingsymbol ?? "",
                 ct);
             return Ok(dto);
         }
@@ -429,6 +474,71 @@ public sealed class BrokerController : ControllerBase
         {
             return Redirect($"{redirectBase}?kite=error&message={Uri.EscapeDataString(ex.Message)}");
         }
+    }
+
+    private sealed record KiteHistoricalBoundQuery(string InstrumentToken, string Interval, DateTimeOffset? FromUtc, DateTimeOffset? ToUtc);
+
+    private sealed record KiteHistoricalInstrumentBinding(KiteHistoricalBoundQuery? Query, ActionResult? Error);
+
+    private KiteHistoricalInstrumentBinding BindKiteHistoricalInstrumentRequest(
+        string? instrumentToken,
+        string? interval,
+        string? from,
+        string? to)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+        {
+            return new KiteHistoricalInstrumentBinding(
+                null,
+                Problem(
+                    title: "Invalid instrument",
+                    detail: "Provide instrumentToken from the Kite instrument list.",
+                    statusCode: StatusCodes.Status400BadRequest));
+        }
+
+        if (string.IsNullOrWhiteSpace(interval))
+        {
+            return new KiteHistoricalInstrumentBinding(
+                null,
+                Problem(
+                    title: "Invalid interval",
+                    detail: "Provide interval (e.g. 5m, 1d).",
+                    statusCode: StatusCodes.Status400BadRequest));
+        }
+
+        DateTimeOffset? fromUtc = null;
+        DateTimeOffset? toUtc = null;
+        if (!string.IsNullOrWhiteSpace(from))
+        {
+            if (!DateTimeOffset.TryParse(from, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var f))
+            {
+                return new KiteHistoricalInstrumentBinding(
+                    null,
+                    Problem(
+                        title: "Invalid from",
+                        detail: "Use an ISO 8601 instant for from.",
+                        statusCode: StatusCodes.Status400BadRequest));
+            }
+
+            fromUtc = f;
+        }
+
+        if (!string.IsNullOrWhiteSpace(to))
+        {
+            if (!DateTimeOffset.TryParse(to, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var t))
+            {
+                return new KiteHistoricalInstrumentBinding(
+                    null,
+                    Problem(
+                        title: "Invalid to",
+                        detail: "Use an ISO 8601 instant for to.",
+                        statusCode: StatusCodes.Status400BadRequest));
+            }
+
+            toUtc = t;
+        }
+
+        return new KiteHistoricalInstrumentBinding(new KiteHistoricalBoundQuery(instrumentToken, interval!, fromUtc, toUtc), null);
     }
 
     private CookieOptions BuildKiteOAuthCookieOptions()

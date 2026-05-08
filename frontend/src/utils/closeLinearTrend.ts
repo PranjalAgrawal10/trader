@@ -6,10 +6,12 @@ export const LINEAR_CLOSE_TREND_COLOR = '#d946ef'
 
 export type ChartPointWithMaAndTrend = ChartPointWithMa & { trendLine: number | null }
 
-/** Least-squares fit of <code>y[i] ~ a + b·i</code> over visible bars (index 0 … n−1). */
-export function linearRegressionCloseTrend(values: readonly number[]): (number | null)[] {
+/** Coefficients for least-squares fit <code>y[i] ~ intercept + slope·i</code> over indices 0 … n−1. */
+export function linearRegressionCloseCoefficients(
+  values: readonly number[],
+): { slope: number; intercept: number; n: number } | null {
   const n = values.length
-  if (n < 2) return Array.from({ length: n }, () => null)
+  if (n < 2) return null
 
   let sumI = 0
   let sumY = 0
@@ -24,10 +26,54 @@ export function linearRegressionCloseTrend(values: readonly number[]): (number |
   }
 
   const denom = n * sumI2 - sumI * sumI
-  if (Math.abs(denom) < 1e-12) return Array.from({ length: n }, () => null)
+  if (Math.abs(denom) < 1e-12) return null
 
   const slope = (n * sumIY - sumI * sumY) / denom
   const intercept = (sumY - slope * sumI) / n
+  return { slope, intercept, n }
+}
+
+/** Summary of linear regression on closes for multi-timeframe trend readouts. */
+export type CloseLinearTrendSummary = {
+  barCount: number
+  /** dy/di in price units per bar index */
+  slopePerBar: number
+  /** Fitted value at first / last bar (same as Trend LR line endpoints). */
+  fitAtFirst: number
+  fitAtLast: number
+  firstClose: number
+  lastClose: number
+  /** (lastClose - firstClose) / firstClose · 100 */
+  windowDeltaPct: number
+}
+
+export function summarizeCloseLinearTrend(closes: readonly number[]): CloseLinearTrendSummary | null {
+  if (closes.length < 2) return null
+  const c = linearRegressionCloseCoefficients(closes)
+  if (!c) return null
+  const { slope, intercept, n } = c
+  const lastI = n - 1
+  const fitAtFirst = intercept
+  const fitAtLast = intercept + slope * lastI
+  const firstClose = closes[0]
+  const lastClose = closes[closes.length - 1]
+  if (!Number.isFinite(firstClose) || firstClose === 0) return null
+  return {
+    barCount: n,
+    slopePerBar: slope,
+    fitAtFirst,
+    fitAtLast,
+    firstClose,
+    lastClose,
+    windowDeltaPct: ((lastClose - firstClose) / firstClose) * 100,
+  }
+}
+
+/** Least-squares fit of <code>y[i] ~ a + b·i</code> over visible bars (index 0 … n−1). */
+export function linearRegressionCloseTrend(values: readonly number[]): (number | null)[] {
+  const c = linearRegressionCloseCoefficients(values)
+  if (!c) return Array.from({ length: values.length }, () => null)
+  const { slope, intercept } = c
   return values.map((_, i) => intercept + slope * i)
 }
 

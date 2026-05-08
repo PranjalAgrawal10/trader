@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc -b --noEmit",
     "build": "tsc -b && vite build && node ./scripts/emit-spa-fallback-html.mjs",
     "preview": "vite preview"
   },

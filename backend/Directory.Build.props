@@ -3,5 +3,9 @@
     <!-- App Platform / Heroku dotnet buildpack: dotnet publish with shared artifacts path can race
          writing the same intermediate outputs (MSB4018 GenerateDepsFile). -->
     <BuildInParallel>false</BuildInParallel>
+    <Deterministic>true</Deterministic>
+    <LangVersion>latest</LangVersion>
+    <!-- Safer deterministic outputs in CI containers / GitHub Actions -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true' Or '$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 </Project>

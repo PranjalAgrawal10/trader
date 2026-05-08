@@ -33,16 +33,41 @@ public interface IBrokerService
         KiteInstrumentSearchSegment segment,
         CancellationToken ct = default);
 
-    /// <summary>
-    /// Historical OHLCV from Kite for an instrument token. <paramref name="interval"/> is a UI code (<c>1m</c>, <c>2m</c>, … <c>1d</c>).
-    /// Optional <paramref name="fromUtc"/> / <paramref name="toUtc"/> bound the range; when omitted, a default lookback is used.
-    /// </summary>
+    /// <remarks>
+    /// Combined SMA/EMA/SR payloads (use <see cref="GetKiteHistoricalChartOhlcvAsync"/> +
+    /// <see cref="GetKiteHistoricalChartOverlaysAsync"/> for lighter parallel responses; server caches the full series ~25s per key).
+    /// </remarks>
     Task<KiteHistoricalCandlesDto> GetKiteHistoricalCandlesAsync(
         Guid userId,
         string instrumentToken,
         string interval,
         DateTimeOffset? fromUtc,
         DateTimeOffset? toUtc,
+        CancellationToken ct = default);
+
+    /// <summary>OHLCV only (no moving averages/SR columns) — same range semantics as historical-candles.</summary>
+    Task<KiteHistoricalOhlcvOnlyDto> GetKiteHistoricalChartOhlcvAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        CancellationToken ct = default);
+
+    /// <summary>Overlay columns aligned to the same trimmed window as OHLC-only (paired fetch).</summary>
+    Task<KiteHistoricalOverlaysDto> GetKiteHistoricalChartOverlaysAsync(
+        Guid userId,
+        string instrumentToken,
+        string interval,
+        DateTimeOffset? fromUtc,
+        DateTimeOffset? toUtc,
+        CancellationToken ct = default);
+
+    /// <summary>LTP plus prior-session close quote (via Kite <c>/quote/ohlc</c>, ~5s server cache).</summary>
+    Task<KiteInstrumentLiveQuoteDto> GetKiteInstrumentLiveQuoteAsync(
+        Guid userId,
+        string exchange,
+        string tradingsymbol,
         CancellationToken ct = default);
 
     Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(Guid userId, CancellationToken ct = default);

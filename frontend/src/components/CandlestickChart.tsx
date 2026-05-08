@@ -96,14 +96,20 @@ function isIntradayRange(data: ChartPointWithMa[]): boolean {
 function formatAxisTimeLabel(iso: string, shortTime: boolean): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  if (shortTime) {
-    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  }
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
+  const timeWithMs: Intl.DateTimeFormatOptions = {
     hour: '2-digit',
     minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3,
+  }
+  if (shortTime) {
+    return d.toLocaleTimeString(undefined, timeWithMs)
+  }
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    ...timeWithMs,
   })
 }
 
@@ -497,7 +503,7 @@ export function CandlestickChart({
             const p = data[hover.idx]
             return (
               <>
-                <div className="text-white-50 small mb-1">{formatLocalDateTime(p.t)}</div>
+                <div className="text-white-50 small mb-1">{formatLocalDateTime(p.t, { includeMilliseconds: true })}</div>
                 <div className="font-monospace">
                   O {p.open} · H {p.high} · L {p.low} · C {p.close}
                 </div>

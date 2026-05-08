@@ -6,8 +6,20 @@ alwaysApply: true
 # Core principles
 
 - **Scope**: Change only what the task requires. No drive-by refactors or unrelated files.
-- **SOLID**: Prefer narrow interfaces (ports) in `Trader.Application.Abstractions`; infrastructure implements them. Keep API controllers thin; use filters/handlers for cross-cutting HTTP concerns.
+- **SOLID (apply on every change — see subsection below)**.
 - **Structure**: Domain entities hold behavior where it fits; application layer orchestrates use cases; persistence stays in `Trader.Infrastructure`.
 - **Quality**: Match existing naming, imports, and patterns in the touched area. Prefer clear names over abbreviations.
 - **Docs**: Do not add or edit markdown docs unless the user asks—**except** root **`README.md`**, which must stay aligned with the project when setup, configuration, or documented behavior changes (see **`readme-maintenance`** rule).
 - **Secrets**: Never commit API keys, connection strings with passwords, or `.env` secrets; use placeholders and env-based config.
+
+## SOLID in this repo (mandatory checklist)
+
+Interpret **SOLID** using the layered solution: **`Trader.Api`** → **`Trader.Application`** → **`Trader.Domain`**; **`Trader.Infrastructure`** implements Application ports **only**.
+
+- **S — Single Responsibility** — One coherent reason to change per type. **`Trader.Api`** controllers/actions: HTTP mapping + auth binding only (delegate to Application services). Application services orchestrate a **use-case slice** (e.g. broker linking, predictions); avoid growing “god” services—extract helpers or new gateways when behavior diverges. **Domain** entities: business rules + invariants that belong there, not SMTP or EF details.
+- **O — Open/closed** — Prefer **extension over editing shared switches**: new behavior via **new implementations** of existing abstractions registered in **`AddInfrastructure`** / **`DependencyInjection`** (e.g. new prediction engines, new persistence gateways), preserving callers that depend on **`IPriceDirectionPredictionEngine`** / **`I*Repository`**-style interfaces.
+- **L — Liskov substitution** — Infrastructure implementations **must satisfy** Application port contracts without surprising side effects or weaker guarantees than the interface/documentation implies (nullability, thread-safety assumptions, disposal).
+- **I — Interface segregation** — **Narrow ports** callers actually need (`Abstractions/Persistence`, `Abstractions/Messaging`, `Abstractions/Security`, `Abstractions/Reporting`, etc.). Do not expose monolithic gateways; reuse existing segregated interfaces. When adding boundaries, declare **small** interfaces rather than widening one large one.
+- **D — Dependency inversion** — **`Trader.Application`** references **`Trader.Domain`** and **defines abstractions only** (`Abstractions/**/*`, broker/streaming/analytics **`I*`** beside features when already established). **`Trader.Infrastructure`** references Application + Domain and **implements** those abstractions **`Trader.Api`** resolves **interfaces** (`IBrokerService`, `IAuthService`, …); **never** inject **`DbContext`**, **`HttpClient`**, or Zerodha SDK types **into controllers** except through Application-layer facades/services.
+
+Anti-patterns to avoid: **`DbContext` or raw SQL inside `Trader.Application`** UI-adjacent code (beyond port implementations); **`Trader.Infrastructure` → `Trader.Api`** project reference; **`HttpClient` / EF** used directly inside controllers instead of passing through Application.
