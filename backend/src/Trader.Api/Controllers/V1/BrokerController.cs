@@ -84,7 +84,7 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
-    /// <summary>Streaming search across Kite instrument CSVs: <c>Fno</c>, <c>Mcx</c>, <c>Spot</c> (NSE/BSE cash <c>EQ</c> and indices only — not commodities), or <c>All</c> (merged). Multi-word <c>q</c> matches when every token appears in the row (e.g. <c>gold mini</c> matches <c>GOLDMINI</c> on MCX).</summary>
+    /// <summary>Streaming search across Kite instrument CSVs: <c>Fno</c>, <c>Mcx</c>, <c>Spot</c> (NSE/BSE cash <c>EQ</c> and indices only — not commodities), or <c>All</c> (merged). Multi-word <c>q</c> matches when every token appears in the row (e.g. <c>gold mini</c> matches <c>GOLDMINI</c> on MCX). Returns every match in the daily CSV (no row cap — the 50-row limit only applies to the Browse-tab preview lists, not to explicit searches).</summary>
     [Authorize]
     [HttpGet("kite/instruments/search")]
     public async Task<ActionResult<KiteInstrumentSearchDto>> SearchKiteInstruments(

@@ -27,6 +27,13 @@ public sealed class BrokerService : IBrokerService
     /// Per-exchange CSV fetches use this as <c>maxRows</c>; merged F&amp;O may be sliced to this total.
     /// </summary>
     private const int KiteInstrumentBrowsePanelMaxRows = 50;
+
+    /// <summary>
+    /// Sentinel for "return every match" when the user runs a search from the UI — the
+    /// preview-list cap (<see cref="KiteInstrumentBrowsePanelMaxRows"/>) only applies to
+    /// the Browse-tab preview lists, not to explicit search results.
+    /// </summary>
+    private const int KiteInstrumentSearchUnlimited = int.MaxValue;
     private const int KiteInstrumentSearchQueryMaxLength = 128;
 
     private const int MaxKiteFavoriteInstrumentsPerUser = 400;
@@ -277,9 +284,10 @@ public sealed class BrokerService : IBrokerService
 
         if (segment == KiteInstrumentSearchSegment.Fno)
         {
-            var cap = KiteInstrumentBrowsePanelMaxRows;
-            var nfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("NFO", apiKey, accessToken, needle, cap, ct: ct);
-            var bfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("BFO", apiKey, accessToken, needle, cap, ct: ct);
+            var nfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync(
+                "NFO", apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, ct: ct);
+            var bfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync(
+                "BFO", apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, ct: ct);
             await Task.WhenAll(nfoTask, bfoTask).ConfigureAwait(false);
 
             var nfo = await nfoTask.ConfigureAwait(false);
@@ -296,38 +304,32 @@ public sealed class BrokerService : IBrokerService
                 scanTruncated |= bfo.Truncated;
             }
 
-            if (combined.Count > KiteInstrumentBrowsePanelMaxRows)
-            {
-                combined = combined.Take(KiteInstrumentBrowsePanelMaxRows).ToList();
-                scanTruncated = true;
-            }
-
             return new KiteInstrumentSearchDto(combined, scanTruncated);
         }
 
         if (segment == KiteInstrumentSearchSegment.Spot)
         {
-            var cap = KiteInstrumentBrowsePanelMaxRows;
-            var nse = await _kiteInstruments
-                .SearchExchangeInstrumentsAsync("NSE", apiKey, accessToken, needle, cap, equityCashOnly: true, ct)
-                .ConfigureAwait(false);
+            var nseTask = _kiteInstruments
+                .SearchExchangeInstrumentsAsync(
+                    "NSE", apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, equityCashOnly: true, ct);
+            var bseTask = _kiteInstruments
+                .SearchExchangeInstrumentsAsync(
+                    "BSE", apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, equityCashOnly: true, ct);
+            await Task.WhenAll(nseTask, bseTask).ConfigureAwait(false);
+
+            var nse = await nseTask.ConfigureAwait(false);
             if (!nse.Success)
                 throw new InvalidOperationException(nse.ErrorMessage ?? "Could not search NSE equity instruments on Kite.");
 
             var combined = new List<KiteInstrumentListItemDto>(nse.Items);
             var scanTruncated = nse.Truncated;
-            var remaining = cap - combined.Count;
-            if (remaining > 0)
-            {
-                var bse = await _kiteInstruments
-                    .SearchExchangeInstrumentsAsync("BSE", apiKey, accessToken, needle, remaining, equityCashOnly: true, ct)
-                    .ConfigureAwait(false);
-                if (!bse.Success)
-                    throw new InvalidOperationException(bse.ErrorMessage ?? "Could not search BSE equity instruments on Kite.");
 
-                combined.AddRange(bse.Items);
-                scanTruncated |= bse.Truncated;
-            }
+            var bse = await bseTask.ConfigureAwait(false);
+            if (!bse.Success)
+                throw new InvalidOperationException(bse.ErrorMessage ?? "Could not search BSE equity instruments on Kite.");
+
+            combined.AddRange(bse.Items);
+            scanTruncated |= bse.Truncated;
 
             return new KiteInstrumentSearchDto(combined, scanTruncated);
         }
@@ -340,7 +342,7 @@ public sealed class BrokerService : IBrokerService
                     apiKey,
                     accessToken,
                     needle,
-                    KiteInstrumentBrowsePanelMaxRows,
+                    KiteInstrumentSearchUnlimited,
                     ct: ct)
                 .ConfigureAwait(false);
             if (!mcx.Success)
