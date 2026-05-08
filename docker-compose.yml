@@ -55,8 +55,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        # Browser calls the API on the host-mapped port (not a Docker service hostname).
-        VITE_API_BASE_URL: http://localhost:5232
+        # Browser calls same-origin /api; nginx proxies to the api service.
+        VITE_API_BASE_URL: ""
     ports:
       - "8080:80"
     depends_on:

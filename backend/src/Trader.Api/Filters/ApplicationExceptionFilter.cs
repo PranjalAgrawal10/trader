@@ -17,7 +17,6 @@ public sealed class ApplicationExceptionFilter : IExceptionFilter
         ProblemDetails? problem = context.Exception switch
         {
             ConflictException ex => Problem(context, StatusCodes.Status409Conflict, "Conflict", ex.Message),
-            RateLimitExceededException ex => Problem(context, StatusCodes.Status429TooManyRequests, "Too Many Requests", ex.Message),
             InvalidOperationException ex => Problem(context, StatusCodes.Status400BadRequest, "Bad Request", ex.Message),
             _ => null,
         };
@@ -28,7 +27,6 @@ public sealed class ApplicationExceptionFilter : IExceptionFilter
         context.Result = problem.Status switch
         {
             StatusCodes.Status409Conflict => new ConflictObjectResult(problem),
-            StatusCodes.Status429TooManyRequests => new ObjectResult(problem) { StatusCode = problem.Status },
             _ => new BadRequestObjectResult(problem),
         };
         context.ExceptionHandled = true;

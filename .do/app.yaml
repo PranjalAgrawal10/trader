@@ -20,6 +20,12 @@ ingress:
         preserve_path_prefix: true
     - match:
         path:
+          prefix: /hubs
+      component:
+        name: trader
+        preserve_path_prefix: true
+    - match:
+        path:
           prefix: /
       component:
         name: trader-web
@@ -57,9 +63,9 @@ static_sites:
     catchall_document: index.html
     environment_slug: node-js
     envs:
-      # Optional if SPA and API share one origin and ingress uses /api → API (client falls back to window.location.origin).
-      # Required when the API is on a different origin — set your real HTTPS base (no trailing slash).
+      # Optional escape hatch only. Default SPA calls are same-origin (/api, /hubs) to avoid CORS preflight OPTIONS.
+      # Set VITE_FORCE_CROSS_ORIGIN_API=true only when the API must live on a different origin.
       - key: VITE_API_BASE_URL
         scope: BUILD_TIME
         type: GENERAL
-        value: https://YOUR_APP_HOSTNAME.ondigitalocean.app
+        value: ""

@@ -59,7 +59,7 @@ npm run dev
 ```
 
 - Dev server: `http://localhost:5173`
-- API base URL: `frontend/.env.development` → `VITE_API_BASE_URL=http://localhost:5232`
+- API calls: same-origin `/api` and `/hubs`; Vite proxies them to the backend (`VITE_API_PROXY_TARGET`, default `http://localhost:5232`).
 
 ## Configuration switches
 

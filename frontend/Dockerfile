@@ -1,4 +1,4 @@
-# Build static assets (Vite). VITE_API_BASE_URL is baked for the *browser* → use host-mapped API port.
+# Build static assets (Vite). By default the browser calls same-origin /api and nginx proxies to the API.
 FROM node:20-alpine AS build
 WORKDIR /app
 
@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY . .
 
-ARG VITE_API_BASE_URL=http://localhost:5232
+ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 RUN npm run build

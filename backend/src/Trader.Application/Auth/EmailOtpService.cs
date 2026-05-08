@@ -1,39 +1,31 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
 using Trader.Application.Configuration;
-using Trader.Application.Exceptions;
 using Trader.Domain.Entities;
 
 namespace Trader.Application.Auth;
 
 public sealed partial class EmailOtpService : IEmailOtpService
 {
-    private const string PublicSendCooldownPrefix = "email-otp-send:";
-    private const string LoginSecondFactorCooldownPrefix = "email-otp-send-login:";
-
     private readonly IEmailOtpRepository _repository;
     private readonly IPlainTextEmailSender _emailSender;
     private readonly IPasswordHasher _passwordHasher;
-    private readonly IMemoryCache _cache;
     private readonly EmailOtpOptions _otpOptions;
 
     public EmailOtpService(
         IEmailOtpRepository repository,
         IPlainTextEmailSender emailSender,
         IPasswordHasher passwordHasher,
-        IMemoryCache cache,
         IOptions<EmailOtpOptions> otpOptions)
     {
         _repository = repository;
         _emailSender = emailSender;
         _passwordHasher = passwordHasher;
-        _cache = cache;
         _otpOptions = otpOptions.Value;
     }
 
@@ -45,7 +37,6 @@ public sealed partial class EmailOtpService : IEmailOtpService
         var email = ValidateAndNormalizeEmail(request.Email);
         return SendSixDigitChallengeAsync(
             email,
-            PublicSendCooldownPrefix,
             "Your verification code",
             (plainCode, expiryMinutes) =>
                 $"Your verification code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not request this, you can ignore this email.",
@@ -57,7 +48,6 @@ public sealed partial class EmailOtpService : IEmailOtpService
         var email = ValidateAndNormalizeEmail(normalizedEmail);
         return SendSixDigitChallengeAsync(
             email,
-            LoginSecondFactorCooldownPrefix,
             "Your Trader sign-in code",
             (plainCode, expiryMinutes) =>
                 $"Your Trader sign-in code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not sign in, change your password and contact support.",
@@ -66,20 +56,10 @@ public sealed partial class EmailOtpService : IEmailOtpService
 
     private async Task SendSixDigitChallengeAsync(
         string normalizedEmail,
-        string cacheKeyPrefix,
         string subject,
         Func<string, int, string> buildBody,
         CancellationToken ct)
     {
-        var cooldownSeconds = EffectiveMinSecondsBetweenSends();
-        var cacheKey = cacheKeyPrefix + normalizedEmail;
-
-        if (_cache.TryGetValue(cacheKey, out _))
-        {
-            throw new RateLimitExceededException(
-                "Please wait before requesting another verification code for this email address.");
-        }
-
         var plainCode = GenerateSixDigitCode();
         var hash = _passwordHasher.Hash(plainCode);
         var expiryMinutes = EffectiveExpiryMinutes();
@@ -110,14 +90,6 @@ public sealed partial class EmailOtpService : IEmailOtpService
             await _repository.DeleteByIdAsync(challenge.Id, ct);
             throw;
         }
-
-        _cache.Set(
-            cacheKey,
-            byte.MinValue,
-            new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(cooldownSeconds),
-            });
     }
 
     public async Task<EmailOtpVerifyResponse> VerifyAsync(EmailOtpVerifyRequest request, CancellationToken ct = default)
@@ -185,13 +157,6 @@ public sealed partial class EmailOtpService : IEmailOtpService
         {
             >= 1 and <= 60 => _otpOptions.ExpiryMinutes,
             _ => 5,
-        };
-
-    private int EffectiveMinSecondsBetweenSends() =>
-        _otpOptions.MinSecondsBetweenSendsPerEmail switch
-        {
-            >= 15 and <= 3600 => _otpOptions.MinSecondsBetweenSendsPerEmail,
-            _ => 60,
         };
 
     private int EffectiveMaxFailures() =>

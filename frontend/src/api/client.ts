@@ -21,18 +21,14 @@ function relativePath(url: string | undefined): string {
 }
 
 function resolveApiBaseUrl(): string {
+  const allowCrossOrigin = import.meta.env.VITE_FORCE_CROSS_ORIGIN_API === 'true'
   const raw = import.meta.env.VITE_API_BASE_URL?.trim()
-  if (raw)
+  if (allowCrossOrigin && raw)
     return raw.replace(/\/$/, '')
 
-  // Production on same host as API (e.g. App Platform: `/api` → API, `/` → static): Vite may not have
-  // BUILD_TIME env; using the page origin avoids a blank bundle from a missing `VITE_API_BASE_URL`.
-  if (!import.meta.env.DEV && typeof window !== 'undefined' && window.location?.origin)
-    return window.location.origin.replace(/\/$/, '')
-
-  throw new Error(
-    'VITE_API_BASE_URL is missing. Add it to frontend/.env.development (local) or .env.production / App Platform BUILD_TIME env.',
-  )
+  // Default to same-origin `/api` so browser requests don't trigger CORS preflight OPTIONS.
+  // Dev uses Vite's proxy; Docker/nginx and App Platform ingress route `/api` to the API.
+  return ''
 }
 
 export const api = axios.create({

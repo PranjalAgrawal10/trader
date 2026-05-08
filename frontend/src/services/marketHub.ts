@@ -2,14 +2,10 @@ import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/s
 import { useAuthStore } from '../store/useAuthStore'
 
 function resolveApiOrigin(): string {
+  const allowCrossOrigin = import.meta.env.VITE_FORCE_CROSS_ORIGIN_API === 'true'
   const raw = import.meta.env.VITE_API_BASE_URL?.trim()
-  if (raw) return raw.replace(/\/$/, '')
-  if (!import.meta.env.DEV && typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin.replace(/\/$/, '')
-  }
-  throw new Error(
-    'VITE_API_BASE_URL is missing. Add it to frontend/.env.development (local) so the market hub can reach the API.',
-  )
+  if (allowCrossOrigin && raw) return raw.replace(/\/$/, '')
+  return ''
 }
 
 /** Payload items match backend MarketTickDto (camelCase JSON). */

@@ -1,6 +1,6 @@
 # Trader web (frontend)
 
-Vite + React SPA. Configure **`VITE_API_BASE_URL`** in **`.env.development`** / **`.env.production`**.
+Vite + React SPA. API calls use same-origin **`/api`** by default to avoid CORS preflight **`OPTIONS`**. In dev, Vite proxies **`/api`** and **`/hubs`** to the API; for the Docker image, nginx does the same.
 
 ```bash
 npm install

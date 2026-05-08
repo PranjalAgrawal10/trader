@@ -97,7 +97,7 @@ dotnet run --project src/Trader.Api
 - **Realtime:** SignalR hub **`/hubs/market`** (same origin as the API). Authenticate with the SPA JWT via the **`access_token`** query parameter (the JS client uses `accessTokenFactory`). Hub methods: **`SubscribeInstrument`** / **`UnsubscribeInstrument`** (numeric Kite `instrument_token`). Server pushes batched **`ticks`** events: `[{ i, p, v, t? }]` (LTP mode). Requires **Zerodha** connected and a valid Kite session; the server opens one **Kite WebSocket** per user with active subscriptions (`Tech.Zerodha.KiteConnect` **4.3.0**). When **`LiveCandles:Enabled`** is **true** (default in `appsettings.json`; **false** in integration tests), those ticks also **aggregate into UTC 1-minute OHLCV** rows in **`HistoricalCandles`** (`Timeframe` **`1m`**); duplicate subscriptions across users **dedupe by instrument**. Turn off with **`LiveCandles__Enabled=false`** if you use a non-MySQL provider without raw SQL upserts.
 
 **Authentication:** **`POST /api/v1/auth/register`** responds **`{ "email_verification_required": true }`** and emails a verification link (**`Smtp__*`**, **`PublicWeb__FrontendBaseUrl`** — see **`.env.example`**). **`POST /api/v1/auth/verify-email`** **`{ "token" }`** returns a JWT. **`POST /api/v1/auth/login`** returns **`{ "requires_email_verification": true }`** when the password is correct but email is not confirmed yet. Once verified, normal login returns a JWT or **`{ "requires_2fa": true, "temp_token": "…", "second_factor": "authenticator" | "email_otp" }`** when a second factor is enabled; complete with **`POST /api/v1/2fa/verify-login`**. Use **`POST /api/v1/auth/resend-login-otp`** for **`email_otp`**. **`GET /api/v1/auth/me`** includes **`email_verified`**. **Password reset:** **`POST /api/v1/auth/forgot-password`**, **`POST /api/v1/auth/reset-password`**. **`POST /api/v1/2fa/enable-email-sign-in`** (Bearer) turns on email codes; **`GET /api/v1/2fa/status`** includes **`second_factor_method`**.
-**Verify-login `otp`** is a TOTP or recovery code when **`second_factor`** is **`authenticator`**, and the emailed six-digit code when **`email_otp`**. Repeated failures lock the step (**`Auth:MaxFailedTotpAttemptsPerScope`**, **`Auth:TotpAttemptLockoutMinutes`**). Bearer **Enrollment** routes: **`2fa/setup`**, **`verify-setup`** (issues **`recovery_codes`** once), **`cancel-setup`**, **`disable`** (password and/or OTP/recovery for authenticator mode; password-only to disable email OTP). Managed MySQL should run migrations including **`EmailOtpChallenges`**, **`AddUserEmailVerificationAndSecondFactor`**, **`AddKiteFavoriteInstruments`**, **`AddKiteInstrumentsChartSettings`**, **`AddKiteInstrumentsChartZoomJson`**, **`AddKiteInstrumentsChartIntervalByInstrumentTokenJson`**, **`AddMlPriceDirectionPredictions`**, **`AddMlFavoriteEodReportSent`**, **`AddFavoriteMlUserAndPredictionSource`**, and **`AddBrokerAccountsAndHistoricalCandles`** ( **`BrokerAccounts`** + **`HistoricalCandles`**; Kite tokens move off **`Users`** ). Demo-only: **`POST /api/v1/auth/email-otp/*`**.
+**Verify-login `otp`** is a TOTP or recovery code when **`second_factor`** is **`authenticator`**, and the emailed six-digit code when **`email_otp`**. Bearer **Enrollment** routes: **`2fa/setup`**, **`verify-setup`** (issues **`recovery_codes`** once), **`cancel-setup`**, **`disable`** (password and/or OTP/recovery for authenticator mode; password-only to disable email OTP). Managed MySQL should run migrations including **`EmailOtpChallenges`**, **`AddUserEmailVerificationAndSecondFactor`**, **`AddKiteFavoriteInstruments`**, **`AddKiteInstrumentsChartSettings`**, **`AddKiteInstrumentsChartZoomJson`**, **`AddKiteInstrumentsChartIntervalByInstrumentTokenJson`**, **`AddMlPriceDirectionPredictions`**, **`AddMlFavoriteEodReportSent`**, **`AddFavoriteMlUserAndPredictionSource`**, and **`AddBrokerAccountsAndHistoricalCandles`** ( **`BrokerAccounts`** + **`HistoricalCandles`**; Kite tokens move off **`Users`** ). Demo-only: **`POST /api/v1/auth/email-otp/*`**.
 
 The SPA exposes **`/verify-email`**, **`/forgot-password`**, and **`/reset-password`** aligned with **`PublicWeb`** paths. The **`/profile`** page (**Account**, **Security** — email vs authenticator 2FA, **Broker**) is still the gate (`RequiresTwoFactor`, `RequiresBroker`). **`/security`** and **`/brokers`** redirects are unchanged.
 
@@ -112,7 +112,7 @@ npm run dev
 ```
 
 - Dev server uses `.env.development` (`VITE_*` variables).
-- Set `VITE_API_BASE_URL` to your API origin (e.g. `http://localhost:5232`). The client calls `{VITE_API_BASE_URL}/api/v1`.
+- The client calls same-origin **`/api/v1`** by default; Vite proxies **`/api`** and **`/hubs`** to the API in dev. This avoids browser CORS preflight **`OPTIONS`** for authenticated requests.
 - **Displayed instants** in the UI use the browser’s local timezone in **`DD/MM/YY HH.mm.ss.fff`** (24-hour clock, millisecond precision) via **`frontend/src/utils/formatLocalDateTime.ts`** (HTML **`datetime-local`** inputs keep `yyyy-MM-ddTHH:mm` as required).
 - On **Kite instruments** at **`/instruments`**, the chart toolbar includes **Candles**: green/red OHLC candlesticks with a **time axis** along the bottom and **hover** OHLC/VOL + MA details; **Zoom** (+ / − / Reset) can narrow the view to as few as **one** recent bar or reset to the full downloaded series; **Full screen** uses the browser’s fullscreen API on the zoom + plot panel (favorites tiles and **Browse** detail chart) and keeps range caption, ML controls, and (**Browse**) symbol / LTP / favorites, chart toolbar, and ML bar in a **scrollable top-left** strip above the chart; visible-bar count is **saved per instrument** (server) and restored when you reopen charts; overlays **SMA 20** (amber), **EMA 9** (violet), **EMA 21** (sky), and an optional **custom-period EMA** (orange, period 2–500, toggle + number input; preference in **localStorage**) on line, bar, and candle plots (optional **Trend LR** — least-squares regression over visible closes — on **Candles** only; unrelated to toolbar **Trend analysis**, which multi-selects intervals and calls **`…/broker/kite/chart/historical-ohlc`** per selection for LR-on-close summaries over the same **Range** as the chart/favorites tile); indicator toggles are **local UI** only (except custom EMA prefs in **localStorage**). **Search Kite** runs the server file scan on **Enter** or button click whenever the query is non-empty (including when the capped preview already shows matches); **Browse** uses one **segment** per list (F&O vs MCX); **All favorites** merges **both** segment searches. **All favorites** chart tiles include the same **ML next-bar bias** control as **Browse** (calls `predictions/price-direction` per instrument; **history** for that bias is stored **per user** on the server). **Full predictions** (browser fullscreen) shows **one pie chart per model** returned by **`GET …/predictions/price-direction/models`** (server order; **correct** / **wrong** / **pending** counts combine **classic** and **LightGBM** history rows per `modelId`), plus **taller scrollable** history tables for each store (**filter** search above each table). The **Auto predictions** tab has the server **Auto ML for favorites** toggle, the same row **filter**, and requests up to **5000** merged classic + LightGBM rows from **`GET …/predictions/price-direction/automation-recent?take=`** (capped server-side). **Refresh chart** (next to zoom / fullscreen, or while a chart is still loading) and **↻ Predictions** reload OHLC and prediction history immediately. With Zerodha connected and a row selected on **Browse**, SignalR ticks update the **in-progress** bar for the chosen interval.
 
@@ -123,7 +123,7 @@ cd frontend
 npm run build
 ```
 
-Uses `.env.production` for `VITE_API_BASE_URL`.
+Production builds also default to same-origin **`/api`** / **`/hubs`**; set cross-origin env only as an explicit escape hatch.
 
 ## Docker Compose (full stack)
 
@@ -135,14 +135,12 @@ docker compose up --build
 
 | Service | Host URL / port | Notes |
 |---------|-----------------|--------|
-| **web** (SPA) | **http://localhost:8080** | nginx serves `frontend` production build; client calls API at **`http://localhost:5232`** (see `web.build.args.VITE_API_BASE_URL`). |
+| **web** (SPA) | **http://localhost:8080** | nginx serves `frontend` production build; client calls same-origin **`/api`** and **`/hubs`**, which nginx proxies to the **api** service. |
 | **api** | **http://localhost:5232** | Swagger: `/swagger`, health: `/health`. |
 | **mysql** | **localhost:3307** → container `3306` | Change if **3307** is taken. API inside Compose still uses `mysql:3306`. |
 | **redis** | **localhost:6379** | Reserved for future use. |
 
-CORS in Compose allows **`http://localhost:8080`** (Docker UI) and **`http://localhost:5173`** (optional local `npm run dev`). **SignalR** (`/hubs/market`) uses WebSockets; ensure any **reverse proxy** in front of the API allows **upgrade** and long-lived connections for that path.
-
-To use a different API port or hostname, rebuild **`web`** with another build-arg, e.g. in `docker-compose.yml`: `VITE_API_BASE_URL: http://localhost:YOUR_PORT`.
+CORS in Compose still allows **`http://localhost:8080`** (Docker UI) and **`http://localhost:5173`** (optional local `npm run dev`) for direct API debugging, but the browser SPA normally uses same-origin proxy routes. **SignalR** (`/hubs/market`) uses WebSockets; ensure any **reverse proxy** in front of the API allows **upgrade** and long-lived connections for that path.
 
 `redis` is included for future use; the current API code does not require it.
 
@@ -168,7 +166,7 @@ Required for a real MySQL run: **`Database:Provider`**, then all of **`Database:
 
 **404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
 
-1. **API calls return 404** — the browser requests `https://<your-app>/api/v1/...`. If ingress sends `/api` traffic to the static site, or **strips** the `/api` prefix before the .NET service, Kestrel sees the wrong path (for example `/v1/...` instead of `/api/v1/...`) and returns 404. Fix in the app **ingress** (Settings → your app → **Ingress** or edit the app spec): add a rule with path prefix **`/api`** pointing at your **Web Service** (API) component and set **`preserve_path_prefix: true`**. List the **`/api` rule before** the catch‑all **`/`** rule that serves the **Static Site**. Then set **`frontend/.env.production`** — or the static site’s **BUILD_TIME** env **`VITE_API_BASE_URL`** — to the **same public origin** as the SPA when both are one hostname (optional if you rely on same-origin fallback in `frontend/src/api/client.ts`). No path segment; the client appends `/api/v1`.
+1. **API calls return 404** — the browser requests `https://<your-app>/api/v1/...`. If ingress sends `/api` traffic to the static site, or **strips** the `/api` prefix before the .NET service, Kestrel sees the wrong path (for example `/v1/...` instead of `/api/v1/...`) and returns 404. Fix in the app **ingress** (Settings → your app → **Ingress** or edit the app spec): add a rule with path prefix **`/api`** pointing at your **Web Service** (API) component and set **`preserve_path_prefix: true`**. Add a second API rule for **`/hubs`** with the same setting so SignalR stays same-origin too. List **`/api`** and **`/hubs`** before the catch‑all **`/`** rule that serves the **Static Site**. Do not set the frontend build to a separate API hostname unless you intentionally accept CORS preflight **`OPTIONS`**.
 2. **Refreshing a deep link (e.g. `/profile`, `/instruments`) returns 404** — the static host has no file at that path. In the **Static Site** component, under **Custom Pages**, set **Catchall** to **`index.html`** (see [Manage static sites — Custom Pages](https://docs.digitalocean.com/products/app-platform/how-to/manage-static-sites/)). The web build also emits **`404.html`** (copy of `index.html`) for hosts that use a custom error page.
 
 #### Zerodha Kite Connect
@@ -180,11 +178,11 @@ Required for a real MySQL run: **`Database:Provider`**, then all of **`Database:
 
 Successful redirects from Kite include **`request_token`**; a **`status=success`** query parameter is **not** always present. The API treats the callback as failed only if **`status`** is sent and is **not** `success`.
 
-**Split SPA and API (two public hostnames)** — e.g. static site at `https://trader-fe-vumpy.ondigitalocean.app` and API at `https://trader-be-7cdnc.ondigitalocean.app` ([Trader Console](https://trader-fe-vumpy.ondigitalocean.app/) · [API root](https://trader-be-7cdnc.ondigitalocean.app/)):
+**Split SPA and API (two public hostnames)** — e.g. static site at `https://trader-fe-vumpy.ondigitalocean.app` and API at `https://trader-be-7cdnc.ondigitalocean.app` ([Trader Console](https://trader-fe-vumpy.ondigitalocean.app/) · [API root](https://trader-be-7cdnc.ondigitalocean.app/)). This mode will produce browser CORS preflight **`OPTIONS`** for authenticated API calls because of the Bearer token header; prefer one public app hostname with **`/api`** and **`/hubs`** routed to the API when you want no UI `OPTIONS` calls:
 
 | Where | Setting |
 |--------|---------|
-| **Frontend build** | **`VITE_API_BASE_URL`** = `https://trader-be-7cdnc.ondigitalocean.app` (no trailing slash). Required when the SPA origin ≠ API origin. |
+| **Frontend build** | **`VITE_FORCE_CROSS_ORIGIN_API=true`** and **`VITE_API_BASE_URL`** = `https://trader-be-7cdnc.ondigitalocean.app` (no trailing slash). Required only when the SPA origin must differ from the API origin. |
 | **API env** | **`Cors__Origins__0`** = `https://trader-fe-vumpy.ondigitalocean.app` (exact SPA origin; no trailing slash). |
 | **Kite developer console** | **Redirect URL** = `https://trader-be-7cdnc.ondigitalocean.app/api/v1/broker/kite/callback` — must be the **API** host, not the static site. |
 | **API env** | **`ZerodhaKite__RedirectUrl`** = same URL as in Kite console. |
@@ -203,8 +201,8 @@ SPA paths: **`/instruments?tab=favorites`** (or **`?tab=fav`**, **`?fav=1`**, **
 
 | File | Purpose |
 |------|---------|
-| `.env.development` | `VITE_API_BASE_URL`, optional `VITE_DEV_SERVER_PORT`, `VITE_API_PROXY_TARGET` |
-| `.env.production` | Optional: production API origin. If unset in the production **build**, the client uses **`window.location.origin`** when the SPA and API share the same host and ingress serves `/api` on that host. |
+| `.env.development` | Optional `VITE_DEV_SERVER_PORT`, `VITE_API_PROXY_TARGET`; same-origin **`/api`** / **`/hubs`** is the default. |
+| `.env.production` | Same-origin **`/api`** / **`/hubs`** is the default. Use **`VITE_FORCE_CROSS_ORIGIN_API=true`** + **`VITE_API_BASE_URL`** only for a deliberate split-host deployment. |
 
 See `frontend/.env.example`. Only variables prefixed with `VITE_` are exposed to the browser.
 
@@ -214,7 +212,7 @@ Example layout for production: see **[Deploy to DigitalOcean App Platform](#depl
 
 ## Deploy to DigitalOcean App Platform
 
-High-level path: **Managed MySQL** + **one App** from this monorepo with a **Web Service** (API) and a **Static Site** (frontend), plus **ingress** so **`/api` → API** and **`/` → static**. TLS is at the edge; the .NET container listens on HTTP **8080** internally (match **`http_port`** in the spec).
+High-level path: **Managed MySQL** + **one App** from this monorepo with a **Web Service** (API) and a **Static Site** (frontend), plus **ingress** so **`/api` → API**, **`/hubs` → API**, and **`/` → static**. TLS is at the edge; the .NET container listens on HTTP **8080** internally (match **`http_port`** in the spec).
 
 ### 1. Database
 
@@ -228,7 +226,7 @@ High-level path: **Managed MySQL** + **one App** from this monorepo with a **Web
 ### 3. Create / update the app
 
 - **Apps → Create** → GitHub → pick repo. Paste or import the spec from **`.do/app.yaml`**, or after the first wizard pass use **Settings → App Spec** / **`doctl apps update --spec .do/app.yaml`**.
-- Ensure **ingress** matches the file: **`/api` first** with **`preserve_path_prefix: true`** on the **Web Service** named **`trader`** (or rename consistently), then **`/`** to static **`trader-web`**.
+- Ensure **ingress** matches the file: **`/api`** and **`/hubs`** first with **`preserve_path_prefix: true`** on the **Web Service** named **`trader`** (or rename consistently), then **`/`** to static **`trader-web`**.
 
 ### 4. API environment variables (Web Service `trader`)
 
@@ -252,7 +250,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
 
 - **Build command:** `npm install && npm run build` · **Output directory:** **`dist`** · **Source directory:** **`frontend`** (monorepo).
 - **Custom pages:** **Catchall** = **`index.html`** (required for client-side routes).
-- **`VITE_API_BASE_URL` (BUILD_TIME):** Set to your **public HTTPS origin** (e.g. `https://your-app.ondigitalocean.app`) if the SPA and API share one hostname—**or** omit and rely on the client’s same-origin fallback. If the API is **only** on another URL, set that origin here.
+- Do **not** set **`VITE_API_BASE_URL`** for the normal one-host deployment. The SPA calls same-origin **`/api`** and **`/hubs`**, which avoids CORS preflight **`OPTIONS`**. Only for a required split-host deployment, set **`VITE_FORCE_CROSS_ORIGIN_API=true`** and **`VITE_API_BASE_URL`** to the API origin.
 
 ### 6. Database schema
 

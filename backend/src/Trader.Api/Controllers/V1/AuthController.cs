@@ -26,7 +26,6 @@ public sealed class AuthController : ControllerBase
     [HttpPost("email-otp/send")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> SendEmailOtp([FromBody] EmailOtpSendRequest request, CancellationToken ct)
     {
         await _emailOtp.SendAsync(request, ct);
@@ -74,7 +73,6 @@ public sealed class AuthController : ControllerBase
     [HttpPost("resend-login-otp")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status429TooManyRequests)]
     public async Task<IActionResult> ResendLoginOtp([FromBody] ResendLoginOtpRequest request, CancellationToken ct)
     {
         await _auth.ResendLoginSecondFactorOtpAsync(request, ct);
