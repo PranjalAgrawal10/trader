@@ -99,6 +99,7 @@ public static class DependencyInjection
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IKiteFavoriteInstrumentRepository, KiteFavoriteInstrumentRepository>();
+        services.AddScoped<IKiteTradingLockInstrumentRepository, KiteTradingLockInstrumentRepository>();
         services.AddScoped<IMlPriceDirectionPredictionRepository, MlPriceDirectionPredictionRepository>();
         services.AddScoped<IMlLightGbmTripleBarrierPredictionRepository, MlLightGbmTripleBarrierPredictionRepository>();
         services.AddScoped<IMlFavoriteEodReportSentRepository, MlFavoriteEodReportSentRepository>();

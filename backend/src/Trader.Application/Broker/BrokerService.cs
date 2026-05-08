@@ -22,15 +22,15 @@ public sealed class BrokerService : IBrokerService
     private const string PendingStateCachePrefix = "Trader.KiteOAuth.PendingState:";
     private static readonly TimeSpan PendingStateTtl = TimeSpan.FromMinutes(20);
 
-    /// <summary>Row cap per Kite <c>/instruments/{exchange}</c> response (streaming stops early; truncated flag set when more rows exist).</summary>
-    private const int KiteInstrumentsMaxRowsPerExchange = 100;
-
-    private const int KiteInstrumentSearchMaxMatchesFnoPerExchange = 50;
-    private const int KiteInstrumentSearchMaxMatchesMcx = 100;
-    private const int KiteInstrumentSearchMaxMatchesSpotPerExchange = 80;
+    /// <summary>
+    /// Browse lists and Kite instrument search: max rows per panel (F&amp;O combined NFO+BFO, MCX, Spot match budget).
+    /// Per-exchange CSV fetches use this as <c>maxRows</c>; merged F&amp;O may be sliced to this total.
+    /// </summary>
+    private const int KiteInstrumentBrowsePanelMaxRows = 50;
     private const int KiteInstrumentSearchQueryMaxLength = 128;
 
     private const int MaxKiteFavoriteInstrumentsPerUser = 400;
+    private const int MaxKiteTradingLockInstrumentsPerUser = 400;
 
     private const int KiteQuoteOhlcBatchSizeBroker = 140;
 
@@ -45,6 +45,7 @@ public sealed class BrokerService : IBrokerService
     private readonly IKiteSessionExchange _kiteSessionExchange;
     private readonly IKiteInstrumentsClient _kiteInstruments;
     private readonly IKiteFavoriteInstrumentRepository _kiteFavoriteInstruments;
+    private readonly IKiteTradingLockInstrumentRepository _kiteTradingLocks;
     private readonly IKiteInstrumentsChartSettingsGateway _kiteChartSettings;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
     private readonly IMemoryCache _memoryCache;
@@ -55,6 +56,7 @@ public sealed class BrokerService : IBrokerService
         IKiteSessionExchange kiteSessionExchange,
         IKiteInstrumentsClient kiteInstruments,
         IKiteFavoriteInstrumentRepository kiteFavoriteInstruments,
+        IKiteTradingLockInstrumentRepository kiteTradingLocks,
         IKiteInstrumentsChartSettingsGateway kiteChartSettings,
         IOptions<ZerodhaKiteOptions> kiteOptions,
         IMemoryCache memoryCache)
@@ -64,6 +66,7 @@ public sealed class BrokerService : IBrokerService
         _kiteSessionExchange = kiteSessionExchange;
         _kiteInstruments = kiteInstruments;
         _kiteFavoriteInstruments = kiteFavoriteInstruments;
+        _kiteTradingLocks = kiteTradingLocks;
         _kiteChartSettings = kiteChartSettings;
         _kiteOptions = kiteOptions;
         _memoryCache = memoryCache;
@@ -137,7 +140,7 @@ public sealed class BrokerService : IBrokerService
     {
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
 
-        var cap = (int?)KiteInstrumentsMaxRowsPerExchange;
+        var cap = (int?)KiteInstrumentBrowsePanelMaxRows;
         var nfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("NFO", apiKey, accessToken, cap, ct);
         var bfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("BFO", apiKey, accessToken, cap, ct);
         var mcxTask = _kiteInstruments.FetchExchangeInstrumentsAsync("MCX", apiKey, accessToken, cap, ct);
@@ -156,6 +159,13 @@ public sealed class BrokerService : IBrokerService
         {
             fno.AddRange(bfo.Items);
             fnoTruncated |= bfo.Truncated;
+        }
+
+        var combinedFnoCount = fno.Count;
+        if (combinedFnoCount > KiteInstrumentBrowsePanelMaxRows)
+        {
+            fno = fno.Take(KiteInstrumentBrowsePanelMaxRows).ToList();
+            fnoTruncated = true;
         }
 
         var mcx = await mcxTask.ConfigureAwait(false);
@@ -237,9 +247,37 @@ public sealed class BrokerService : IBrokerService
 
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
 
+        if (segment == KiteInstrumentSearchSegment.All)
+        {
+            var fTask = SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Fno, ct);
+            var mTask = SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Mcx, ct);
+            var sTask = SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Spot, ct);
+            await Task.WhenAll(fTask, mTask, sTask).ConfigureAwait(false);
+            var f = await fTask.ConfigureAwait(false);
+            var m = await mTask.ConfigureAwait(false);
+            var s = await sTask.ConfigureAwait(false);
+
+            var scanTruncated = f.ScanTruncated || m.ScanTruncated || s.ScanTruncated;
+            var byKey = new Dictionary<string, KiteInstrumentListItemDto>(StringComparer.Ordinal);
+            void AddDistinct(IReadOnlyList<KiteInstrumentListItemDto> items)
+            {
+                foreach (var item in items)
+                {
+                    var k = $"{item.Exchange.Trim()}:{item.Tradingsymbol.Trim()}";
+                    if (!byKey.ContainsKey(k))
+                        byKey[k] = item;
+                }
+            }
+
+            AddDistinct(f.Items);
+            AddDistinct(m.Items);
+            AddDistinct(s.Items);
+            return new KiteInstrumentSearchDto(byKey.Values.ToList(), scanTruncated);
+        }
+
         if (segment == KiteInstrumentSearchSegment.Fno)
         {
-            var cap = KiteInstrumentSearchMaxMatchesFnoPerExchange;
+            var cap = KiteInstrumentBrowsePanelMaxRows;
             var nfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("NFO", apiKey, accessToken, needle, cap, ct: ct);
             var bfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("BFO", apiKey, accessToken, needle, cap, ct: ct);
             await Task.WhenAll(nfoTask, bfoTask).ConfigureAwait(false);
@@ -258,12 +296,18 @@ public sealed class BrokerService : IBrokerService
                 scanTruncated |= bfo.Truncated;
             }
 
+            if (combined.Count > KiteInstrumentBrowsePanelMaxRows)
+            {
+                combined = combined.Take(KiteInstrumentBrowsePanelMaxRows).ToList();
+                scanTruncated = true;
+            }
+
             return new KiteInstrumentSearchDto(combined, scanTruncated);
         }
 
         if (segment == KiteInstrumentSearchSegment.Spot)
         {
-            var cap = KiteInstrumentSearchMaxMatchesSpotPerExchange;
+            var cap = KiteInstrumentBrowsePanelMaxRows;
             var nse = await _kiteInstruments
                 .SearchExchangeInstrumentsAsync("NSE", apiKey, accessToken, needle, cap, equityCashOnly: true, ct)
                 .ConfigureAwait(false);
@@ -288,6 +332,7 @@ public sealed class BrokerService : IBrokerService
             return new KiteInstrumentSearchDto(combined, scanTruncated);
         }
 
+        if (segment == KiteInstrumentSearchSegment.Mcx)
         {
             var mcx = await _kiteInstruments
                 .SearchExchangeInstrumentsAsync(
@@ -295,7 +340,7 @@ public sealed class BrokerService : IBrokerService
                     apiKey,
                     accessToken,
                     needle,
-                    KiteInstrumentSearchMaxMatchesMcx,
+                    KiteInstrumentBrowsePanelMaxRows,
                     ct: ct)
                 .ConfigureAwait(false);
             if (!mcx.Success)
@@ -303,6 +348,8 @@ public sealed class BrokerService : IBrokerService
 
             return new KiteInstrumentSearchDto(mcx.Items, mcx.Truncated);
         }
+
+        throw new InvalidOperationException($"Unexpected segment: {segment}.");
     }
 
     public async Task<KiteHistoricalCandlesDto> GetKiteHistoricalCandlesAsync(
@@ -559,6 +606,76 @@ public sealed class BrokerService : IBrokerService
         await _kiteFavoriteInstruments.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<KiteTradingLocksListDto> GetKiteTradingLocksAsync(Guid userId, CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+        var rows = await _kiteTradingLocks.ListByUserAsync(userId, ct).ConfigureAwait(false);
+        var items = rows.Select(MapTradingLockToDto).ToList();
+        return new KiteTradingLocksListDto(items);
+    }
+
+    public async Task AddKiteTradingLockAsync(
+        Guid userId,
+        KiteInstrumentListItemDto item,
+        CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(item.InstrumentToken)
+            || !item.InstrumentToken.Trim().All(char.IsAsciiDigit))
+            throw new InvalidOperationException("A numeric instrument token from Kite is required.");
+
+        var token = item.InstrumentToken.Trim();
+        if (token.Length > 64)
+            throw new InvalidOperationException("Instrument token is too long.");
+
+        if (string.IsNullOrWhiteSpace(item.Tradingsymbol) || string.IsNullOrWhiteSpace(item.Exchange))
+            throw new InvalidOperationException("Tradingsymbol and exchange are required.");
+
+        var existing = await _kiteTradingLocks.FindAsync(userId, token, ct).ConfigureAwait(false);
+        if (existing is not null)
+            return;
+
+        var count = await _kiteTradingLocks.CountByUserAsync(userId, ct).ConfigureAwait(false);
+        if (count >= MaxKiteTradingLockInstrumentsPerUser)
+            throw new InvalidOperationException($"You can lock at most {MaxKiteTradingLockInstrumentsPerUser} instruments for trading.");
+
+        var entity = new KiteTradingLockInstrument
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            InstrumentToken = token,
+            Tradingsymbol = item.Tradingsymbol.Trim(),
+            Exchange = item.Exchange.Trim(),
+            Name = NullableNorm(item.Name),
+            InstrumentType = NullableNorm(item.InstrumentType),
+            Segment = NullableNorm(item.Segment),
+            Expiry = NullableNorm(item.Expiry),
+            Strike = item.Strike,
+            LotSize = item.LotSize,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+        };
+
+        await _kiteTradingLocks.AddAsync(entity, ct).ConfigureAwait(false);
+        await _kiteTradingLocks.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task RemoveKiteTradingLockAsync(Guid userId, string instrumentToken, CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+            return;
+
+        var token = instrumentToken.Trim();
+        var existing = await _kiteTradingLocks.FindAsync(userId, token, ct).ConfigureAwait(false);
+        if (existing is null)
+            return;
+
+        _kiteTradingLocks.Remove(existing);
+        await _kiteTradingLocks.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<KiteInstrumentsChartSettingsDto> GetKiteInstrumentsChartSettingsAsync(
         Guid userId,
         CancellationToken ct = default)
@@ -715,6 +832,18 @@ public sealed class BrokerService : IBrokerService
         if (snapshot is null)
             throw new InvalidOperationException("User not found.");
     }
+
+    private static KiteInstrumentListItemDto MapTradingLockToDto(KiteTradingLockInstrument x) =>
+        new(
+            x.InstrumentToken,
+            x.Tradingsymbol,
+            x.Exchange,
+            x.Name,
+            x.InstrumentType,
+            x.Segment,
+            x.Expiry,
+            x.Strike,
+            x.LotSize);
 
     private static KiteInstrumentListItemDto MapFavoriteToDto(KiteFavoriteInstrument x) =>
         new(

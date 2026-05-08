@@ -1,0 +1,17 @@
+---
+description: SPA user-visible timestamps — canonical local format
+globs: frontend/src/**/*
+alwaysApply: false
+---
+
+# Date / time display (`frontend`)
+
+- **Canonical format** for any **user-visible** timestamp derived from API ISO strings or epoch values:  
+  **`DD/MM/YY HH.mm.ss.fff`** in the **browser’s local timezone**  
+  - Date: two-digit day / month / year (`%` of century for year).  
+  - Time: **24-hour** hours, minutes, seconds; **dot** separators; **three** fractional second digits (milliseconds).
+- **Implementation:** use **`formatLocalDateTime`** from **`frontend/src/utils/formatLocalDateTime.ts`** (extend there if a variant is needed). Avoid `toLocaleString` / `toLocaleTimeString` / ad-hoc formatting for displayed instants so the UI stays consistent.
+- **Exceptions:**  
+  - **`<input type="datetime-local">`** values stay in **`yyyy-MM-ddTHH:mm`** as required by HTML.  
+  - **Wire / API payloads** stay ISO-8601 / UTC as today; this rule is **display-only**.  
+  - **Numeric counts** (e.g. `n.toLocaleString()` for thousands separators) are unrelated.

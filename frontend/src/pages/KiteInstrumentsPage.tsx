@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import {
   Alert,
@@ -143,6 +144,10 @@ interface PriceDirectionModelsApiResponse {
 }
 
 interface KiteFavoritesResponse {
+  items: KiteInstrumentRow[]
+}
+
+interface KiteTradingLocksResponse {
   items: KiteInstrumentRow[]
 }
 
@@ -381,9 +386,9 @@ function coerceChartGraphType(v: string | null | undefined): ChartGraphType {
   return 'line'
 }
 
-type MainTab = 'browse' | 'favorites' | 'automation'
+type MainTab = 'browse' | 'favorites' | 'tradingLocks' | 'automation'
 
-/** Deep-link: <code>?tab=favorites</code> / <code>?tab=fav</code> / <code>?fav=1</code>; <code>?tab=automation</code>. */
+/** Deep-link: <code>?tab=favorites</code> / <code>?tab=fav</code> / <code>?fav=1</code>; <code>?tab=automation</code>; <code>?tab=locked</code>. */
 function mainTabFromSearchParams(params: URLSearchParams): MainTab {
   const raw = params.get('tab')
   const tab = raw?.toLowerCase()
@@ -394,6 +399,7 @@ function mainTabFromSearchParams(params: URLSearchParams): MainTab {
     return favOpen ? 'favorites' : 'browse'
   }
   if (tab === 'favorites' || tab === 'fav') return 'favorites'
+  if (tab === 'locked' || tab === 'trading-locks' || tab === 'tradinglocks') return 'tradingLocks'
   if (tab === 'automation' || tab === 'auto' || tab === 'auto-ml' || tab === 'automl') return 'automation'
   return 'browse'
 }
@@ -416,7 +422,7 @@ function favoriteRowKey(r: KiteInstrumentRow): string {
   return `${r.exchange}:${r.tradingsymbol}:${r.instrumentToken}`
 }
 
-const INSTRUMENT_PAGE_SIZE = 100
+const INSTRUMENT_PAGE_SIZE = 50
 const SCROLL_LOAD_THRESHOLD_PX = 96
 
 function rowSearchHaystack(r: KiteInstrumentRow): string {
@@ -449,6 +455,8 @@ function InstrumentListPanel({
   enableKiteLiveSearch = true,
   favoriteKeySet,
   onToggleFavorite,
+  tradingLockKeySet,
+  onToggleTradingLock,
 }: {
   title: string
   rows: KiteInstrumentRow[]
@@ -463,6 +471,8 @@ function InstrumentListPanel({
   enableKiteLiveSearch?: boolean
   favoriteKeySet: Set<string>
   onToggleFavorite: (row: KiteInstrumentRow) => void
+  tradingLockKeySet?: Set<string>
+  onToggleTradingLock?: (row: KiteInstrumentRow) => void
 }) {
   const searchFieldId = useId()
   const [search, setSearch] = useState('')
@@ -667,6 +677,11 @@ function InstrumentListPanel({
                 <th className="text-center" style={{ width: '2.5rem' }} title="Favorite">
                   ★
                 </th>
+                {onToggleTradingLock ? (
+                  <th className="text-center" style={{ width: '2.5rem' }} title="Locked for trading">
+                    🔒
+                  </th>
+                ) : null}
                 <th>Symbol</th>
                 <th>Exch.</th>
                 <th>Type</th>
@@ -716,6 +731,32 @@ function InstrumentListPanel({
                       {favoriteKeySet.has(favoriteRowKey(r)) ? '★' : '☆'}
                     </Button>
                   </td>
+                  {onToggleTradingLock ? (
+                    <td
+                      className="text-center align-middle"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onToggleTradingLock(r)
+                      }}
+                    >
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="p-0 text-info text-decoration-none lh-1"
+                        aria-label={
+                          (tradingLockKeySet?.has(favoriteRowKey(r)) ?? false)
+                            ? 'Unlock for trading'
+                            : 'Lock for trading'
+                        }
+                        aria-pressed={tradingLockKeySet?.has(favoriteRowKey(r)) ?? false}
+                        tabIndex={0}
+                        style={{ fontSize: '1rem' }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        {(tradingLockKeySet?.has(favoriteRowKey(r)) ?? false) ? '🔒' : '🔓'}
+                      </Button>
+                    </td>
+                  ) : null}
                   <td className="font-monospace">{r.tradingsymbol}</td>
                   <td>{r.exchange}</td>
                   <td>{r.instrumentType ?? '—'}</td>
@@ -791,6 +832,9 @@ const ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT = 'calc(2rem + 2.35rem + (5 * 2.15
 /** Matches server-side PriceDirectionPredictionService.MaxAutomationHistoryTake (merged classic + LightGBM). */
 const ML_AUTOMATION_RECENT_FETCH_TAKE = 5000
 const ML_AUTOMATION_TABLE_MAX_HEIGHT = 'min(780px, 75vh)'
+/** Matches server max take for today-top-performers; Browse shows TODAY_TOP_MOVERS_PAGE_SIZE rows then Load more. */
+const TODAY_TOP_MOVERS_FETCH_TAKE = 30
+const TODAY_TOP_MOVERS_PAGE_SIZE = 5
 
 /** Fewer bars visible (most recent on the right); reindexed for chart axes. */
 function ChartZoomControls({
@@ -1099,15 +1143,14 @@ function HistoricalRangeCaption({
   toIso: string
   compact?: boolean
 }) {
-  const from = formatLocalDateTime(fromIso, { includeMilliseconds: true })
-  const to = formatLocalDateTime(toIso, { includeMilliseconds: true })
+  const from = formatLocalDateTime(fromIso)
+  const to = formatLocalDateTime(toIso)
   return (
     <div className={compact ? 'small text-secondary mb-2' : 'small text-secondary mb-3'}>
       <div className={compact ? 'mb-0' : 'mb-1'}>
         <strong className="text-body-secondary">From</strong>{' '}
         <span className="font-monospace">{from}</span>
-      </div>
-      <div className={compact ? 'mb-0' : 'mb-1'}>
+        <span className="text-body-secondary"> - </span>
         <strong className="text-body-secondary">To</strong>{' '}
         <span className="font-monospace">{to}</span>
       </div>
@@ -1137,7 +1180,7 @@ function ChartTooltipContent({
       className="rounded border border-secondary p-2 small"
       style={{ background: '#212529', color: '#f8f9fa' }}
     >
-      <div>{formatLocalDateTime(p.t, { includeMilliseconds: true })}</div>
+      <div>{formatLocalDateTime(p.t)}</div>
       <div className="font-monospace mt-1">
         O {p.open} · H {p.high} · L {p.low} · C {p.close}
       </div>
@@ -1744,8 +1787,10 @@ function MlAutomationDirectionVotePie({
         </div>
         <p className="small text-secondary mb-2" style={{ maxWidth: '44rem' }}>
           Built from <strong>recent automation predictions</strong> currently shown in the table below (respects search,
-          direction / outcome / interval / engine filters). One count per row. Plurality sets consensus; ties resolve to{' '}
-          <strong>neutral</strong>.
+          direction / outcome / interval / engine filters). One count per row. Each row states the{' '}
+          <strong>ref close</strong> (price at the reference bar when the prediction was made) and, once scored, the{' '}
+          <strong>next close</strong> (price at the bar used to judge the outcome). Plurality sets consensus; ties resolve
+          to <strong>neutral</strong>.
         </p>
         {n === 0 ? (
           <div
@@ -1911,6 +1956,8 @@ function MlAutomationRecentRowMatchesFilter(
     formatLocalDateTime(r.predictedAt),
     formatLocalDateTime(r.refBarTime),
     r.nextBarTime ? formatLocalDateTime(r.nextBarTime) : '',
+    String(r.refClose),
+    r.nextClose != null ? String(r.nextClose) : '',
   ]
   return chunks.some((c) => String(c).toLowerCase().includes(q))
 }
@@ -1954,10 +2001,17 @@ function predictionHistoryMatchesFilter(e: MlPredictionLogEntry, query: string):
 function MlPredictionHistoryTableBody({
   rows,
   compact,
+  headActions,
+  emptyFilterMessage,
 }: {
   rows: MlPredictionLogEntry[]
   compact?: boolean
+  /** Rightmost header cell (e.g. refresh history + full screen). */
+  headActions?: ReactNode
+  /** When <paramref name="rows"/> is empty, one full-width row (e.g. filter matched nothing). */
+  emptyFilterMessage?: string
 }) {
+  const colCount = 11 + (headActions != null ? 1 : 0)
   return (
     <Table
       responsive
@@ -1987,10 +2041,24 @@ function MlPredictionHistoryTableBody({
           <th>Next close</th>
           <th>Model</th>
           <th className="d-none d-md-table-cell">Detail</th>
+          {headActions != null ? (
+            <th className="text-end align-middle" style={{ width: '1%' }}>
+              <div className="d-flex justify-content-end gap-1 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                {headActions}
+              </div>
+            </th>
+          ) : null}
         </tr>
       </thead>
       <tbody>
-        {rows.map((e, idx) => (
+        {rows.length === 0 && emptyFilterMessage ? (
+          <tr>
+            <td colSpan={colCount} className="py-4 px-2 text-secondary small text-center fst-italic">
+              {emptyFilterMessage}
+            </td>
+          </tr>
+        ) : (
+          rows.map((e, idx) => (
           <tr
             key={e.id}
             style={{
@@ -2038,8 +2106,10 @@ function MlPredictionHistoryTableBody({
             <td className="d-none d-md-table-cell text-truncate text-muted" style={{ maxWidth: '12rem' }} title={e.detail}>
               {e.detail}
             </td>
+            {headActions != null ? <td aria-hidden="true" className="p-0 border-secondary" /> : null}
           </tr>
-        ))}
+          ))
+        )}
       </tbody>
     </Table>
   )
@@ -2049,9 +2119,11 @@ function MlPredictionHistoryTableBody({
 function MlPredictionHistoryTableWithFilter({
   rows,
   compact,
+  headActions,
 }: {
   rows: MlPredictionLogEntry[]
   compact?: boolean
+  headActions?: ReactNode
 }) {
   const [filterQuery, setFilterQuery] = useState('')
   const filteredRows = useMemo(
@@ -2078,11 +2150,16 @@ function MlPredictionHistoryTableWithFilter({
           </div>
         ) : null}
       </div>
-      {filteredRows.length === 0 && rows.length > 0 ? (
-        <div className="py-4 px-2 text-secondary small text-center fst-italic">No rows match this filter.</div>
-      ) : (
-        <MlPredictionHistoryTableBody rows={filteredRows} compact={compact} />
-      )}
+      {rows.length > 0 ? (
+        <MlPredictionHistoryTableBody
+          rows={filteredRows}
+          compact={compact}
+          headActions={headActions}
+          emptyFilterMessage={
+            filteredRows.length === 0 && q ? 'No rows match this filter.' : undefined
+          }
+        />
+      ) : null}
     </>
   )
 }
@@ -2295,6 +2372,51 @@ function MlNextBarBiasBar({
     () => sortByPredictedAtNewestFirst(lightGbmHistory),
     [lightGbmHistory],
   )
+  const showHistoryDataTables = history.length > 0 || lightGbmHistory.length > 0
+  const canFullscreenPredictions =
+    history.length > 0 ||
+    lightGbmHistory.length > 0 ||
+    (priceModels != null && priceModels.models.length > 0)
+
+  const mlHistoryHeadActions = useMemo(
+    () => (
+      <>
+        <Button
+          type="button"
+          variant="outline-secondary"
+          size="sm"
+          className="py-0 px-2"
+          disabled={historyLoading}
+          onClick={() => void reloadHistory()}
+          title="Reload prediction history from server"
+          aria-label="Refresh prediction history"
+        >
+          {historyLoading ? (
+            <>
+              <Spinner animation="border" size="sm" className="me-1" role="status" />
+              …
+            </>
+          ) : (
+            '↻ Predictions'
+          )}
+        </Button>
+        {canFullscreenPredictions ? (
+          <Button
+            type="button"
+            variant="outline-secondary"
+            size="sm"
+            className="py-0 px-2"
+            onClick={() => void toggleFullscreen()}
+            title={fullscreenActive ? 'Exit full screen' : 'Full screen predictions and chart'}
+            aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen predictions'}
+          >
+            {fullscreenActive ? (compact ? 'Exit' : 'Exit full screen') : compact ? 'Full' : 'Full predictions'}
+          </Button>
+        ) : null}
+      </>
+    ),
+    [historyLoading, reloadHistory, toggleFullscreen, fullscreenActive, compact, canFullscreenPredictions],
+  )
 
   return (
     <div
@@ -2350,39 +2472,47 @@ function MlNextBarBiasBar({
             'ML next-bar bias'
           )}
         </Button>
-        <Button
-          type="button"
-          variant="outline-secondary"
-          size="sm"
-          className="py-0 px-2"
-          disabled={historyLoading}
-          onClick={() => void reloadHistory()}
-          title="Reload prediction history from server"
-          aria-label="Refresh prediction history"
-        >
-          {historyLoading ? (
-            <>
-              <Spinner animation="border" size="sm" className="me-1" role="status" />
-              …
-            </>
-          ) : (
-            '↻ Predictions'
-          )}
-        </Button>
-        {history.length > 0 ||
-        lightGbmHistory.length > 0 ||
-        (priceModels != null && priceModels.models.length > 0) ? (
-          <Button
-            type="button"
-            variant="outline-secondary"
-            size="sm"
-            className="py-0 px-2"
-            onClick={() => void toggleFullscreen()}
-            title={fullscreenActive ? 'Exit full screen' : 'Full screen predictions and chart'}
-            aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen predictions'}
-          >
-            {fullscreenActive ? (compact ? 'Exit' : 'Exit full screen') : compact ? 'Full' : 'Full predictions'}
-          </Button>
+        {!showHistoryDataTables ? (
+          <>
+            <Button
+              type="button"
+              variant="outline-secondary"
+              size="sm"
+              className="py-0 px-2"
+              disabled={historyLoading}
+              onClick={() => void reloadHistory()}
+              title="Reload prediction history from server"
+              aria-label="Refresh prediction history"
+            >
+              {historyLoading ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-1" role="status" />
+                  …
+                </>
+              ) : (
+                '↻ Predictions'
+              )}
+            </Button>
+            {canFullscreenPredictions ? (
+              <Button
+                type="button"
+                variant="outline-secondary"
+                size="sm"
+                className="py-0 px-2"
+                onClick={() => void toggleFullscreen()}
+                title={fullscreenActive ? 'Exit full screen' : 'Full screen predictions and chart'}
+                aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen predictions'}
+              >
+                {fullscreenActive
+                  ? compact
+                    ? 'Exit'
+                    : 'Exit full screen'
+                  : compact
+                    ? 'Full'
+                    : 'Full predictions'}
+              </Button>
+            ) : null}
+          </>
         ) : null}
         {mlPred ? (
           <span
@@ -2442,7 +2572,11 @@ function MlNextBarBiasBar({
               ML history — classic ({history.length})
             </span>
           </div>
-          <MlPredictionHistoryTableWithFilter rows={mlHistoryTableRows} compact={compact} />
+          <MlPredictionHistoryTableWithFilter
+            rows={mlHistoryTableRows}
+            compact={compact}
+            headActions={mlHistoryHeadActions}
+          />
         </div>
       ) : null}
       {lightGbmHistory.length > 0 ? (
@@ -2465,7 +2599,11 @@ function MlNextBarBiasBar({
               ML history — LightGBM triple-barrier ({lightGbmHistory.length})
             </span>
           </div>
-          <MlPredictionHistoryTableWithFilter rows={mlLightGbmHistoryTableRows} compact={compact} />
+          <MlPredictionHistoryTableWithFilter
+            rows={mlLightGbmHistoryTableRows}
+            compact={compact}
+            headActions={mlHistoryHeadActions}
+          />
         </div>
       ) : null}
     </div>
@@ -2779,7 +2917,10 @@ function FavoritesChartsGrid({
   onCustomEmaPeriodChange,
   trendAnalysisSelections,
   onTrendAnalysisSelectionsChange,
-  onToggleFavorite,
+  listTilePrimaryAction,
+  listTilePrimaryLabel,
+  tradingLockKeySet,
+  onToggleTradingLock,
   chartZoomByInstrumentToken,
   onInstrumentChartZoomChange,
 }: {
@@ -2798,7 +2939,10 @@ function FavoritesChartsGrid({
   onCustomEmaPeriodChange: (n: number) => void
   trendAnalysisSelections: ChartInterval[]
   onTrendAnalysisSelectionsChange: (next: ChartInterval[]) => void
-  onToggleFavorite: (r: KiteInstrumentRow) => void
+  listTilePrimaryAction: (r: KiteInstrumentRow) => void
+  listTilePrimaryLabel: string
+  tradingLockKeySet?: Set<string>
+  onToggleTradingLock?: (r: KiteInstrumentRow) => void
   chartZoomByInstrumentToken: Record<string, number>
   onInstrumentChartZoomChange: (instrumentToken: string, bars: number | null) => void
 }) {
@@ -2822,7 +2966,7 @@ function FavoritesChartsGrid({
         onMaLineVisibilityChange={onMaLineVisibilityChange}
         customEmaPeriod={customEmaPeriod}
         onCustomEmaPeriodChange={onCustomEmaPeriodChange}
-        trendPresetHint="Multi-select does not change the chart interval row; expand each tile for MTF trends"
+        trendPresetHint="Multi-select does not change the chart interval row; each tile shows multi-interval trend below the chart"
       />
       <p className="small text-secondary mb-3" style={{ maxWidth: '48rem' }}>
         <strong>Trend analysis</strong> checkboxes choose which candle sizes participate in{' '}
@@ -2841,15 +2985,31 @@ function FavoritesChartsGrid({
                     <span className="font-monospace fw-semibold">{row.tradingsymbol}</span>
                     <span className="text-secondary ms-1">{row.exchange}</span>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline-warning"
-                    size="sm"
-                    className="py-0 px-2 text-nowrap"
-                    onClick={() => onToggleFavorite(row)}
-                  >
-                    ★ Remove
-                  </Button>
+                  <div className="d-flex flex-wrap gap-1 justify-content-end">
+                    <Button
+                      type="button"
+                      variant="outline-warning"
+                      size="sm"
+                      className="py-0 px-2 text-nowrap"
+                      onClick={() => listTilePrimaryAction(row)}
+                    >
+                      {listTilePrimaryLabel}
+                    </Button>
+                    {onToggleTradingLock && tradingLockKeySet ? (
+                      <Button
+                        type="button"
+                        variant={
+                          tradingLockKeySet.has(favoriteRowKey(row)) ? 'outline-info' : 'outline-secondary'
+                        }
+                        size="sm"
+                        className="py-0 px-2 text-nowrap"
+                        aria-pressed={tradingLockKeySet.has(favoriteRowKey(row))}
+                        onClick={() => onToggleTradingLock(row)}
+                      >
+                        {tradingLockKeySet.has(favoriteRowKey(row)) ? '🔒 Locked' : '🔓 Lock'}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
                 <Form.Group className="mb-2" controlId={`fav-iv-${row.instrumentToken}`}>
                   <Form.Label className="small text-secondary text-uppercase mb-1">Candles for this symbol</Form.Label>
@@ -2911,6 +3071,8 @@ function InstrumentChartCard({
   onCustomEmaPeriodChange,
   isFavorite,
   onToggleFavorite,
+  isTradingLocked,
+  onToggleTradingLock,
   liveLastPrice,
   liveLastTick,
   zoomVisibleBars,
@@ -2931,6 +3093,8 @@ function InstrumentChartCard({
   onCustomEmaPeriodChange: (n: number) => void
   isFavorite: boolean
   onToggleFavorite?: () => void
+  isTradingLocked?: boolean
+  onToggleTradingLock?: () => void
   liveLastPrice?: number | null
   liveLastTick?: MarketTickBatchItem | null
   zoomVisibleBars: number | null
@@ -3058,6 +3222,19 @@ function InstrumentChartCard({
               onClick={() => onToggleFavorite()}
             >
               {isFavorite ? '★ Favorited' : '☆ Add to fav'}
+            </Button>
+          ) : null}
+          {onToggleTradingLock ? (
+            <Button
+              type="button"
+              variant={isTradingLocked ? 'outline-info' : 'outline-secondary'}
+              size="sm"
+              className="py-0 px-2"
+              aria-label={isTradingLocked ? 'Unlock for trading' : 'Lock for trading'}
+              aria-pressed={Boolean(isTradingLocked)}
+              onClick={() => onToggleTradingLock()}
+            >
+              {isTradingLocked ? '🔒 Locked' : '🔓 Lock trade'}
             </Button>
           ) : null}
         </p>
@@ -3286,6 +3463,8 @@ export function KiteInstrumentsPage() {
   const automationIntervalToggleIdPrefix = useId()
   const [favorites, setFavorites] = useState<KiteInstrumentRow[]>([])
   const [favoritesError, setFavoritesError] = useState<string | null>(null)
+  const [tradingLocks, setTradingLocks] = useState<KiteInstrumentRow[]>([])
+  const [tradingLocksError, setTradingLocksError] = useState<string | null>(null)
 
   const loadFavorites = useCallback(async () => {
     try {
@@ -3298,7 +3477,20 @@ export function KiteInstrumentsPage() {
     }
   }, [])
 
+  const loadTradingLocks = useCallback(async () => {
+    try {
+      const { data } = await api.get<KiteTradingLocksResponse>('/broker/kite/trading-locks')
+      setTradingLocks(data.items)
+      setTradingLocksError(null)
+    } catch (err) {
+      setTradingLocks([])
+      setTradingLocksError(problemDetail(err))
+    }
+  }, [])
+
   const favoriteKeySet = useMemo(() => new Set(favorites.map(favoriteRowKey)), [favorites])
+
+  const tradingLockKeySet = useMemo(() => new Set(tradingLocks.map(favoriteRowKey)), [tradingLocks])
 
   const favoriteByInstrumentToken = useMemo(() => {
     const m = new Map<string, KiteInstrumentRow>()
@@ -3338,6 +3530,25 @@ export function KiteInstrumentsPage() {
     [favorites, loadFavorites],
   )
 
+  const toggleTradingLock = useCallback(
+    async (r: KiteInstrumentRow) => {
+      const key = favoriteRowKey(r)
+      const exists = tradingLocks.some((x) => favoriteRowKey(x) === key)
+      setTradingLocksError(null)
+      try {
+        if (exists) {
+          await api.delete('/broker/kite/trading-locks', { params: { instrumentToken: r.instrumentToken } })
+        } else {
+          await api.post('/broker/kite/trading-locks', r)
+        }
+        await loadTradingLocks()
+      } catch (err) {
+        setTradingLocksError(problemDetail(err))
+      }
+    },
+    [tradingLocks, loadTradingLocks],
+  )
+
   const [mainTab, setMainTab] = useState<MainTab>(() =>
     typeof window !== 'undefined' ? mainTabFromSearchParams(new URLSearchParams(window.location.search)) : 'browse',
   )
@@ -3356,6 +3567,9 @@ export function KiteInstrumentsPage() {
           const p = new URLSearchParams(prev)
           if (next === 'favorites') {
             p.set('tab', 'favorites')
+            p.delete('fav')
+          } else if (next === 'tradingLocks') {
+            p.set('tab', 'locked')
             p.delete('fav')
           } else if (next === 'automation') {
             p.set('tab', 'automation')
@@ -3378,6 +3592,7 @@ export function KiteInstrumentsPage() {
   const [instrumentsLoading, setInstrumentsLoading] = useState(false)
   const [instrumentsError, setInstrumentsError] = useState<string | null>(null)
   const [todayTopPerformers, setTodayTopPerformers] = useState<TodayTopPerformerDto[]>([])
+  const [todayTopVisibleCount, setTodayTopVisibleCount] = useState(TODAY_TOP_MOVERS_PAGE_SIZE)
   const [todayTopBasis, setTodayTopBasis] = useState('')
   const [todayTopLoading, setTodayTopLoading] = useState(false)
   const [todayTopError, setTodayTopError] = useState<string | null>(null)
@@ -3751,6 +3966,7 @@ export function KiteInstrumentsPage() {
       setInstrumentsError(null)
       setInstrumentsLoading(false)
       setTodayTopPerformers([])
+      setTodayTopVisibleCount(TODAY_TOP_MOVERS_PAGE_SIZE)
       setTodayTopBasis('')
       setTodayTopError(null)
       return
@@ -3771,6 +3987,7 @@ export function KiteInstrumentsPage() {
   const loadTodayTopPerformers = useCallback(async () => {
     if (!isZerodha) {
       setTodayTopPerformers([])
+      setTodayTopVisibleCount(TODAY_TOP_MOVERS_PAGE_SIZE)
       setTodayTopBasis('')
       setTodayTopError(null)
       setTodayTopLoading(false)
@@ -3781,12 +3998,14 @@ export function KiteInstrumentsPage() {
     try {
       const { data } = await api.get<TodayTopPerformersResponse>(
         '/broker/kite/instruments/today-top-performers',
-        { params: { take: 15 } },
+        { params: { take: TODAY_TOP_MOVERS_FETCH_TAKE } },
       )
       setTodayTopPerformers(data.items ?? [])
+      setTodayTopVisibleCount(TODAY_TOP_MOVERS_PAGE_SIZE)
       setTodayTopBasis(data.basis ?? '')
     } catch (err) {
       setTodayTopPerformers([])
+      setTodayTopVisibleCount(TODAY_TOP_MOVERS_PAGE_SIZE)
       setTodayTopBasis('')
       setTodayTopError(problemDetail(err))
     } finally {
@@ -3815,10 +4034,13 @@ export function KiteInstrumentsPage() {
     if (!isZerodha) {
       setFavorites([])
       setFavoritesError(null)
+      setTradingLocks([])
+      setTradingLocksError(null)
       return
     }
     void loadFavorites()
-  }, [isZerodha, loadFavorites])
+    void loadTradingLocks()
+  }, [isZerodha, loadFavorites, loadTradingLocks])
 
   return (
     <Layout>
@@ -3848,8 +4070,8 @@ export function KiteInstrumentsPage() {
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Filter preview or press <strong>Enter</strong> / <strong>Search Kite</strong> for a full scan (on{' '}
-                  <strong>All favorites</strong>, F&amp;O + Spot + MCX). Favorites and chart settings sync to your account; use ☆/★ and{' '}
-                  <strong>All favorites</strong> for the grid; on <strong>Browse</strong>, click a row for the chart. Scheduled
+                  <strong>All favorites</strong> and <strong>Locked for trading</strong>, F&amp;O + Spot + MCX). Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
+                  open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below. Scheduled
                   automation and the merged prediction log live on the <strong>Auto predictions</strong> tab.
                 </Card.Text>
               </Col>
@@ -3875,6 +4097,9 @@ export function KiteInstrumentsPage() {
               </Nav.Item>
               <Nav.Item>
                 <Nav.Link eventKey="favorites">All favorites ({favorites.length})</Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="tradingLocks">Locked for trading ({tradingLocks.length})</Nav.Link>
               </Nav.Item>
               <Nav.Item>
                 <Nav.Link eventKey="automation">Auto predictions</Nav.Link>
@@ -4021,6 +4246,13 @@ export function KiteInstrumentsPage() {
                 By default the server uses <strong>1m</strong> candles for automation so predictions are not held until
                 a 3m/5m bar closes. The list below requests up to{' '}
                 <strong>{ML_AUTOMATION_RECENT_FETCH_TAKE.toLocaleString()}</strong> merged rows (classic + LightGBM).
+                <span className="d-block mt-1 text-muted" style={{ fontSize: '0.72rem' }}>
+                  Server schedule (report timezone, default <strong>Asia/Kolkata</strong>): no <strong>new</strong> auto
+                  predictions from <strong>11:25 PM</strong> through <strong>8:00 AM</strong> daily, and all day on{' '}
+                  <strong>Saturday</strong> / <strong>Sunday</strong> (pending rows still resolve). Operators can change{' '}
+                  <span className="font-monospace">FavoriteMlAutomation:QuietHours*</span> and{' '}
+                  <span className="font-monospace">PauseAutomationOnWeekends</span>.
+                </span>
               </p>
               {mlAutomationError ? (
                 <Alert variant="warning" className="py-2 small mb-2">
@@ -4212,6 +4444,10 @@ export function KiteInstrumentsPage() {
                       <th>Symbol</th>
                       <th>Engine</th>
                       <th>Interval</th>
+                      <th title="Close of the reference bar when the prediction ran">Ref close</th>
+                      <th title="Close of the next bar used to score the prediction (empty while pending)">
+                        Next close
+                      </th>
                       <th>Dir</th>
                       <th>Conf</th>
                       <th>Outcome</th>
@@ -4220,13 +4456,13 @@ export function KiteInstrumentsPage() {
                   <tbody className="font-monospace">
                     {automationRecent.length === 0 && !automationRecentLoading ? (
                       <tr>
-                        <td colSpan={7} className="text-secondary small">
+                        <td colSpan={9} className="text-secondary small">
                           No automation rows yet.
                         </td>
                       </tr>
                     ) : automationRecentDisplay.length === 0 && automationRecent.length > 0 ? (
                       <tr>
-                        <td colSpan={7} className="text-secondary small fst-italic">
+                        <td colSpan={9} className="text-secondary small fst-italic">
                           No rows match this filter.
                         </td>
                       </tr>
@@ -4245,6 +4481,12 @@ export function KiteInstrumentsPage() {
                             {r.engineModelId}
                           </td>
                           <td>{r.interval}</td>
+                          <td title={`Reference bar: ${formatLocalDateTime(r.refBarTime)}`}>
+                            {Number.isFinite(r.refClose) ? r.refClose.toFixed(4) : '—'}
+                          </td>
+                          <td title={r.nextBarTime ? `Next bar: ${formatLocalDateTime(r.nextBarTime)}` : 'Pending'}>
+                            {r.nextClose != null && Number.isFinite(r.nextClose) ? r.nextClose.toFixed(4) : '—'}
+                          </td>
                           <td>{r.direction}</td>
                           <td>{r.confidence}</td>
                           <td
@@ -4270,6 +4512,12 @@ export function KiteInstrumentsPage() {
             {favoritesError ? (
               <Alert variant="danger" className="mt-2 py-2 small mb-0">
                 Favorites: {favoritesError}
+              </Alert>
+            ) : null}
+
+            {tradingLocksError ? (
+              <Alert variant="danger" className="mt-2 py-2 small mb-0">
+                Trading locks: {tradingLocksError}
               </Alert>
             ) : null}
 
@@ -4317,55 +4565,80 @@ export function KiteInstrumentsPage() {
                     </p>
                   ) : null}
                   {todayTopPerformers.length > 0 ? (
-                    <div className="table-responsive">
-                      <Table striped bordered hover size="sm" className="mb-0 align-middle">
-                        <thead className="table-light">
-                          <tr className="text-nowrap">
-                            <th>#</th>
-                            <th>Symbol</th>
-                            <th>Exch</th>
-                            <th>LTP</th>
-                            <th>Prev close</th>
-                            <th>Δ %</th>
-                          </tr>
-                        </thead>
-                        <tbody className="font-monospace">
-                          {todayTopPerformers.map((row, idx) => {
-                            const instr = kiteInstrumentApiToRow(row.instrument)
-                            const pct = Number(row.changePercent)
-                            const selected =
-                              !!chartRow && favoriteRowKey(chartRow) === favoriteRowKey(instr)
-                            return (
-                              <tr
-                                key={`top-${instr.instrumentToken}-${idx}`}
-                                role="button"
-                                tabIndex={0}
-                                className={selected ? 'table-active' : undefined}
-                                style={{ cursor: 'pointer' }}
-                                title="Show in chart below"
-                                onClick={() => setChartRow(instr)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault()
-                                    setChartRow(instr)
-                                  }
-                                }}
-                              >
-                                <td className="small text-secondary">{idx + 1}</td>
-                                <td className="fw-semibold">{instr.tradingsymbol}</td>
-                                <td className="small">{instr.exchange}</td>
-                                <td>{Number(row.lastPrice).toFixed(4)}</td>
-                                <td>{Number(row.previousClose).toFixed(4)}</td>
-                                <td className={pct >= 0 ? 'text-success' : 'text-danger'}>
-                                  {pct >= 0 ? '+' : ''}
-                                  {pct.toFixed(2)}%
-                                </td>
-                              </tr>
+                    <>
+                      <div className="table-responsive">
+                        <Table striped bordered hover size="sm" className="mb-0 align-middle">
+                          <thead className="table-light">
+                            <tr className="text-nowrap">
+                              <th>#</th>
+                              <th>Symbol</th>
+                              <th>Exch</th>
+                              <th>LTP</th>
+                              <th>Prev close</th>
+                              <th>Δ %</th>
+                            </tr>
+                          </thead>
+                          <tbody className="font-monospace">
+                            {todayTopPerformers.slice(0, todayTopVisibleCount).map((row, idx) => {
+                              const instr = kiteInstrumentApiToRow(row.instrument)
+                              const pct = Number(row.changePercent)
+                              const selected =
+                                !!chartRow && favoriteRowKey(chartRow) === favoriteRowKey(instr)
+                              return (
+                                <tr
+                                  key={`top-${instr.instrumentToken}-${idx}`}
+                                  role="button"
+                                  tabIndex={0}
+                                  className={selected ? 'table-active' : undefined}
+                                  style={{ cursor: 'pointer' }}
+                                  title="Show in chart below"
+                                  onClick={() => setChartRow(instr)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault()
+                                      setChartRow(instr)
+                                    }
+                                  }}
+                                >
+                                  <td className="small text-secondary">{idx + 1}</td>
+                                  <td className="fw-semibold">{instr.tradingsymbol}</td>
+                                  <td className="small">{instr.exchange}</td>
+                                  <td>{Number(row.lastPrice).toFixed(4)}</td>
+                                  <td>{Number(row.previousClose).toFixed(4)}</td>
+                                  <td className={pct >= 0 ? 'text-success' : 'text-danger'}>
+                                    {pct >= 0 ? '+' : ''}
+                                    {pct.toFixed(2)}%
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </Table>
+                      </div>
+                      {todayTopPerformers.length > TODAY_TOP_MOVERS_PAGE_SIZE ||
+                      todayTopVisibleCount < todayTopPerformers.length ? (
+                        <p className="small text-secondary mb-2 mt-2">
+                          Showing{' '}
+                          {Math.min(todayTopVisibleCount, todayTopPerformers.length)} of{' '}
+                          {todayTopPerformers.length}
+                        </p>
+                      ) : null}
+                      {todayTopVisibleCount < todayTopPerformers.length ? (
+                        <Button
+                          type="button"
+                          variant="outline-secondary"
+                          size="sm"
+                          disabled={todayTopLoading}
+                          onClick={() =>
+                            setTodayTopVisibleCount((c) =>
+                              Math.min(c + TODAY_TOP_MOVERS_PAGE_SIZE, todayTopPerformers.length),
                             )
-                          })}
-                        </tbody>
-                      </Table>
-                    </div>
+                          }
+                        >
+                          Load more
+                        </Button>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
                 <InstrumentListPanel
@@ -4379,6 +4652,8 @@ export function KiteInstrumentsPage() {
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
+                  tradingLockKeySet={tradingLockKeySet}
+                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
                 />
                 <InstrumentListPanel
                   title="Commodities (MCX)"
@@ -4391,6 +4666,8 @@ export function KiteInstrumentsPage() {
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
+                  tradingLockKeySet={tradingLockKeySet}
+                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
                 />
                 <InstrumentListPanel
                   title="Spot equity (NSE / BSE cash)"
@@ -4403,6 +4680,8 @@ export function KiteInstrumentsPage() {
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
+                  tradingLockKeySet={tradingLockKeySet}
+                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
                 />
               </>
             ) : mainTab === 'favorites' ? (
@@ -4419,6 +4698,8 @@ export function KiteInstrumentsPage() {
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
+                  tradingLockKeySet={tradingLockKeySet}
+                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
                 />
                 <FavoritesChartsGrid
                   favorites={favorites}
@@ -4438,7 +4719,49 @@ export function KiteInstrumentsPage() {
                   onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
                   chartZoomByInstrumentToken={chartZoomByToken}
                   onInstrumentChartZoomChange={persistInstrumentChartZoom}
+                  listTilePrimaryAction={(r) => void toggleFavorite(r)}
+                  listTilePrimaryLabel="★ Remove"
+                  tradingLockKeySet={tradingLockKeySet}
+                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
+                />
+              </div>
+            ) : mainTab === 'tradingLocks' ? (
+              <div className="mt-3">
+                <InstrumentListPanel
+                  title="Locked for trading"
+                  rows={tradingLocks}
+                  truncated={false}
+                  loading={false}
+                  emptyHint="No instruments locked yet. On Browse (or All favorites), use 🔓 to lock a row for trading."
+                  searchSegment="fno"
+                  kiteLiveSegmentScope="all"
+                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
+                  onSelectRow={setChartRow}
+                  favoriteKeySet={favoriteKeySet}
                   onToggleFavorite={(r) => void toggleFavorite(r)}
+                  tradingLockKeySet={tradingLockKeySet}
+                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
+                />
+                <FavoritesChartsGrid
+                  favorites={tradingLocks}
+                  rangePreset={chartRangePreset}
+                  onRangePresetChange={setChartRangePreset}
+                  defaultInterval={chartInterval}
+                  onDefaultIntervalChange={applyIntervalToAllFavoriteCharts}
+                  chartIntervalByInstrumentToken={chartIntervalByToken}
+                  onInstrumentIntervalChange={persistInstrumentChartInterval}
+                  graphType={chartGraphType}
+                  onGraphTypeChange={setChartGraphType}
+                  maLineVisibility={maLineVisibility}
+                  onMaLineVisibilityChange={patchMaLineVisibility}
+                  customEmaPeriod={customEmaPeriod}
+                  onCustomEmaPeriodChange={setCustomEmaPeriod}
+                  trendAnalysisSelections={trendAnalysisSelections}
+                  onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
+                  chartZoomByInstrumentToken={chartZoomByToken}
+                  onInstrumentChartZoomChange={persistInstrumentChartZoom}
+                  listTilePrimaryAction={(r) => void toggleTradingLock(r)}
+                  listTilePrimaryLabel="🔒 Remove lock"
                 />
               </div>
             ) : null}
@@ -4459,6 +4782,10 @@ export function KiteInstrumentsPage() {
                 isFavorite={chartRow ? favoriteKeySet.has(favoriteRowKey(chartRow)) : false}
                 onToggleFavorite={
                   chartRow ? () => void toggleFavorite(chartRow) : undefined
+                }
+                isTradingLocked={chartRow ? tradingLockKeySet.has(favoriteRowKey(chartRow)) : false}
+                onToggleTradingLock={
+                  chartRow ? () => void toggleTradingLock(chartRow) : undefined
                 }
                 liveLastPrice={liveLtp}
                 liveLastTick={liveLastTick}

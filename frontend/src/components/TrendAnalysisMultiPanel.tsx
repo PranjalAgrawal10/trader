@@ -1,8 +1,9 @@
 import axios from 'axios'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Accordion, Alert, Button, Spinner, Table } from 'react-bootstrap'
+import { Alert, Button, Spinner, Table } from 'react-bootstrap'
 import { api } from '../api/client'
 import { summarizeCloseLinearTrend, type CloseLinearTrendSummary } from '../utils/closeLinearTrend'
+import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 
 interface HistoricalCandlesResponse {
   candles: { close: number }[]
@@ -47,8 +48,6 @@ export function TrendAnalysisMultiPanel({
   variant: TrendAnalysisMultiPanelVariant
 }) {
   const shouldAutoRun = variant === 'browseAlways'
-  const [accordionKey, setAccordionKey] = useState<string | undefined>(undefined)
-  const openFavorite = accordionKey === '0'
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [rowsByInterval, setRowsByInterval] = useState<
@@ -67,7 +66,6 @@ export function TrendAnalysisMultiPanel({
     >
   >({})
 
-  const active = shouldAutoRun || openFavorite
   useEffect(() => {
     setRowsByInterval({})
     setError(null)
@@ -126,9 +124,9 @@ export function TrendAnalysisMultiPanel({
   }, [instrumentToken, selectedIntervalsOrdered, JSON.stringify(historicalQueryExtra)])
 
   useEffect(() => {
-    if (!instrumentToken || !active || selectedIntervalsOrdered.length === 0) return
+    if (!instrumentToken || selectedIntervalsOrdered.length === 0) return
     void fetchAnalysis()
-  }, [instrumentToken, active, selectedIntervalsOrdered.join(','), JSON.stringify(historicalQueryExtra), fetchAnalysis])
+  }, [instrumentToken, selectedIntervalsOrdered.join(','), JSON.stringify(historicalQueryExtra), fetchAnalysis])
 
   const majority = useMemo(() => {
     let up = 0
@@ -182,65 +180,70 @@ export function TrendAnalysisMultiPanel({
           ) : null}
         </p>
       ) : null}
-      {loading && Object.keys(rowsByInterval).length === 0 ? (
-        <div className="d-flex align-items-center gap-2 py-3 text-secondary small">
+      {loading ? (
+        <div className="d-flex align-items-center gap-2 mb-2 text-secondary small" aria-live="polite">
           <Spinner animation="border" size="sm" role="status" />
-          Loading past data per interval…
+          {Object.keys(rowsByInterval).length === 0
+            ? 'Loading past data per interval…'
+            : 'Refreshing multi-interval…'}
         </div>
-      ) : (
-        <div className="table-responsive">
-          <Table striped bordered hover size="sm" className="mb-0 small font-monospace">
-            <thead className="table-light">
-              <tr>
-                <th>Interval</th>
-                <th>Bars</th>
-                <th title="Close last − first vs first close (%)">Window Δ%</th>
-                <th title="Least-squares on close vs bar index">LR tilt</th>
-                <th>Fit window (UTC)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedIntervalsOrdered.map((iv) => {
-                const r = rowsByInterval[iv]
-                const dirClass =
-                  r != null && r !== 'error'
-                    ? r.lrDir === 'up'
-                      ? 'text-success'
-                      : r.lrDir === 'down'
-                        ? 'text-danger'
-                        : 'text-secondary'
-                    : ''
-                return (
-                  <tr key={`trend-analysis-${instrumentToken}-${iv}`}>
-                    <td className="fw-semibold">{iv}</td>
-                    <td>
-                      {loading && r === undefined ? (
-                        <Spinner animation="border" size="sm" />
-                      ) : r === 'error' ? (
-                        <span className="text-warning">fail</span>
-                      ) : r && typeof r !== 'string' ? (
-                        r.bars
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td>
-                      {r != null && r !== 'error' ? `${r.windowDeltaPct >= 0 ? '+' : ''}${r.windowDeltaPct.toFixed(2)}%` : '—'}
-                    </td>
-                    <td className={dirClass}>
-                      {r != null && r !== 'error' ? `${r.lrDir.toUpperCase()} (${r.lrSlopePerBar >= 0 ? '+' : ''}${r.lrSlopePerBar.toPrecision(4)}/bar)` : '—'}
-                    </td>
-                    <td className="small text-muted" style={{ whiteSpace: 'nowrap' }}>
-                      {r != null && typeof r !== 'string' ? `${formatIsoShort(r.fromIso)}→${formatIsoShort(r.toIso)}` : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </Table>
-        </div>
-      )}
-      {!shouldAutoRun && openFavorite ? (
+      ) : null}
+      <div className="table-responsive">
+        <Table striped bordered hover size="sm" className="mb-0 small font-monospace">
+          <thead className="table-light">
+            <tr>
+              <th>Interval</th>
+              <th>Bars</th>
+              <th title="Close last − first vs first close (%)">Window Δ%</th>
+              <th title="Least-squares on close vs bar index">LR tilt</th>
+              <th title={`OHLC range from / to in your timezone (${Intl.DateTimeFormat().resolvedOptions().timeZone})`}>
+                Fit window (local)
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {selectedIntervalsOrdered.map((iv) => {
+              const r = rowsByInterval[iv]
+              const dirClass =
+                r != null && r !== 'error'
+                  ? r.lrDir === 'up'
+                    ? 'text-success'
+                    : r.lrDir === 'down'
+                      ? 'text-danger'
+                      : 'text-secondary'
+                  : ''
+              return (
+                <tr key={`trend-analysis-${instrumentToken}-${iv}`}>
+                  <td className="fw-semibold">{iv}</td>
+                  <td>
+                    {loading && r === undefined ? (
+                      <Spinner animation="border" size="sm" />
+                    ) : r === 'error' ? (
+                      <span className="text-warning">fail</span>
+                    ) : r && typeof r !== 'string' ? (
+                      r.bars
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  <td>
+                    {r != null && r !== 'error' ? `${r.windowDeltaPct >= 0 ? '+' : ''}${r.windowDeltaPct.toFixed(2)}%` : '—'}
+                  </td>
+                  <td className={dirClass}>
+                    {r != null && r !== 'error' ? `${r.lrDir.toUpperCase()} (${r.lrSlopePerBar >= 0 ? '+' : ''}${r.lrSlopePerBar.toPrecision(4)}/bar)` : '—'}
+                  </td>
+                  <td className="small text-muted" style={{ whiteSpace: 'nowrap' }}>
+                    {r != null && typeof r !== 'string'
+                      ? `${formatLocalDateTime(r.fromIso)} - ${formatLocalDateTime(r.toIso)}`
+                      : '—'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </Table>
+      </div>
+      {!shouldAutoRun ? (
         <div className="mt-2 d-flex gap-2">
           <Button
             type="button"
@@ -253,7 +256,7 @@ export function TrendAnalysisMultiPanel({
             Refresh
           </Button>
         </div>
-      ) : shouldAutoRun ? (
+      ) : (
         <div className="mt-2">
           <Button
             type="button"
@@ -266,7 +269,7 @@ export function TrendAnalysisMultiPanel({
             Refresh multi-timeframe
           </Button>
         </div>
-      ) : null}
+      )}
     </>
   )
 
@@ -286,46 +289,14 @@ export function TrendAnalysisMultiPanel({
   }
 
   return (
-    <Accordion
-      className="mt-2"
-      flush
-      activeKey={accordionKey}
-      onSelect={(eventKey) => {
-        const ek = Array.isArray(eventKey) ? eventKey[0] : eventKey
-        setAccordionKey(
-          ek == null || ek === ''
-            ? undefined
-            : typeof ek === 'string'
-              ? ek
-              : String(ek),
-        )
-      }}
-    >
-      <Accordion.Item eventKey="0">
-        <Accordion.Header>
-          <span className="small fw-semibold">Multi-interval trend ({symbolLabel}) · past Range</span>
-        </Accordion.Header>
-        <Accordion.Body className="pt-2 pb-2">
-          <p className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
-            Fetches OHLC once per checked timeframe using the favorites grid Range. LR tilt follows close regression over the returned bars.
-          </p>
-          {body}
-        </Accordion.Body>
-      </Accordion.Item>
-    </Accordion>
+    <section className="mt-2" aria-labelledby="trend-multi-heading-favorite">
+      <h4 id="trend-multi-heading-favorite" className="h6 text-secondary mb-2">
+        Multi-interval trend ({symbolLabel}) — past Range
+      </h4>
+      <p className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
+        Fetches OHLC once per checked timeframe using the favorites grid Range. LR tilt follows close regression over the returned bars.
+      </p>
+      {body}
+    </section>
   )
-}
-
-function formatIsoShort(iso: string): string {
-  try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return iso.slice(0, 16)
-    return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())} ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
-  } catch {
-    return iso.slice(0, 16)
-  }
-}
-
-function pad2(n: number): string {
-  return String(n).padStart(2, '0')
 }

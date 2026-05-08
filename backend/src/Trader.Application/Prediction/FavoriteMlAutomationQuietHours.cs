@@ -3,22 +3,32 @@ using Trader.Application.Configuration;
 namespace Trader.Application.Prediction;
 
 /// <summary>
-/// Daily window when the favorite-ML background job skips only <strong>new</strong> scheduled predictions per favorite/engine.
-/// Pending-row resolution still runs so outcomes can settle; nightly EOD email is unchanged.
+/// Daily window and optional weekend days when the favorite-ML background job skips only <strong>new</strong> scheduled
+/// predictions per favorite/engine. Pending-row resolution still runs so outcomes can settle; nightly EOD email is unchanged.
 /// Uses <see cref="FavoriteMlAutomationOptions.ReportTimeZoneId"/> (default <c>Asia/Kolkata</c> = IST).
 /// </summary>
 public static class FavoriteMlAutomationQuietHours
 {
     /// <summary>
-    /// When <see cref="FavoriteMlAutomationOptions.QuietHoursEnabled"/> is false, always false.
-    /// When local time (<see cref="FavoriteMlAutomationOptions.ReportTimeZoneId"/>) falls in
+    /// When <see cref="FavoriteMlAutomationOptions.QuietHoursEnabled"/> is false, only weekend pausing may apply.
+    /// When <see cref="FavoriteMlAutomationOptions.PauseAutomationOnWeekends"/> is true and local date is Saturday or Sunday,
+    /// returns <c>true</c>.
+    /// Otherwise when quiet hours are enabled and local time falls in
     /// [<see cref="FavoriteMlAutomationOptions.QuietHoursStartLocalHour"/>:<see cref="FavoriteMlAutomationOptions.QuietHoursStartLocalMinute"/>,
     /// <see cref="FavoriteMlAutomationOptions.QuietHoursEndLocalHour"/>:<see cref="FavoriteMlAutomationOptions.QuietHoursEndLocalMinute"/>),
     /// returns <c>true</c> so the automation loop skips only <strong>new</strong> scheduled predictions—pending resolutions and EOD email still run.
-    /// End time is exclusive. If start and end coincide after clamping, returns false.
+    /// Overnight ranges use start &gt;= end (e.g. 23:25→08:00); end time is exclusive. If start and end coincide after clamping, returns false.
     /// </summary>
     public static bool IsAutomationPaused(FavoriteMlAutomationOptions opts, DateTime utcNow)
     {
+        var tz = ResolveTimeZone(opts.ReportTimeZoneId);
+        utcNow = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow, tz);
+
+        if (opts.PauseAutomationOnWeekends &&
+            (local.DayOfWeek == DayOfWeek.Saturday || local.DayOfWeek == DayOfWeek.Sunday))
+            return true;
+
         if (!opts.QuietHoursEnabled)
             return false;
 
@@ -27,9 +37,6 @@ public static class FavoriteMlAutomationQuietHours
         if (start == end)
             return false;
 
-        var tz = ResolveTimeZone(opts.ReportTimeZoneId);
-        utcNow = DateTime.SpecifyKind(utcNow, DateTimeKind.Utc);
-        var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow, tz);
         var t = TimeOnly.FromDateTime(local);
 
         if (start < end)

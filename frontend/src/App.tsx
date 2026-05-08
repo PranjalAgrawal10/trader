@@ -66,6 +66,18 @@ export default function App() {
         }
       />
       <Route
+        path="/instruments/locked"
+        element={
+          <Protected>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <Navigate to="/instruments?tab=locked" replace />
+              </RequiresBroker>
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
         path="/instruments"
         element={
           <Protected>

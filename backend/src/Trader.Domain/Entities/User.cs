@@ -62,6 +62,7 @@ public class User
     public ICollection<Bot> Bots { get; set; } = new List<Bot>();
     public ICollection<KiteFavoriteInstrument> KiteFavoriteInstruments { get; set; } = new List<KiteFavoriteInstrument>();
 
+    public ICollection<KiteTradingLockInstrument> KiteTradingLockInstruments { get; set; } = new List<KiteTradingLockInstrument>();
     public ICollection<MlPriceDirectionPrediction> MlPriceDirectionPredictions { get; set; } = new List<MlPriceDirectionPrediction>();
 
     public ICollection<MlLightGbmTripleBarrierPrediction> MlLightGbmTripleBarrierPredictions { get; set; } =

@@ -7,6 +7,7 @@ alwaysApply: false
 # Frontend API usage
 
 - **Client**: Use the shared axios `api` instance from `src/api/client` (base URL from `VITE_API_BASE_URL`). Do not scatter raw `fetch` to the API unless there is an existing pattern (e.g. streaming).
+- **Retries**: The shared client retries **once** after a recoverable failure (**2 total attempts**): network errors (no response), **5xx**, **408**, and **429**. It does **not** retry **401** (handled by auth interceptor), **4xx** otherwise, or **cancelled** requests. When adding calls, use `api` so this policy applies; do not add per-call retry loops that fight the global cap unless there is a strong reason (document it).
 - **Errors**: ASP.NET often returns ProblemDetails (`title`, `detail`, `status`). When handling errors, read **`detail`** (and fallbacks) like existing `problemDetail` helpers—do not assume Axios `error.response.data.message` alone.
 - **Auth**: The client should already attach Bearer tokens where configured; new authenticated calls go through the same `api` instance.
 - **Query params**: Match server names (`instrumentToken`, `interval`, `model`, etc.). Optional params may be omitted rather than sent empty when the server treats null as default.

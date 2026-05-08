@@ -28,6 +28,8 @@ dotnet test Trader.sln -p:RunEfMigrationsOnBuild=false
 
 ## Frontend
 
+**Timestamps in the SPA** (tables, charts, tooltips): `formatLocalDateTime` in `frontend/src/utils/formatLocalDateTime.ts` — **`DD/MM/YY HH.mm.ss.fff`**, local timezone. Rule: `.cursor/rules/datetime-display.mdc`.
+
 ```bash
 cd frontend
 npm ci

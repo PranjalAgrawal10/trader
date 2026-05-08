@@ -64,12 +64,18 @@ public sealed class FavoriteMlAutomationOptions
     /// <summary>Local hour when automation stops (inclusive).</summary>
     public int QuietHoursStartLocalHour { get; set; } = 23;
 
-    /// <summary>Local minute when automation stops (inclusive); default <c>20</c> → 11:20 PM IST when TZ is Kolkata.</summary>
-    public int QuietHoursStartLocalMinute { get; set; } = 20;
+    /// <summary>Local minute when automation stops (inclusive); default <c>25</c> → 11:25 PM IST when TZ is Kolkata.</summary>
+    public int QuietHoursStartLocalMinute { get; set; } = 25;
 
     /// <summary>Local hour when automation resumes (exclusive).</summary>
-    public int QuietHoursEndLocalHour { get; set; } = 5;
+    public int QuietHoursEndLocalHour { get; set; } = 8;
 
-    /// <summary>Local minute when automation resumes (exclusive); → 5:00 AM local.</summary>
+    /// <summary>Local minute when automation resumes (exclusive); → 8:00 AM local with minute <c>0</c>.</summary>
     public int QuietHoursEndLocalMinute { get; set; } = 0;
+
+    /// <summary>
+    /// When true (default), local Saturday/Sunday in <see cref="ReportTimeZoneId"/> skip <strong>new</strong> scheduled
+    /// automation predictions for the whole day (pending resolution still runs). Set false for 24/7 markets or tests.
+    /// </summary>
+    public bool PauseAutomationOnWeekends { get; set; } = true;
 }

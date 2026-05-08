@@ -84,7 +84,7 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
-    /// <summary>Streaming substring search across Kite instrument CSVs for F&amp;O (NFO+BFO), MCX, or NSE/BSE spot (cash equities + index listings such as SENSEX — <c>segment=Spot</c>).</summary>
+    /// <summary>Streaming search across Kite instrument CSVs: <c>Fno</c>, <c>Mcx</c>, <c>Spot</c> (NSE/BSE cash <c>EQ</c> and indices only — not commodities), or <c>All</c> (merged). Multi-word <c>q</c> matches when every token appears in the row (e.g. <c>gold mini</c> matches <c>GOLDMINI</c> on MCX).</summary>
     [Authorize]
     [HttpGet("kite/instruments/search")]
     public async Task<ActionResult<KiteInstrumentSearchDto>> SearchKiteInstruments(
@@ -276,6 +276,70 @@ public sealed class BrokerController : ControllerBase
         try
         {
             await _broker.RemoveKiteFavoriteInstrumentAsync(User.GetUserId(), instrumentToken, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>Kite instruments marked locked for trading (separate persisted list from favorites).</summary>
+    [Authorize]
+    [HttpGet("kite/trading-locks")]
+    public async Task<ActionResult<KiteTradingLocksListDto>> KiteTradingLocks(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetKiteTradingLocksAsync(User.GetUserId(), ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPost("kite/trading-locks")]
+    public async Task<IActionResult> AddKiteTradingLock([FromBody] KiteInstrumentListItemDto? body, CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send a JSON instrument row (instrumentToken, tradingsymbol, exchange, …).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.AddKiteTradingLockAsync(User.GetUserId(), body, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpDelete("kite/trading-locks")]
+    public async Task<IActionResult> RemoveKiteTradingLock(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(instrumentToken))
+        {
+            return Problem(
+                title: "Invalid instrument",
+                detail: "Provide instrumentToken.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.RemoveKiteTradingLockAsync(User.GetUserId(), instrumentToken, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)

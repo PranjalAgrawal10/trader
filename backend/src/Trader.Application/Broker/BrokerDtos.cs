@@ -26,12 +26,13 @@ public sealed record KiteFnoCommodityListsDto(
     bool FnoTruncated,
     bool CommoditiesTruncated);
 
-/// <summary>F&amp;O (NFO+BFO), MCX, or NSE/BSE spot (cash <c>EQ</c> + indices <c>INDEX</c>).</summary>
+/// <summary>F&amp;O (NFO+BFO), MCX, NSE/BSE spot (cash <c>EQ</c> + indices), or all three merged.</summary>
 public enum KiteInstrumentSearchSegment
 {
     Fno,
     Mcx,
     Spot,
+    All,
 }
 
 public sealed record KiteInstrumentSearchDto(
@@ -99,6 +100,8 @@ public sealed record KiteHistoricalCandlePointDto(
 
 /// <summary>Saved Kite instruments for the signed-in user (F&amp;O / MCX).</summary>
 public sealed record KiteFavoriteInstrumentsListDto(IReadOnlyList<KiteInstrumentListItemDto> Items);
+
+public sealed record KiteTradingLocksListDto(IReadOnlyList<KiteInstrumentListItemDto> Items);
 
 /// <summary>Top movers among the capped F&amp;O+MCX instrument preview (% gain vs prior close).</summary>
 public sealed record KiteTodayTopPerformersDto(IReadOnlyList<KiteInstrumentMoverDto> Items, string Basis);

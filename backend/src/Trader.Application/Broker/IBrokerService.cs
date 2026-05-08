@@ -76,6 +76,12 @@ public interface IBrokerService
 
     Task RemoveKiteFavoriteInstrumentAsync(Guid userId, string instrumentToken, CancellationToken ct = default);
 
+    Task<KiteTradingLocksListDto> GetKiteTradingLocksAsync(Guid userId, CancellationToken ct = default);
+
+    Task AddKiteTradingLockAsync(Guid userId, KiteInstrumentListItemDto item, CancellationToken ct = default);
+
+    Task RemoveKiteTradingLockAsync(Guid userId, string instrumentToken, CancellationToken ct = default);
+
     /// <summary>Loads saved chart UI settings for the Kite instruments page (null fields mean “use SPA defaults”).</summary>
     Task<KiteInstrumentsChartSettingsDto> GetKiteInstrumentsChartSettingsAsync(Guid userId, CancellationToken ct = default);
 

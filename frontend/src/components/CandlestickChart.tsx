@@ -78,7 +78,7 @@ function buildMaPath(
   return d
 }
 
-/** X-axis time labels: a few ticks across the window; `shortTime` omits date when range is one calendar day. */
+/** X-axis time labels: a few ticks across the window (each uses {@link formatLocalDateTime}). */
 function computeXTickIndices(n: number, targetSlots: number): number[] {
   if (n <= 0) return []
   if (n === 1) return [0]
@@ -90,41 +90,6 @@ function computeXTickIndices(n: number, targetSlots: number): number[] {
     if (out.length === 0 || out[out.length - 1] !== i) out.push(i)
   }
   return out
-}
-
-function sameUtcDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  )
-}
-
-function isIntradayRange(data: ChartPointWithMa[]): boolean {
-  if (data.length < 2) return true
-  const a = new Date(data[0].t)
-  const b = new Date(data[data.length - 1].t)
-  return sameUtcDay(a, b)
-}
-
-function formatAxisTimeLabel(iso: string, shortTime: boolean): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  const timeWithMs: Intl.DateTimeFormatOptions = {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    fractionalSecondDigits: 3,
-  }
-  if (shortTime) {
-    return d.toLocaleTimeString(undefined, timeWithMs)
-  }
-  return d.toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    ...timeWithMs,
-  })
 }
 
 function useContainerPixelSize<T extends HTMLElement>() {
@@ -262,13 +227,12 @@ export function CandlestickChart({
         ? buildTrendPath(trendSeries, clusterStartX, slotW, yPrice)
         : ''
 
-    const shortDay = isIntradayRange(data)
     const targetXTicks = Math.min(6, Math.max(2, Math.floor(plotW / 72)))
     const xTickIndices = computeXTickIndices(n, targetXTicks)
     const xTicks = xTickIndices.map((i) => ({
       i,
       cx: clusterStartX + i * slotW + slotW / 2,
-      label: formatAxisTimeLabel(data[i].t, shortDay),
+      label: formatLocalDateTime(data[i].t),
     }))
 
     const plotBottomY = PAD.top + plotH
@@ -528,7 +492,7 @@ export function CandlestickChart({
             const p = data[hover.idx]
             return (
               <>
-                <div className="text-white-50 small mb-1">{formatLocalDateTime(p.t, { includeMilliseconds: true })}</div>
+                <div className="text-white-50 small mb-1">{formatLocalDateTime(p.t)}</div>
                 <div className="font-monospace">
                   O {p.open} · H {p.high} · L {p.low} · C {p.close}
                 </div>

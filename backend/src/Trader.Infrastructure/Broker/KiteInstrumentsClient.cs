@@ -281,7 +281,7 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         if (maxMatches < 1)
             return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
-        var needle = query.Trim().ToLowerInvariant();
+        var needle = NormalizeSearchNeedle(query);
         if (needle.Length == 0)
             return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
@@ -347,6 +347,18 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         return t is "EQ" or "BE" or "BZ" or "INDEX";
     }
 
+    /// <summary>Lowercase, trim; treat <c>+</c> as space; collapse whitespace (URL <c>q=gold+mini</c> → <c>gold mini</c>).</summary>
+    private static string NormalizeSearchNeedle(string query)
+    {
+        var t = query.Trim().ToLowerInvariant().Replace('+', ' ');
+        var parts = t.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return string.Join(' ', parts);
+    }
+
+    /// <summary>
+    /// Every whitespace-separated token must appear in the row haystack (order-independent).
+    /// So <c>gold mini</c> matches <c>GOLDMINI</c> (both <c>gold</c> and <c>mini</c> as substrings).
+    /// </summary>
     private static bool RowMatchesNeedle(KiteInstrumentListItemDto row, string needleNormalized)
     {
         var haystack = string.Join(
@@ -364,7 +376,16 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
                     row.InstrumentToken,
                 })
             .ToLowerInvariant();
-        return haystack.Contains(needleNormalized, StringComparison.Ordinal);
+
+        foreach (var token in needleNormalized.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (token.Length == 0)
+                continue;
+            if (!haystack.Contains(token, StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
     }
 
     private static KiteInstrumentListItemDto? TryParseRow(string line)
