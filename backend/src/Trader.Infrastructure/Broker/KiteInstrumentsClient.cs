@@ -317,8 +317,8 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
             var row = TryParseRow(line);
             if (row is null)
                 continue;
-            if (equityCashOnly
-                && !string.Equals(row.Segment, "EQ", StringComparison.OrdinalIgnoreCase))
+            // Kite CSV: cash equities use instrument_type EQ; indices often use EQ + segment INDICES (see Kite forum / instruments docs). Type INDEX may also appear.
+            if (equityCashOnly && !IsKiteSpotSearchRow(row))
                 continue;
             if (!RowMatchesNeedle(row, needle))
                 continue;
@@ -332,6 +332,19 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         }
 
         return new KiteInstrumentsFetchResult(true, null, items, scanTruncated);
+    }
+
+    /// <summary>
+    /// Kite spot (NSE+BSE) universe: cash EQ/BE/BZ, <c>instrument_type</c> INDEX if present, and indices marked <c>segment=INDICES</c> (often <c>instrument_type</c> EQ per Kite — same as stocks).
+    /// </summary>
+    private static bool IsKiteSpotSearchRow(KiteInstrumentListItemDto row)
+    {
+        if (row.Segment is not null
+            && row.Segment.Contains("INDICES", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var t = row.InstrumentType?.Trim().ToUpperInvariant();
+        return t is "EQ" or "BE" or "BZ" or "INDEX";
     }
 
     private static bool RowMatchesNeedle(KiteInstrumentListItemDto row, string needleNormalized)

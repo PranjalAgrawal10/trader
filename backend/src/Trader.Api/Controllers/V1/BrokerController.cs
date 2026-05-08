@@ -84,7 +84,7 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
-    /// <summary>Streaming substring search across Kite instrument CSVs for F&amp;O (NFO+BFO), MCX, or NSE/BSE equity cash (<c>segment=Spot</c>).</summary>
+    /// <summary>Streaming substring search across Kite instrument CSVs for F&amp;O (NFO+BFO), MCX, or NSE/BSE spot (cash equities + index listings such as SENSEX — <c>segment=Spot</c>).</summary>
     [Authorize]
     [HttpGet("kite/instruments/search")]
     public async Task<ActionResult<KiteInstrumentSearchDto>> SearchKiteInstruments(

@@ -14,6 +14,7 @@ public interface IKiteInstrumentsClient
 
     /// <summary>
     /// Streams Kite <c>/instruments/{exchange}</c> and returns rows whose searchable fields contain <paramref name="query"/> (case-insensitive). Stops after <paramref name="maxMatches"/> hits; <see cref="KiteInstrumentsFetchResult.Truncated"/> indicates the exchange dump may have more matches.
+    /// When <paramref name="equityCashOnly"/> is true, keeps only NSE/BSE spot universe: cash equity (<c>instrument_type</c> EQ/BE/BZ), INDEX, and rows whose <c>segment</c> contains INDICES (Kite index listings — often EQ + segment INDICES).
     /// </summary>
     Task<KiteInstrumentsFetchResult> SearchExchangeInstrumentsAsync(
         string exchange,
