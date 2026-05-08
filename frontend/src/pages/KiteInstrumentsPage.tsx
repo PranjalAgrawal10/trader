@@ -1392,6 +1392,7 @@ function ChartSettingsToolbar({
 
 /** Correct / wrong / pending counts for ML prediction history (pie chart). */
 type MlOutcomeCounts = { correct: number; wrong: number; pending: number }
+type MlDirectionBias = 'up' | 'down' | 'neutral'
 
 const ML_FULLSCREEN_PIE_HEIGHT = { compact: 400, default: 480 } as const
 const ML_FULLSCREEN_PIE_MIN_COL_PX = 460
@@ -1619,6 +1620,132 @@ function MlOutcomePieChart({
         </PieChart>
       </ResponsiveContainer>
     </div>
+  )
+}
+
+function countMlDirections(directions: readonly MlDirectionBias[]): {
+  up: number
+  down: number
+  neutral: number
+} {
+  let up = 0
+  let down = 0
+  let neutral = 0
+  for (const d of directions) {
+    if (d === 'up') up += 1
+    else if (d === 'down') down += 1
+    else neutral += 1
+  }
+  return { up, down, neutral }
+}
+
+/** Single top direction; ties (e.g. 1 up, 1 down, 1 neutral) resolve to neutral. */
+function consensusMlDirection(counts: {
+  up: number
+  down: number
+  neutral: number
+}): MlDirectionBias | null {
+  const { up, down, neutral: neu } = counts
+  const total = up + down + neu
+  if (total === 0) return null
+  const max = Math.max(up, down, neu)
+  const winners: MlDirectionBias[] = []
+  if (up === max) winners.push('up')
+  if (down === max) winners.push('down')
+  if (neu === max) winners.push('neutral')
+  if (winners.length === 1) return winners[0]
+  return 'neutral'
+}
+
+const FAVORITES_DIRECTION_CONSENSUS_PIE_HEIGHT = 240
+
+function FavoritesMlDirectionConsensusPie({
+  directionByToken,
+  favoriteCount,
+}: {
+  directionByToken: Readonly<Record<string, MlDirectionBias>>
+  favoriteCount: number
+}) {
+  const counts = useMemo(
+    () => countMlDirections(Object.values(directionByToken)),
+    [directionByToken],
+  )
+  const consensus = useMemo(() => consensusMlDirection(counts), [counts])
+  const n = counts.up + counts.down + counts.neutral
+  const reported = Object.keys(directionByToken).length
+
+  const pieData = useMemo(() => {
+    const rows: { name: string; value: number; fill: string }[] = []
+    if (counts.up > 0) rows.push({ name: 'Up', value: counts.up, fill: '#198754' })
+    if (counts.down > 0) rows.push({ name: 'Down', value: counts.down, fill: '#dc3545' })
+    if (counts.neutral > 0) rows.push({ name: 'Neutral', value: counts.neutral, fill: '#6c757d' })
+    return rows
+  }, [counts])
+
+  return (
+    <Card className="border-secondary mb-3">
+      <Card.Body className="py-3">
+        <div className="small text-muted text-uppercase mb-2" style={{ fontSize: '0.68rem' }}>
+          All charts — direction vote
+        </div>
+        <p className="small text-secondary mb-2" style={{ maxWidth: '44rem' }}>
+          Combines each favorite chart’s latest <strong>ML next-bar bias</strong> (one vote per symbol). Majority sets
+          consensus; ties resolve to <strong>neutral</strong> (e.g. up + down + neutral → neutral).
+        </p>
+        {n === 0 ? (
+          <div
+            className="d-flex align-items-center justify-content-center border border-secondary rounded bg-body-secondary text-secondary small"
+            style={{ height: FAVORITES_DIRECTION_CONSENSUS_PIE_HEIGHT }}
+          >
+            No ML directions yet — charts auto-request bias when candles load (All favorites tab).
+          </div>
+        ) : (
+          <>
+            <div
+              className={`small font-monospace fw-semibold mb-2 ${
+                consensus === 'up'
+                  ? 'text-success'
+                  : consensus === 'down'
+                    ? 'text-danger'
+                    : 'text-secondary'
+              }`}
+            >
+              Consensus: {consensus != null ? consensus.toUpperCase() : '—'}
+              <span className="text-muted fw-normal ms-2">
+                ({reported}/{favoriteCount} chart{favoriteCount === 1 ? '' : 's'} with ML)
+              </span>
+            </div>
+            <div className="overflow-visible" style={{ height: FAVORITES_DIRECTION_CONSENSUS_PIE_HEIGHT }}>
+              <ResponsiveContainer width="100%" height="100%" debounce={50}>
+                <PieChart margin={{ top: 10, left: 12, right: 12, bottom: 44 }}>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="44%"
+                    innerRadius={0}
+                    outerRadius="62%"
+                    paddingAngle={pieData.length > 1 ? 1.5 : 0}
+                  >
+                    {pieData.map((d) => (
+                      <Cell key={d.name} fill={d.fill} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number, name: string) => [`${value} vote(s)`, name]} />
+                  <Legend
+                    verticalAlign="bottom"
+                    align="center"
+                    layout="horizontal"
+                    wrapperStyle={{ fontSize: 12, paddingTop: 4 }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
+      </Card.Body>
+    </Card>
   )
 }
 
@@ -1908,11 +2035,17 @@ function MlNextBarBiasBar({
   interval,
   compact,
   candleSeries,
+  onLatestDirectionChange,
+  autoFetchMlBias,
 }: {
   instrumentToken: string
   interval: ChartInterval
   compact?: boolean
   candleSeries: ChartPointWithMa[]
+  /** Fires when ML bias is cleared, loaded, or changes (for aggregate favorites pie). */
+  onLatestDirectionChange?: (direction: MlDirectionBias | null) => void
+  /** When true (e.g. All favorites grid), fetch ML bias once per token/interval after candles load. */
+  autoFetchMlBias?: boolean
 }) {
   const [mlPred, setMlPred] = useState<PriceDirectionApiResponse | null>(null)
   const [mlLoading, setMlLoading] = useState(false)
@@ -2103,6 +2236,31 @@ function MlNextBarBiasBar({
       setMlLoading(false)
     }
   }, [instrumentToken, interval, candleSeries, selectedPriceModelId, storesPredictionsInLightGbm])
+
+  const mlAutoFetchKeyRef = useRef('')
+
+  useEffect(() => {
+    onLatestDirectionChange?.(mlPred?.direction ?? null)
+  }, [mlPred, onLatestDirectionChange])
+
+  useEffect(() => {
+    mlAutoFetchKeyRef.current = ''
+  }, [instrumentToken, interval])
+
+  useEffect(() => {
+    if (!autoFetchMlBias || candleSeries.length === 0) return
+    const key = `${instrumentToken}|${interval}|${selectedPriceModelId || ''}`
+    if (mlAutoFetchKeyRef.current === key) return
+    mlAutoFetchKeyRef.current = key
+    void fetchMlBias()
+  }, [
+    autoFetchMlBias,
+    instrumentToken,
+    interval,
+    selectedPriceModelId,
+    candleSeries.length,
+    fetchMlBias,
+  ])
 
   const gapClass = compact ? 'mb-1' : 'mb-2'
   const mlHistoryTableRows = useMemo(() => sortByPredictedAtNewestFirst(history), [history])
@@ -2297,6 +2455,8 @@ function CompactPriceChart({
   customEmaPeriod,
   zoomVisibleBars,
   onZoomVisibleBarsChange,
+  onLatestDirectionChange,
+  autoFetchMlBias,
 }: {
   row: KiteInstrumentRow
   rangePreset: ChartRangePreset
@@ -2307,6 +2467,8 @@ function CompactPriceChart({
   customEmaPeriod: number
   zoomVisibleBars: number | null
   onZoomVisibleBarsChange: (bars: number | null) => void
+  onLatestDirectionChange?: (direction: MlDirectionBias | null) => void
+  autoFetchMlBias?: boolean
 }) {
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(true)
@@ -2433,7 +2595,14 @@ function CompactPriceChart({
               toIso={candleRange.to}
             />
           ) : null}
-          <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact candleSeries={seriesWithCustom} />
+          <MlNextBarBiasBar
+            instrumentToken={row.instrumentToken}
+            interval={interval}
+            compact
+            candleSeries={seriesWithCustom}
+            onLatestDirectionChange={onLatestDirectionChange}
+            autoFetchMlBias={autoFetchMlBias}
+          />
         </>
       ) : null}
       {compactHasChart ? (
@@ -2461,7 +2630,14 @@ function CompactPriceChart({
                   toIso={candleRange.to}
                 />
               ) : null}
-              <MlNextBarBiasBar instrumentToken={row.instrumentToken} interval={interval} compact candleSeries={seriesWithCustom} />
+              <MlNextBarBiasBar
+                instrumentToken={row.instrumentToken}
+                interval={interval}
+                compact
+                candleSeries={seriesWithCustom}
+                onLatestDirectionChange={onLatestDirectionChange}
+                autoFetchMlBias={autoFetchMlBias}
+              />
             </div>
           ) : null}
           <ChartZoomControls
@@ -2608,6 +2784,29 @@ function FavoritesChartsGrid({
 }) {
   if (favorites.length === 0) return null
 
+  const [favDirectionByToken, setFavDirectionByToken] = useState<Record<string, MlDirectionBias>>({})
+
+  useEffect(() => {
+    const allowed = new Set(favorites.map((f) => f.instrumentToken))
+    setFavDirectionByToken((prev) => {
+      const next = { ...prev }
+      for (const k of Object.keys(next)) {
+        if (!allowed.has(k)) delete next[k]
+      }
+      return next
+    })
+  }, [favorites])
+
+  const onFavChartDirection = useCallback((instrumentToken: string, d: MlDirectionBias | null) => {
+    setFavDirectionByToken((prev) => {
+      if (d == null) {
+        const { [instrumentToken]: _, ...rest } = prev
+        return rest
+      }
+      return { ...prev, [instrumentToken]: d }
+    })
+  }, [])
+
   return (
     <div className="mt-4">
       <h2 className="h6 mb-3">All charts</h2>
@@ -2630,6 +2829,10 @@ function FavoritesChartsGrid({
         <span className="font-monospace text-body-secondary">FavoriteMlAutomation:PredictionIntervalOverride</span>) so it
         is not slowed by 3m/5m bar closes; it can be configured to follow these chart intervals instead.
       </p>
+      <FavoritesMlDirectionConsensusPie
+        directionByToken={favDirectionByToken}
+        favoriteCount={favorites.length}
+      />
       <Row className="g-3">
         {favorites.map((row) => (
           <Col key={favoriteRowKey(row)} xs={12} lg={6} xl={4}>
@@ -2679,6 +2882,8 @@ function FavoritesChartsGrid({
                   customEmaPeriod={customEmaPeriod}
                   zoomVisibleBars={chartZoomByInstrumentToken[row.instrumentToken] ?? null}
                   onZoomVisibleBarsChange={(bars) => onInstrumentChartZoomChange(row.instrumentToken, bars)}
+                  onLatestDirectionChange={(d) => onFavChartDirection(row.instrumentToken, d)}
+                  autoFetchMlBias
                 />
               </Card.Body>
             </Card>
