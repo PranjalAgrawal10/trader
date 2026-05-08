@@ -3691,7 +3691,7 @@ export function KiteInstrumentsPage() {
     setStatusLoading(true)
     try {
       const { data } = await api.get<BrokerStatusResponse>('/broker/status')
-      setProvider(data.provider ?? null)
+      setProvider(data.connected ? (data.provider ?? null) : null)
     } catch {
       setProvider(null)
     } finally {
@@ -3801,6 +3801,10 @@ export function KiteInstrumentsPage() {
 
   useEffect(() => {
     void loadStatus()
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadStatus()
+    }, 90_000)
+    return () => window.clearInterval(id)
   }, [loadStatus])
 
   useEffect(() => {

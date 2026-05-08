@@ -94,6 +94,13 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
   }, [navigate, searchParams, loadBroker])
 
   useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadBroker()
+    }, 90_000)
+    return () => window.clearInterval(id)
+  }, [loadBroker])
+
+  useEffect(() => {
     void loadTwoFa()
   }, [loadTwoFa, twoFaEpoch])
 

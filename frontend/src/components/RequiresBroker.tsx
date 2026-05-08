@@ -22,17 +22,24 @@ export function RequiresBroker({ children }: { children: ReactElement }) {
     }
 
     let cancelled = false
-    ;(async () => {
+
+    const run = async () => {
       try {
         const { data } = await api.get<BrokerStatus>('/broker/status')
         if (!cancelled) setGate(data.connected ? 'ok' : 'need')
       } catch {
         if (!cancelled) setGate('need')
       }
-    })()
+    }
+
+    void run()
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void run()
+    }, 90_000)
 
     return () => {
       cancelled = true
+      window.clearInterval(id)
     }
   }, [token])
 

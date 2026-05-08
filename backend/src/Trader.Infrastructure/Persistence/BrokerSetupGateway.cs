@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Trader.Application.Broker;
 using Trader.Domain.Entities;
 
@@ -12,11 +13,16 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
 
     private readonly TraderDbContext _db;
     private readonly IDataProtector _tokens;
+    private readonly ILogger<BrokerSetupGateway> _logger;
 
-    public BrokerSetupGateway(TraderDbContext db, IDataProtectionProvider protectionProvider)
+    public BrokerSetupGateway(
+        TraderDbContext db,
+        IDataProtectionProvider protectionProvider,
+        ILogger<BrokerSetupGateway> logger)
     {
         _db = db;
         _tokens = protectionProvider.CreateProtector("Trader.Broker.Kite.Tokens");
+        _logger = logger;
     }
 
     public async Task<BrokerSetupSnapshot?> GetSnapshotAsync(Guid userId, CancellationToken ct)
@@ -32,7 +38,45 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
         if (account is null || string.IsNullOrEmpty(account.AccessTokenProtected))
             return new BrokerSetupSnapshot(userId, null, null);
 
+        try
+        {
+            var access = _tokens.Unprotect(account.AccessTokenProtected);
+            if (string.IsNullOrEmpty(access))
+            {
+                await RemoveStaleZerodhaAccountsAsync(userId, ct).ConfigureAwait(false);
+                _logger.LogWarning(
+                    "Removed Zerodha broker row for user {UserId}: access token decrypted to empty.",
+                    userId);
+                return new BrokerSetupSnapshot(userId, null, null);
+            }
+        }
+        catch (CryptographicException ex)
+        {
+            await RemoveStaleZerodhaAccountsAsync(userId, ct).ConfigureAwait(false);
+            _logger.LogWarning(
+                ex,
+                "Removed Zerodha broker credentials for user {UserId}: cannot decrypt tokens. " +
+                "Typical causes: redeploy without a persisted DataProtection__KeyRingPath, or rotated key ring.",
+                userId);
+            return new BrokerSetupSnapshot(userId, null, null);
+        }
+
         return new BrokerSetupSnapshot(userId, account.ConnectedAt, ZerodhaBrokerName);
+    }
+
+    /// <summary>Deletes encrypted broker rows when ciphertext no longer decrypts so status and UX match API reality.</summary>
+    private async Task RemoveStaleZerodhaAccountsAsync(Guid userId, CancellationToken ct)
+    {
+        var rows = await _db.BrokerAccounts
+            .Where(a => a.UserId == userId && a.BrokerName == ZerodhaBrokerName)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        if (rows.Count == 0)
+            return;
+
+        _db.BrokerAccounts.RemoveRange(rows);
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     public async Task CompleteBrokerSetupAsync(Guid userId, CancellationToken ct)
