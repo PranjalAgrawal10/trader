@@ -182,7 +182,7 @@ export function TrendAnalysisMultiPanel({
           ) : null}
         </p>
       ) : null}
-      {!shouldAutoRun && openFavorite ? null : loading && Object.keys(rowsByInterval).length === 0 ? (
+      {loading && Object.keys(rowsByInterval).length === 0 ? (
         <div className="d-flex align-items-center gap-2 py-3 text-secondary small">
           <Spinner animation="border" size="sm" role="status" />
           Loading past data per interval…
