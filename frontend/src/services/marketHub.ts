@@ -1,18 +1,13 @@
 import { HubConnectionBuilder, HubConnectionState, LogLevel } from '@microsoft/signalr'
 import { useAuthStore } from '../store/useAuthStore'
-
-function resolveApiOrigin(): string {
-  const allowCrossOrigin = import.meta.env.VITE_FORCE_CROSS_ORIGIN_API === 'true'
-  const raw = import.meta.env.VITE_API_BASE_URL?.trim()
-  if (allowCrossOrigin && raw) return raw.replace(/\/$/, '')
-  return ''
-}
+import { resolveSpaApiBaseOrigin } from '../api/sameOrigin'
 
 /** Payload items match backend MarketTickDto (camelCase JSON). */
 export type MarketTickBatchItem = { i: number; p: number; v: number; t?: number | null }
 
 export function createMarketHubConnection() {
-  const hubUrl = `${resolveApiOrigin()}/hubs/market`
+  // Same-origin by default so the SignalR negotiate POST does not trigger CORS preflight OPTIONS.
+  const hubUrl = `${resolveSpaApiBaseOrigin()}/hubs/market`
   return new HubConnectionBuilder()
     .withUrl(hubUrl, {
       accessTokenFactory: () => useAuthStore.getState().token ?? '',

@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/useAuthStore'
+import { resolveSpaApiBaseOrigin } from './sameOrigin'
 
 /** Relative to axios `baseURL` (`.../api/v1`). Omit Bearer so an expired stored JWT does not fail JWT validation before login/register. */
 const pathsWithoutBearer = new Set([
@@ -20,19 +21,10 @@ function relativePath(url: string | undefined): string {
   return withoutQuery.startsWith('/') ? withoutQuery.slice(1) : withoutQuery
 }
 
-function resolveApiBaseUrl(): string {
-  const allowCrossOrigin = import.meta.env.VITE_FORCE_CROSS_ORIGIN_API === 'true'
-  const raw = import.meta.env.VITE_API_BASE_URL?.trim()
-  if (allowCrossOrigin && raw)
-    return raw.replace(/\/$/, '')
-
-  // Default to same-origin `/api` so browser requests don't trigger CORS preflight OPTIONS.
-  // Dev uses Vite's proxy; Docker/nginx and App Platform ingress route `/api` to the API.
-  return ''
-}
-
 export const api = axios.create({
-  baseURL: `${resolveApiBaseUrl()}/api/v1`,
+  // `resolveSpaApiBaseOrigin` returns "" by default → axios sends `/api/v1/...` to the page's
+  // own origin, which the browser treats as same-origin and never preflights with OPTIONS.
+  baseURL: `${resolveSpaApiBaseOrigin()}/api/v1`,
   withCredentials: true,
 })
 
