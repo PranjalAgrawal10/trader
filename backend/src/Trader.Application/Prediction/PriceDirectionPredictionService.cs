@@ -46,6 +46,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         string interval,
         string? source = null,
         string? modelId = null,
+        bool bestOfThreeSlidingWindow = false,
         CancellationToken ct = default)
     {
         var hist = await _broker
@@ -70,7 +71,16 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
 
         var last = hist.Candles[^1];
         var engine = _engines.Resolve(modelId);
-        var result = engine.PredictNextDirection(hist.Candles);
+        PriceDirectionResult result;
+        if (bestOfThreeSlidingWindow &&
+            PriceDirectionBestOfThree.TryCompute(hist.Candles, engine, MinCandlesRequired, out var merged, out var b3Prefix))
+        {
+            result = merged with { Detail = b3Prefix + merged.Detail };
+        }
+        else
+        {
+            result = engine.PredictNextDirection(hist.Candles);
+        }
 
         var id = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;

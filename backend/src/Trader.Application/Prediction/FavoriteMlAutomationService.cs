@@ -190,6 +190,16 @@ public sealed class FavoriteMlAutomationService
             wrongAll,
             pendingAll);
 
+        var (manualVoteUp, manualVoteDown, manualVoteNeu) =
+            PriceDirectionBestOfThree.SumVoteComponents(rows.Select(static r => r.Detail));
+        AddDirectionVotePieIfAny(
+            embeddedPies,
+            chartFragments,
+            $"Automation — best-of-3 direction votes ({pieTitleSuffix})",
+            manualVoteUp,
+            manualVoteDown,
+            manualVoteNeu);
+
         foreach (var engineId in engineIdsForPies)
         {
             var scoped = rows.Where(r => EffectiveEngineKey(r).Equals(engineId, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -214,7 +224,7 @@ public sealed class FavoriteMlAutomationService
             {
                 $"Manual automation report for {reportRangeSummary}.",
                 $"Rows (Source=automation only): {rows.Count} (correct {correctAll}, wrong {wrongAll}, pending {pendingAll}).",
-                $"The HTML part embeds {chartFragments.Count} PNG outcome charts via cid (combined + each engine below). CSV is attached.",
+                $"The HTML part embeds {chartFragments.Count} PNG chart(s) via cid (outcome + optional best-of-3 direction vote + per engine). CSV is attached.",
                 "This send is not throttled against the nightly EOD job.",
                 string.Empty,
                 "Prefer the graphical HTML part in Mail / Outlook / Gmail or use the spreadsheet attachment.",
@@ -315,6 +325,22 @@ public sealed class FavoriteMlAutomationService
         var cid = $"ml-pie-{fragments.Count}";
         fragments.Add(MlOutcomePieChartHtmlBuilder.BuildChartSection(title, cid, correct, wrong, pending));
         embedded.Add(new EmbeddedEmailImage(cid, "image/png", _piePng.RenderPng(correct, wrong, pending)));
+    }
+
+    private void AddDirectionVotePieIfAny(
+        List<EmbeddedEmailImage> embedded,
+        List<string> fragments,
+        string title,
+        int up,
+        int down,
+        int neutral)
+    {
+        if (up + down + neutral <= 0)
+            return;
+
+        var cid = $"ml-pie-b3dir-{fragments.Count}";
+        fragments.Add(MlOutcomePieChartHtmlBuilder.BuildDirectionVoteChartSection(title, cid, up, down, neutral));
+        embedded.Add(new EmbeddedEmailImage(cid, "image/png", _piePng.RenderDirectionVotePng(up, down, neutral)));
     }
 
     private static bool IsAutomationSource(MlPriceDirectionPrediction entity) =>
@@ -449,6 +475,7 @@ public sealed class FavoriteMlAutomationService
                             hist.Interval,
                             PriceDirectionPredictionService.SourceAutomation,
                             engineModelId,
+                            _opts.BestOfThreeEnabled,
                             ct)
                         .ConfigureAwait(false);
                 }
@@ -605,18 +632,32 @@ public sealed class FavoriteMlAutomationService
 
         const string eodPieCid = "ml-pie-eod";
         var eodPie = _piePng.RenderPng(correct, wrong, pending);
-        var embeddedPies = new[] { new EmbeddedEmailImage(eodPieCid, "image/png", eodPie) };
         var chartFragment =
             MlOutcomePieChartHtmlBuilder.BuildChartSection($"Trader ML favorites — {ymd}", eodPieCid, correct, wrong, pending);
-        var htmlBody = MlOutcomePieChartHtmlBuilder.WrapHtmlDocument([chartFragment]);
+
+        var (eodVoteUp, eodVoteDown, eodVoteNeu) =
+            PriceDirectionBestOfThree.SumVoteComponents(rows.Select(static r => r.Detail));
+        var chartFragments = new List<string> { chartFragment };
+        var embeddedList = new List<EmbeddedEmailImage> { new(eodPieCid, "image/png", eodPie) };
+        AddDirectionVotePieIfAny(
+            embeddedList,
+            chartFragments,
+            $"Trader ML favorites — best-of-3 direction votes — {ymd}",
+            eodVoteUp,
+            eodVoteDown,
+            eodVoteNeu);
+
+        var embeddedPies = embeddedList.ToArray();
+        var htmlBody = MlOutcomePieChartHtmlBuilder.WrapHtmlDocument(chartFragments);
 
         var subject =
             $"Trader ML favorites — {ymd} (all engines; rows={rows.Count}; correct {correct}, wrong {wrong}, pending {pending})";
         var plainBody =
             $"Combined ML predictions (every registered automation engine; classic + LightGBM stores) on {ymd} ({tz.Id}).\r\n"
             + $"Totals: rows={rows.Count}, correct={correct}, wrong={wrong}, pending={pending}.\r\n"
-            + "The HTML part embeds an inline PNG outcome chart. CSV spreadsheet is attached "
-            + "(engineModelId + model output id).\r\n\r\n"
+            + "The HTML part embeds inline PNG chart(s): outcome pie"
+            + (eodVoteUp + eodVoteDown + eodVoteNeu > 0 ? " plus best-of-3 direction vote pie." : ".")
+            + " CSV spreadsheet is attached (engineModelId + model output id; best-of-3 columns when present).\r\n\r\n"
             + "Use a graphical mail client or the attachment for best results.";
 
         try
@@ -712,11 +753,18 @@ public sealed class FavoriteMlAutomationService
     {
         var sb = new StringBuilder();
         sb.AppendLine(
-            "predictedAtUtc,instrumentToken,tradingsymbol,exchange,interval,direction,confidence,outcome,refBarTimeUtc,refClose,nextBarTimeUtc,nextClose,modelId,engineModelId,detail");
+            "predictedAtUtc,instrumentToken,tradingsymbol,exchange,interval,direction,confidence,outcome,refBarTimeUtc,refClose,nextBarTimeUtc,nextClose,modelId,engineModelId,b3Up,b3Down,b3Neutral,b3Votes,b3Majority,detail");
         foreach (var r in rows)
         {
             var tok = r.InstrumentToken.Trim();
             symbolByToken.TryGetValue(tok, out var sym);
+            var hasB3 = PriceDirectionBestOfThree.TryParseDetailExtended(
+                r.Detail,
+                out var b3Up,
+                out var b3Down,
+                out var b3Neu,
+                out var b3Votes,
+                out var b3Maj);
             sb.Append(Csv(r.PredictedAtUtc.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture)))
                 .Append(',')
                 .Append(Csv(tok))
@@ -744,6 +792,16 @@ public sealed class FavoriteMlAutomationService
                 .Append(Csv(r.ModelId))
                 .Append(',')
                 .Append(Csv(r.EngineModelId))
+                .Append(',')
+                .Append(hasB3 ? b3Up.ToString(CultureInfo.InvariantCulture) : "")
+                .Append(',')
+                .Append(hasB3 ? b3Down.ToString(CultureInfo.InvariantCulture) : "")
+                .Append(',')
+                .Append(hasB3 ? b3Neu.ToString(CultureInfo.InvariantCulture) : "")
+                .Append(',')
+                .Append(Csv(hasB3 ? b3Votes : null))
+                .Append(',')
+                .Append(Csv(hasB3 ? b3Maj : null))
                 .Append(',')
                 .Append(Csv(r.Detail))
                 .AppendLine();

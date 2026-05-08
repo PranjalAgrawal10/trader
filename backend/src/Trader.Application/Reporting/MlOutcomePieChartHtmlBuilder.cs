@@ -55,6 +55,48 @@ public static class MlOutcomePieChartHtmlBuilder
         return sb.ToString();
     }
 
+    /// <summary>Pie of best-of-three <strong>component</strong> votes (sum of up/down/neutral tallies across rows).</summary>
+    public static string BuildDirectionVoteChartSection(string title, string imageContentId, int up, int down, int neutral)
+    {
+        var enc = HtmlEncoder.Default;
+        var safeTitle = string.IsNullOrWhiteSpace(title) ? "Direction votes (best of 3)" : title.Trim();
+        if (safeTitle.Length > 120)
+            safeTitle = safeTitle[..117] + "…";
+
+        var cid = string.IsNullOrWhiteSpace(imageContentId) ? "ml-pie-b3-dir" : imageContentId.Trim();
+
+        var sb = new StringBuilder(2048)
+            .Append("<section style=\"margin-bottom:28px;font-family:system-ui,Segoe UI,Roboto,Helvetica,sans-serif;\">")
+            .Append("<h2 style=\"font-size:15px;font-weight:600;margin:0 0 12px;color:#212529;line-height:1.3;\">")
+            .Append(enc.Encode(safeTitle))
+            .Append("</h2>");
+
+        var total = up + down + neutral;
+        if (total <= 0)
+            return sb
+                .Append("<p style=\"margin:8px 0;color:#6c757d;font-size:14px;\">No best-of-three vote rows in this range.</p></section>")
+                .ToString();
+
+        var alt = enc.Encode($"Direction vote pie: up {up}, down {down}, neutral {neutral} (total {total} component votes).");
+        sb.Append("<div style=\"overflow-x:auto;-webkit-overflow-scrolling:touch;text-align:center;\">")
+            .Append("<img src=\"cid:")
+            .Append(enc.Encode(cid))
+            .Append("\" width=\"")
+            .Append(MlReportingConstants.MlPieImageWidth.ToString(CultureInfo.InvariantCulture))
+            .Append("\" height=\"")
+            .Append(MlReportingConstants.MlPieImageHeight.ToString(CultureInfo.InvariantCulture))
+            .Append("\" alt=\"")
+            .Append(alt)
+            .Append("\" style=\"max-width:100%;height:auto;display:block;margin:0 auto;border:0;\" />")
+            .Append("</div>\n");
+        sb.Append("<table role=\"presentation\" style=\"margin-top:10px;font-size:14px;line-height:1.4;color:#212529;\">\n");
+        AppendLegendRow(sb, enc, ColorCorrect, "Up", up);
+        AppendLegendRow(sb, enc, ColorWrong, "Down", down);
+        AppendLegendRow(sb, enc, ColorPending, "Neutral", neutral);
+        sb.Append("</table>\n</section>");
+        return sb.ToString();
+    }
+
     /// <summary>Minimal HTML5 wrapper for multipart alternative.</summary>
     public static string WrapHtmlDocument(IEnumerable<string> sectionFragments)
     {

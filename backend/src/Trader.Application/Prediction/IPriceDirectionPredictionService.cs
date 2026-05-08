@@ -9,6 +9,9 @@ public interface IPriceDirectionPredictionService
     /// When <paramref name="modelId"/> is null or whitespace, <see cref="IPriceDirectionPredictionEngineRegistry.DefaultModelId"/> is used.
     /// Persists a row when enough candles exist; <see cref="PriceDirectionPredictionEnvelope.StoredId"/> is null otherwise.
     /// LightGBM triple-barrier runs go to <see cref="Domain.Entities.MlLightGbmTripleBarrierPrediction"/>; other engines use <see cref="Domain.Entities.MlPriceDirectionPrediction"/>.
+    /// When <paramref name="bestOfThreeSlidingWindow"/> is true and at least <c>MinCandlesRequired + 2</c> bars exist, runs three
+    /// inferences (dropping 0, 1, 2 oldest candles) and persists the majority direction with a <c>[b3 …]</c> prefix on <c>detail</c>;
+    /// otherwise a single inference is used. Interactive API callers should leave this false.
     /// </summary>
     Task<PriceDirectionPredictionEnvelope> PredictForInstrumentAsync(
         Guid userId,
@@ -16,6 +19,7 @@ public interface IPriceDirectionPredictionService
         string interval,
         string? source = null,
         string? modelId = null,
+        bool bestOfThreeSlidingWindow = false,
         CancellationToken ct = default);
 
     /// <summary>

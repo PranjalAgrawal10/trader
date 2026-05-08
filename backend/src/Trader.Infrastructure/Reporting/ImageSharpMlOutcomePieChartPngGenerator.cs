@@ -39,6 +39,29 @@ public sealed class ImageSharpMlOutcomePieChartPngGenerator : IMlOutcomePieChart
         return ms.ToArray();
     }
 
+    public byte[] RenderDirectionVotePng(int up, int down, int neutral)
+    {
+        const int w = MlReportingConstants.MlPieImageWidth;
+        const int h = MlReportingConstants.MlPieImageHeight;
+        using var image = new Image<Rgba32>(w, h, Color.White);
+
+        var total = up + down + neutral;
+        if (total > 0)
+        {
+            var center = new PointF(w / 2f, h / 2f - 8f);
+            var radius = Math.Min(w * 0.42f, h * 0.38f);
+            float startDeg = -90f;
+
+            DrawSlice(image, center, radius, up, total, CorrectRgb, ref startDeg);
+            DrawSlice(image, center, radius, down, total, WrongRgb, ref startDeg);
+            DrawSlice(image, center, radius, neutral, total, PendingRgb, ref startDeg);
+        }
+
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
     private static void DrawSlice(
         Image<Rgba32> image,
         PointF center,

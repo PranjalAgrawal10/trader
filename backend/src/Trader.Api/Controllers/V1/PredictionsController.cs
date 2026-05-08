@@ -76,6 +76,7 @@ public sealed class PredictionsController : ControllerBase
                     interval.Trim(),
                     source: null,
                     string.IsNullOrWhiteSpace(model) ? null : model.Trim(),
+                    bestOfThreeSlidingWindow: false,
                     ct)
                 .ConfigureAwait(false);
 

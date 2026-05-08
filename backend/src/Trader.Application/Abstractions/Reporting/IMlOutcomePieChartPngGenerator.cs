@@ -4,4 +4,7 @@ namespace Trader.Application.Abstractions.Reporting;
 public interface IMlOutcomePieChartPngGenerator
 {
     byte[] RenderPng(int correct, int wrong, int pending);
+
+    /// <summary>Best-of-three direction component tallies (up / down / neutral slices).</summary>
+    byte[] RenderDirectionVotePng(int up, int down, int neutral);
 }

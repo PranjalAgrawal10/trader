@@ -49,6 +49,13 @@ public sealed class FavoriteMlAutomationOptions
     public int MaxPendingResolutionBatch { get; set; } = 2_000;
 
     /// <summary>
+    /// When true (default), each automation prediction runs three sliding-window inferences on the same latest bar
+    /// (drops 0, 1, then 2 oldest candles). Stored <c>direction</c> is the majority (e.g. up, up, down → up); <c>detail</c> begins with a compact
+    /// <c>[b3 …]</c> tag. Requires at least <c>MinCandlesRequired + 2</c> bars; otherwise falls back to a single inference. Reports may include a direction-vote pie.
+    /// </summary>
+    public bool BestOfThreeEnabled { get; set; } = true;
+
+    /// <summary>
     /// When true, skips only the automated <strong>new prediction</strong> pass (per favorite/engine). Pending resolutions,
     /// nightly EOD email, interactive REST predictions, and broker/live ticks are unchanged.
     /// </summary>
