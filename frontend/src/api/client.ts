@@ -63,7 +63,9 @@ function isRecoverableApiFailure(err: unknown): boolean {
   if (status === 401) return false
   if (status != null) {
     if (status >= 500 && status < 600) return true
-    if (status === 408 || status === 429) return true
+    if (status === 408) return true
+    // Do NOT retry 429: the server is explicitly asking the client to slow down;
+    // an immediate retry only amplifies the rate-limit pressure.
     return false
   }
   // No HTTP response (network / DNS / CORS bridge) — one retry may help.

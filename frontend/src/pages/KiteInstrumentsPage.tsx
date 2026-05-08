@@ -1095,7 +1095,10 @@ function MaChartCornerLegend({
 type ChartPoint = ChartPointOhlc
 
 /** Re-fetch OHLC while a chart is mounted (browser tab visible) to keep the series current. */
-const CHART_LIVE_POLL_MS = 30_000
+// Per-chart historical-OHLC refresh cadence. With many favorite/locked tiles open this
+// multiplies (one timer per tile) so 60s keeps the call rate well under broker quotas
+// while still feeling "live" alongside the websocket tick overlay.
+const CHART_LIVE_POLL_MS = 60_000
 
 function historicalCandlesToChartPoints(data: HistoricalCandlesResponse): ChartPoint[] {
   return data.candles.map((c, idx) => ({
@@ -1520,6 +1523,13 @@ function mergedOutcomeCountsForModel(
   }
 }
 
+/** Accuracy = correct / (correct + wrong), as integer percent. Returns <c>null</c> when no rows are resolved (only pending). */
+function accuracyPercentFromCounts(counts: MlOutcomeCounts): number | null {
+  const resolved = counts.correct + counts.wrong
+  if (resolved === 0) return null
+  return Math.round((counts.correct / resolved) * 100)
+}
+
 /** Tally automation rows for a registered engine (<code>engineModelId</code>). */
 function outcomeCountsForAutomationEngine(
   rows: readonly MlAutomationRecentRow[],
@@ -1597,12 +1607,35 @@ function MlAutomationOutcomesPieGrid({
         {modelIds.map((engineId) => {
           const counts = outcomeCountsForAutomationEngine(rows, engineId)
           const n = counts.correct + counts.wrong + counts.pending
+          const resolved = counts.correct + counts.wrong
+          const accuracyPct = accuracyPercentFromCounts(counts)
           const desc = descById.get(engineId)
           return (
             <div key={engineId} className="flex-shrink-0 overflow-visible border border-secondary rounded p-3 bg-body-tertiary">
-              <div className="small fw-semibold text-truncate mb-1 font-monospace" title={`${engineId} — ${n} row(s)`}>
+              <div
+                className="small fw-semibold text-truncate mb-1 font-monospace"
+                title={`${engineId} — ${n} row(s); ${counts.correct} correct / ${counts.wrong} wrong / ${counts.pending} pending`}
+              >
                 {engineId}
                 <span className="text-muted fw-normal ms-1">({n})</span>
+              </div>
+              <div
+                className={`small mb-2 fw-semibold ${
+                  accuracyPct == null
+                    ? 'text-muted'
+                    : accuracyPct >= 50
+                      ? 'text-success'
+                      : 'text-danger'
+                }`}
+                title="Accuracy = correct / (correct + wrong); pending rows excluded"
+              >
+                Prediction:{' '}
+                {accuracyPct != null
+                  ? `${accuracyPct}% (${counts.correct}/${resolved} resolved)`
+                  : 'no resolved rows yet'}
+                {counts.pending > 0 ? (
+                  <span className="text-muted fw-normal ms-2">· {counts.pending} pending</span>
+                ) : null}
               </div>
               {desc ? (
                 <div className="text-muted mb-2" style={{ fontSize: '0.78rem', lineHeight: 1.35 }}>
@@ -1939,6 +1972,7 @@ function MlAutomationRecentRowMatchesFilter(
   const fav = favoritesByToken?.get(r.instrumentToken)
   const favSym = fav?.tradingsymbol ?? ''
   const favExch = fav?.exchange ?? ''
+  const category = automationRowCategory(r, favoritesByToken).label
   const chunks = [
     r.id,
     r.instrumentToken,
@@ -1948,6 +1982,7 @@ function MlAutomationRecentRowMatchesFilter(
     favExch,
     `${sym}${exch ? ` (${exch})` : ''}`,
     favSym && favExch ? `${favSym} (${favExch})` : favSym,
+    category,
     r.engineModelId,
     r.interval,
     r.direction,
@@ -1975,6 +2010,27 @@ function formatMlAutomationSymbol(
   const fav = favoritesByToken?.get(r.instrumentToken)
   if (fav) return `${fav.tradingsymbol} (${fav.exchange})`
   return r.instrumentToken
+}
+
+/**
+ * Map a Kite exchange code to the Browse-tab category label so the auto-predictions table can show e.g.
+ * <c>F&amp;O</c> for <c>NFO</c>/<c>BFO</c>, <c>Commodities</c> for <c>MCX</c>, <c>Spot</c> for <c>NSE</c>/<c>BSE</c> equity / indices.
+ * Falls back to the raw exchange (or <c>'—'</c>) when nothing else fits.
+ */
+function automationRowCategory(
+  r: MlAutomationRecentRow,
+  favoritesByToken?: ReadonlyMap<string, KiteInstrumentRow>,
+): { label: string; exchange: string } {
+  const exch =
+    r.exchange?.trim() ||
+    favoritesByToken?.get(r.instrumentToken)?.exchange?.trim() ||
+    ''
+  const upper = exch.toUpperCase()
+  if (upper === 'NFO' || upper === 'BFO') return { label: 'F&O', exchange: exch }
+  if (upper === 'MCX') return { label: 'Commodities', exchange: exch }
+  if (upper === 'NSE' || upper === 'BSE' || upper.endsWith('_INDEX'))
+    return { label: 'Spot', exchange: exch }
+  return { label: exch || '—', exchange: exch }
 }
 
 /** Case-insensitive match on model id, outcomes, timestamps, numeric fields, detail. */
@@ -3933,22 +3989,21 @@ export function KiteInstrumentsPage() {
     }
   }, [isZerodha])
 
+  // Only poll automation rows while the user is actually on the Auto predictions tab —
+  // the data isn't shown on Browse / Favorites / Locked, so a background 60s poll there
+  // just burns API quota (and triggered backend "Too many requests").
   useEffect(() => {
     if (!isZerodha) {
       setAutomationRecent([])
       setAutomationPriceModels(null)
       return
     }
+    if (mainTab !== 'automation') return
     void loadAutomationRecent()
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadAutomationRecent()
     }, 60_000)
     return () => window.clearInterval(id)
-  }, [isZerodha, loadAutomationRecent])
-
-  useEffect(() => {
-    if (!isZerodha || mainTab !== 'automation') return
-    void loadAutomationRecent()
   }, [isZerodha, mainTab, loadAutomationRecent])
 
   useEffect(() => {
@@ -4419,7 +4474,7 @@ export function KiteInstrumentsPage() {
                 size="sm"
                 type="search"
                 className="mb-2"
-                placeholder="Filter rows (symbol, engine, interval, outcome, …)"
+                placeholder="Filter rows (symbol, category, engine, interval, outcome, …)"
                 value={automationTableFilter}
                 onChange={(e) => setAutomationTableFilter(e.target.value)}
                 aria-label="Filter automation prediction rows"
@@ -4442,6 +4497,9 @@ export function KiteInstrumentsPage() {
                     <tr className="text-nowrap">
                       <th>Time</th>
                       <th>Symbol</th>
+                      <th title="Browse-tab category resolved from the row's exchange (NFO/BFO → F&O, MCX → Commodities, NSE/BSE → Spot)">
+                        Category
+                      </th>
                       <th>Engine</th>
                       <th>Interval</th>
                       <th title="Close of the reference bar when the prediction ran">Ref close</th>
@@ -4449,29 +4507,41 @@ export function KiteInstrumentsPage() {
                         Next close
                       </th>
                       <th>Dir</th>
-                      <th>Conf</th>
+                      <th title="Engine confidence for this prediction (0–100%)">Conf %</th>
                       <th>Outcome</th>
                     </tr>
                   </thead>
                   <tbody className="font-monospace">
                     {automationRecent.length === 0 && !automationRecentLoading ? (
                       <tr>
-                        <td colSpan={9} className="text-secondary small">
+                        <td colSpan={10} className="text-secondary small">
                           No automation rows yet.
                         </td>
                       </tr>
                     ) : automationRecentDisplay.length === 0 && automationRecent.length > 0 ? (
                       <tr>
-                        <td colSpan={9} className="text-secondary small fst-italic">
+                        <td colSpan={10} className="text-secondary small fst-italic">
                           No rows match this filter.
                         </td>
                       </tr>
                     ) : (
-                      automationRecentDisplay.map((r) => (
+                      automationRecentDisplay.map((r) => {
+                        const category = automationRowCategory(r, favoriteByInstrumentToken)
+                        return (
                         <tr key={r.id}>
                           <td className="small">{formatLocalDateTime(r.predictedAt)}</td>
                           <td title={`Instrument token ${r.instrumentToken}`}>
                             {formatMlAutomationSymbol(r, favoriteByInstrumentToken)}
+                          </td>
+                          <td
+                            className="small"
+                            title={
+                              category.exchange
+                                ? `Exchange: ${category.exchange}`
+                                : 'Exchange unknown for this row'
+                            }
+                          >
+                            {category.label}
                           </td>
                           <td
                             className="text-truncate small"
@@ -4488,7 +4558,7 @@ export function KiteInstrumentsPage() {
                             {r.nextClose != null && Number.isFinite(r.nextClose) ? r.nextClose.toFixed(4) : '—'}
                           </td>
                           <td>{r.direction}</td>
-                          <td>{r.confidence}</td>
+                          <td>{r.confidence}%</td>
                           <td
                             className={
                               r.outcome === 'correct'
@@ -4501,7 +4571,8 @@ export function KiteInstrumentsPage() {
                             {r.outcome}
                           </td>
                         </tr>
-                      ))
+                        )
+                      })
                     )}
                   </tbody>
                 </Table>
