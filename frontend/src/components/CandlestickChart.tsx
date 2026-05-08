@@ -15,6 +15,9 @@ import {
 
 const PAD = { top: 6, right: 8, bottom: 34, left: 52 }
 
+/** When zoomed to few bars, avoid stretching candles across the full plot — keep a max pitch and anchor the cluster to the right (latest on the right edge). */
+const MAX_CANDLE_SLOT_PX = 28
+
 /** Bullish / bearish candle colors (typical trading terminal green / red). */
 const CANDLE = {
   upFill: '#22c55e',
@@ -30,7 +33,12 @@ type MaKey = keyof Pick<
   'sma20' | 'ema9' | 'ema21' | 'emaCustom' | 'srSupport' | 'srResistance'
 >
 
-function buildTrendPath(points: ChartPointWithMaAndTrend[], slotW: number, yPrice: (p: number) => number): string {
+function buildTrendPath(
+  points: ChartPointWithMaAndTrend[],
+  clusterStartX: number,
+  slotW: number,
+  yPrice: (p: number) => number,
+): string {
   let d = ''
   let penUp = true
   for (let i = 0; i < points.length; i++) {
@@ -39,7 +47,7 @@ function buildTrendPath(points: ChartPointWithMaAndTrend[], slotW: number, yPric
       penUp = true
       continue
     }
-    const cx = PAD.left + i * slotW + slotW / 2
+    const cx = clusterStartX + i * slotW + slotW / 2
     const cy = yPrice(v)
     d += penUp ? `M ${cx} ${cy}` : ` L ${cx} ${cy}`
     penUp = false
@@ -47,7 +55,13 @@ function buildTrendPath(points: ChartPointWithMaAndTrend[], slotW: number, yPric
   return d
 }
 
-function buildMaPath(key: MaKey, data: ChartPointWithMa[], slotW: number, yPrice: (p: number) => number): string {
+function buildMaPath(
+  key: MaKey,
+  data: ChartPointWithMa[],
+  clusterStartX: number,
+  slotW: number,
+  yPrice: (p: number) => number,
+): string {
   let d = ''
   let penUp = true
   for (let i = 0; i < data.length; i++) {
@@ -56,7 +70,7 @@ function buildMaPath(key: MaKey, data: ChartPointWithMa[], slotW: number, yPrice
       penUp = true
       continue
     }
-    const cx = PAD.left + i * slotW + slotW / 2
+    const cx = clusterStartX + i * slotW + slotW / 2
     const cy = yPrice(v)
     d += penUp ? `M ${cx} ${cy}` : ` L ${cx} ${cy}`
     penUp = false
@@ -223,19 +237,29 @@ export function CandlestickChart({
 
     const yPrice = (p: number) => PAD.top + ((max - p) / (max - min)) * plotH
     const n = data.length
-    const slotW = plotW / n
+    const naturalSlotW = plotW / n
+    let slotW = naturalSlotW
+    let clusterStartX = PAD.left
+    if (naturalSlotW > MAX_CANDLE_SLOT_PX) {
+      slotW = MAX_CANDLE_SLOT_PX
+      clusterStartX = PAD.left + plotW - n * slotW
+      if (clusterStartX < PAD.left) {
+        slotW = naturalSlotW
+        clusterStartX = PAD.left
+      }
+    }
     const bodyW = Math.min(Math.max(1, slotW * 0.65), 14)
 
-    const pathSma = buildMaPath('sma20', data, slotW, yPrice)
-    const pathEma9 = buildMaPath('ema9', data, slotW, yPrice)
-    const pathEma21 = buildMaPath('ema21', data, slotW, yPrice)
-    const pathEmaCustom = buildMaPath('emaCustom', data, slotW, yPrice)
-    const pathSrSupport = buildMaPath('srSupport', data, slotW, yPrice)
-    const pathSrResistance = buildMaPath('srResistance', data, slotW, yPrice)
+    const pathSma = buildMaPath('sma20', data, clusterStartX, slotW, yPrice)
+    const pathEma9 = buildMaPath('ema9', data, clusterStartX, slotW, yPrice)
+    const pathEma21 = buildMaPath('ema21', data, clusterStartX, slotW, yPrice)
+    const pathEmaCustom = buildMaPath('emaCustom', data, clusterStartX, slotW, yPrice)
+    const pathSrSupport = buildMaPath('srSupport', data, clusterStartX, slotW, yPrice)
+    const pathSrResistance = buildMaPath('srResistance', data, clusterStartX, slotW, yPrice)
 
     const pathTrend =
       maLineVisibility.showLinearCloseTrend && trendSeries && trendSeries.length > 0
-        ? buildTrendPath(trendSeries, slotW, yPrice)
+        ? buildTrendPath(trendSeries, clusterStartX, slotW, yPrice)
         : ''
 
     const shortDay = isIntradayRange(data)
@@ -243,7 +267,7 @@ export function CandlestickChart({
     const xTickIndices = computeXTickIndices(n, targetXTicks)
     const xTicks = xTickIndices.map((i) => ({
       i,
-      cx: PAD.left + i * slotW + slotW / 2,
+      cx: clusterStartX + i * slotW + slotW / 2,
       label: formatAxisTimeLabel(data[i].t, shortDay),
     }))
 
@@ -256,6 +280,7 @@ export function CandlestickChart({
       max,
       yPrice,
       n,
+      clusterStartX,
       slotW,
       bodyW,
       pathSma,
@@ -312,7 +337,7 @@ export function CandlestickChart({
           ))}
 
           {data.map((c, i) => {
-            const cx = PAD.left + i * layout.slotW + layout.slotW / 2
+            const cx = layout.clusterStartX + i * layout.slotW + layout.slotW / 2
             const yHi = layout.yPrice(c.high)
             const yLo = layout.yPrice(c.low)
             const yOpen = layout.yPrice(c.open)
@@ -424,8 +449,8 @@ export function CandlestickChart({
           ) : null}
           {hover ? (
             <line
-              x1={PAD.left + hover.idx * layout.slotW + layout.slotW / 2}
-              x2={PAD.left + hover.idx * layout.slotW + layout.slotW / 2}
+              x1={layout.clusterStartX + hover.idx * layout.slotW + layout.slotW / 2}
+              x2={layout.clusterStartX + hover.idx * layout.slotW + layout.slotW / 2}
               y1={PAD.top}
               y2={layout.plotBottomY}
               stroke="rgba(248, 249, 250, 0.35)"
@@ -467,7 +492,7 @@ export function CandlestickChart({
               if (!svg || !ref.current) return
               const svgR = svg.getBoundingClientRect()
               const sx = ((e.clientX - svgR.left) / Math.max(svgR.width, 1)) * w
-              const rel = sx - PAD.left
+              const rel = sx - layout.clusterStartX
               const idx = Math.max(0, Math.min(data.length - 1, Math.floor(rel / layout.slotW)))
               const box = ref.current.getBoundingClientRect()
               setHover({
