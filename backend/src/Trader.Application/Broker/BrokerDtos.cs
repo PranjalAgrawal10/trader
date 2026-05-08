@@ -26,11 +26,12 @@ public sealed record KiteFnoCommodityListsDto(
     bool FnoTruncated,
     bool CommoditiesTruncated);
 
-/// <summary>F&amp;O (NFO+BFO) or MCX only.</summary>
+/// <summary>F&amp;O (NFO+BFO), MCX, or NSE/BSE equity cash (<c>EQ</c> segment).</summary>
 public enum KiteInstrumentSearchSegment
 {
     Fno,
     Mcx,
+    Spot,
 }
 
 public sealed record KiteInstrumentSearchDto(

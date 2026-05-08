@@ -17,7 +17,9 @@ public static class MlChartIntervalDuration
             "15m" => TimeSpan.FromMinutes(15),
             "30m" => TimeSpan.FromMinutes(30),
             "1h" => TimeSpan.FromHours(1),
+            "4h" => TimeSpan.FromHours(4),
             "1d" => TimeSpan.FromDays(1),
+            "1w" => TimeSpan.FromDays(7),
             _ => throw new InvalidOperationException(
                 $"Unknown interval '{normalizedInterval}' for bar duration."),
         };

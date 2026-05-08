@@ -275,6 +275,7 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         string accessToken,
         string query,
         int maxMatches,
+        bool equityCashOnly = false,
         CancellationToken ct = default)
     {
         if (maxMatches < 1)
@@ -314,7 +315,12 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         while (await reader.ReadLineAsync(ct) is { } line)
         {
             var row = TryParseRow(line);
-            if (row is null || !RowMatchesNeedle(row, needle))
+            if (row is null)
+                continue;
+            if (equityCashOnly
+                && !string.Equals(row.Segment, "EQ", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (!RowMatchesNeedle(row, needle))
                 continue;
 
             items.Add(row);

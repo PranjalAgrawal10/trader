@@ -33,7 +33,7 @@ export function Layout({ children }: { children: ReactNode }) {
                 Dashboard
               </Nav.Link>
               <Nav.Link as={NavLink} to="/instruments">
-                F&amp;O / MCX
+                F&amp;O / Spot / MCX
               </Nav.Link>
               <Nav.Link as={NavLink} to="/strategies">
                 Strategies

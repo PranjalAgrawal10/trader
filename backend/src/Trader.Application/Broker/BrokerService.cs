@@ -27,6 +27,7 @@ public sealed class BrokerService : IBrokerService
 
     private const int KiteInstrumentSearchMaxMatchesFnoPerExchange = 50;
     private const int KiteInstrumentSearchMaxMatchesMcx = 100;
+    private const int KiteInstrumentSearchMaxMatchesSpotPerExchange = 80;
     private const int KiteInstrumentSearchQueryMaxLength = 128;
 
     private const int MaxKiteFavoriteInstrumentsPerUser = 400;
@@ -234,8 +235,8 @@ public sealed class BrokerService : IBrokerService
         if (segment == KiteInstrumentSearchSegment.Fno)
         {
             var cap = KiteInstrumentSearchMaxMatchesFnoPerExchange;
-            var nfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("NFO", apiKey, accessToken, needle, cap, ct);
-            var bfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("BFO", apiKey, accessToken, needle, cap, ct);
+            var nfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("NFO", apiKey, accessToken, needle, cap, ct: ct);
+            var bfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync("BFO", apiKey, accessToken, needle, cap, ct: ct);
             await Task.WhenAll(nfoTask, bfoTask).ConfigureAwait(false);
 
             var nfo = await nfoTask.ConfigureAwait(false);
@@ -255,6 +256,33 @@ public sealed class BrokerService : IBrokerService
             return new KiteInstrumentSearchDto(combined, scanTruncated);
         }
 
+        if (segment == KiteInstrumentSearchSegment.Spot)
+        {
+            var cap = KiteInstrumentSearchMaxMatchesSpotPerExchange;
+            var nse = await _kiteInstruments
+                .SearchExchangeInstrumentsAsync("NSE", apiKey, accessToken, needle, cap, equityCashOnly: true, ct)
+                .ConfigureAwait(false);
+            if (!nse.Success)
+                throw new InvalidOperationException(nse.ErrorMessage ?? "Could not search NSE equity instruments on Kite.");
+
+            var combined = new List<KiteInstrumentListItemDto>(nse.Items);
+            var scanTruncated = nse.Truncated;
+            var remaining = cap - combined.Count;
+            if (remaining > 0)
+            {
+                var bse = await _kiteInstruments
+                    .SearchExchangeInstrumentsAsync("BSE", apiKey, accessToken, needle, remaining, equityCashOnly: true, ct)
+                    .ConfigureAwait(false);
+                if (!bse.Success)
+                    throw new InvalidOperationException(bse.ErrorMessage ?? "Could not search BSE equity instruments on Kite.");
+
+                combined.AddRange(bse.Items);
+                scanTruncated |= bse.Truncated;
+            }
+
+            return new KiteInstrumentSearchDto(combined, scanTruncated);
+        }
+
         {
             var mcx = await _kiteInstruments
                 .SearchExchangeInstrumentsAsync(
@@ -263,7 +291,7 @@ public sealed class BrokerService : IBrokerService
                     accessToken,
                     needle,
                     KiteInstrumentSearchMaxMatchesMcx,
-                    ct)
+                    ct: ct)
                 .ConfigureAwait(false);
             if (!mcx.Success)
                 throw new InvalidOperationException(mcx.ErrorMessage ?? "Could not search MCX instruments on Kite.");
@@ -304,6 +332,30 @@ public sealed class BrokerService : IBrokerService
                 throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load candles from Kite.");
 
             var merged = MergeMinuteCandles(fetch.Candles, period);
+            return FinalizeChartHistoricalCandles(merged, code, requestStart, requestEnd);
+        }
+
+        if (code == "4h")
+        {
+            var fetch = await _kiteInstruments
+                .FetchHistoricalCandlesAsync(token, "60minute", apiKey, accessToken, fetchStart, requestEnd, continuous: false, ct)
+                .ConfigureAwait(false);
+            if (!fetch.Success)
+                throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load candles from Kite.");
+
+            var merged = MergeOhlcByBucketSeconds(fetch.Candles, 4L * 3600);
+            return FinalizeChartHistoricalCandles(merged, code, requestStart, requestEnd);
+        }
+
+        if (code == "1w")
+        {
+            var fetch = await _kiteInstruments
+                .FetchHistoricalCandlesAsync(token, "day", apiKey, accessToken, fetchStart, requestEnd, continuous: false, ct)
+                .ConfigureAwait(false);
+            if (!fetch.Success)
+                throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load candles from Kite.");
+
+            var merged = MergeEveryNCandles(fetch.Candles, 7);
             return FinalizeChartHistoricalCandles(merged, code, requestStart, requestEnd);
         }
 
@@ -622,7 +674,9 @@ public sealed class BrokerService : IBrokerService
             "15m" => TimeSpan.FromMinutes(15),
             "30m" => TimeSpan.FromMinutes(30),
             "1h" => TimeSpan.FromHours(1),
+            "4h" => TimeSpan.FromHours(4),
             "1d" => TimeSpan.FromDays(1),
+            "1w" => TimeSpan.FromDays(7),
             _ => TimeSpan.FromMinutes(5),
         };
 
@@ -636,7 +690,9 @@ public sealed class BrokerService : IBrokerService
             "15m" => TimeSpan.FromDays(120),
             "30m" => TimeSpan.FromDays(180),
             "1h" => TimeSpan.FromDays(365),
+            "4h" => TimeSpan.FromDays(730),
             "1d" => TimeSpan.FromDays(730),
+            "1w" => TimeSpan.FromDays(365 * 12),
             _ => TimeSpan.FromDays(5),
         };
 
@@ -662,6 +718,17 @@ public sealed class BrokerService : IBrokerService
             return minutes;
 
         var ordered = minutes.OrderBy(c => c.Time).ToList();
+        return MergeOhlcByBucketSeconds(ordered, periodMinutes * 60L);
+    }
+
+    private static IReadOnlyList<KiteHistoricalCandlePointDto> MergeOhlcByBucketSeconds(
+        IReadOnlyList<KiteHistoricalCandlePointDto> candles,
+        long bucketSeconds)
+    {
+        if (candles.Count == 0 || bucketSeconds < 1)
+            return candles;
+
+        var ordered = candles.OrderBy(c => c.Time).ToList();
         var merged = new List<KiteHistoricalCandlePointDto>();
         long? bucketKey = null;
         decimal open = 0, high = 0, low = 0, close = 0;
@@ -685,7 +752,7 @@ public sealed class BrokerService : IBrokerService
         foreach (var c in ordered)
         {
             var secs = c.Time.ToUnixTimeSeconds();
-            var key = secs - secs % (periodMinutes * 60L);
+            var key = secs - secs % bucketSeconds;
             if (bucketKey != key)
             {
                 Flush();
@@ -707,6 +774,33 @@ public sealed class BrokerService : IBrokerService
         }
 
         Flush();
+        return merged;
+    }
+
+    /// <summary>Group consecutive daily bars into blocks of <paramref name="n"/> (7 → ~weekly bars for UI <c>1w</c>).</summary>
+    private static IReadOnlyList<KiteHistoricalCandlePointDto> MergeEveryNCandles(
+        IReadOnlyList<KiteHistoricalCandlePointDto> candles,
+        int n)
+    {
+        if (n <= 1 || candles.Count == 0)
+            return candles;
+
+        var ordered = candles.OrderBy(c => c.Time).ToList();
+        var merged = new List<KiteHistoricalCandlePointDto>();
+        for (var i = 0; i < ordered.Count; i += n)
+        {
+            var chunk = ordered.Skip(i).Take(n).ToList();
+            if (chunk.Count == 0)
+                break;
+
+            var o = chunk[0].Open;
+            var hi = chunk.Max(x => x.High);
+            var lo = chunk.Min(x => x.Low);
+            var last = chunk[^1];
+            var vol = chunk.Sum(x => x.Volume);
+            merged.Add(new KiteHistoricalCandlePointDto(last.Time, o, hi, lo, last.Close, vol));
+        }
+
         return merged;
     }
 

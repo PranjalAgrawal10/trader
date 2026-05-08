@@ -234,8 +234,24 @@ function initialAutomationEmailReportDatetimeLocal(): { from: string; to: string
   return { from: dateToDatetimeLocalInputValue(from), to: dateToDatetimeLocalInputValue(to) }
 }
 
-const CHART_INTERVALS = ['1m', '2m', '3m', '4m', '5m', '10m', '15m', '30m', '1h', '1d'] as const
+const CHART_INTERVALS = [
+  '1m',
+  '2m',
+  '3m',
+  '4m',
+  '5m',
+  '10m',
+  '15m',
+  '30m',
+  '1h',
+  '4h',
+  '1d',
+  '1w',
+] as const
 type ChartInterval = (typeof CHART_INTERVALS)[number]
+
+/** Higher-timeframe trend presets (toolbar quick row); each value must exist in {@link CHART_INTERVALS}. */
+const TREND_ANALYSIS_INTERVALS = ['5m', '15m', '1h', '4h', '1d', '1w'] as const satisfies readonly ChartInterval[]
 
 /** Sort automation row interval codes in chart order, then unknown codes alphabetically. */
 function sortMlAutomationIntervalCodes(intervals: string[]): string[] {
@@ -428,8 +444,8 @@ function InstrumentListPanel({
   truncated: boolean
   loading: boolean
   emptyHint: string
-  searchSegment: 'fno' | 'mcx'
-  /** `panel`: one server scan for this panel's segment. `all`: F&O + MCX (e.g. favorites). */
+  searchSegment: 'fno' | 'mcx' | 'spot'
+  /** `panel`: one server scan for this panel's segment. `all`: F&O + Spot + MCX (e.g. favorites). */
   kiteLiveSegmentScope?: 'panel' | 'all'
   selectedRowKey: string | null
   onSelectRow: (row: KiteInstrumentRow) => void
@@ -488,8 +504,8 @@ function InstrumentListPanel({
     setLiveSearchLoading(true)
     setLiveSearchError(null)
     try {
-      const segments: Array<'fno' | 'mcx'> =
-        kiteLiveSegmentScope === 'all' ? ['fno', 'mcx'] : [searchSegment]
+      const segments: Array<'fno' | 'mcx' | 'spot'> =
+        kiteLiveSegmentScope === 'all' ? ['fno', 'spot', 'mcx'] : [searchSegment]
       const responses = await Promise.all(
         segments.map((segment) =>
           api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', {
@@ -1206,6 +1222,26 @@ function ChartSettingsToolbar({
               }
             >
               {CHART_RANGE_LABEL[id]}
+            </ToggleButton>
+          ))}
+        </ButtonGroup>
+      </div>
+      <div className="mb-3 d-flex flex-wrap align-items-center gap-2">
+        <span className="small text-secondary text-uppercase me-1">Trend analysis</span>
+        <ButtonGroup size="sm" className="flex-wrap">
+          {TREND_ANALYSIS_INTERVALS.map((iv) => (
+            <ToggleButton
+              key={`trend-${iv}`}
+              id={`${idPrefix}-trend-${iv}`}
+              type="radio"
+              variant="outline-primary"
+              name={`${idPrefix}-chart-trend`}
+              value={iv}
+              checked={interval === iv}
+              onChange={() => onIntervalChange(iv)}
+              title="5m–1w presets for multi-timeframe context"
+            >
+              {iv}
             </ToggleButton>
           ))}
         </ButtonGroup>
@@ -3528,9 +3564,10 @@ export function KiteInstrumentsPage() {
 
   return (
     <Layout>
-      <h1 className="h3 mb-1">F&O & commodities</h1>
+      <h1 className="h3 mb-1">F&O, spot & commodities</h1>
       <p className="text-secondary small mb-4" style={{ maxWidth: '42rem' }}>
-        Master contract rows from Kite for NFO, BFO, and MCX (daily instrument dump; not live quotes).
+        Browse F&amp;O and MCX from Kite&apos;s daily dumps; search <strong>Spot</strong> for NSE/BSE equity cash (EQ) and chart
+        with the same OHLC tools. Lists are not live quotes until you select a row.
       </p>
 
       {statusLoading ? (
@@ -3553,7 +3590,7 @@ export function KiteInstrumentsPage() {
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Filter preview or press <strong>Enter</strong> / <strong>Search Kite</strong> for a full scan (on{' '}
-                  <strong>All favorites</strong>, F&amp;O + MCX). Favorites and chart settings sync to your account; use ☆/★ and{' '}
+                  <strong>All favorites</strong>, F&amp;O + Spot + MCX). Favorites and chart settings sync to your account; use ☆/★ and{' '}
                   <strong>All favorites</strong> for the grid; on <strong>Browse</strong>, click a row for the chart. Scheduled
                   automation and the merged prediction log live on the <strong>Auto predictions</strong> tab.
                 </Card.Text>
@@ -4091,6 +4128,18 @@ export function KiteInstrumentsPage() {
                   loading={instrumentsLoading}
                   emptyHint="No rows returned. Try Refresh or check your Kite session."
                   searchSegment="mcx"
+                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
+                  onSelectRow={setChartRow}
+                  favoriteKeySet={favoriteKeySet}
+                  onToggleFavorite={(r) => void toggleFavorite(r)}
+                />
+                <InstrumentListPanel
+                  title="Spot equity (NSE / BSE cash)"
+                  rows={EMPTY_INSTRUMENTS}
+                  truncated={false}
+                  loading={false}
+                  emptyHint="Type a symbol or company name, then press Enter or Search Kite. Only equity cash (EQ segment) matches are returned."
+                  searchSegment="spot"
                   selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}

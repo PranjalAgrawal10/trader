@@ -21,6 +21,7 @@ public interface IKiteInstrumentsClient
         string accessToken,
         string query,
         int maxMatches,
+        bool equityCashOnly = false,
         CancellationToken ct = default);
 
     /// <summary>Kite <c>GET /instruments/historical/{token}/{interval}</c> — <paramref name="fromUtc"/> / <paramref name="toUtc"/> are converted to IST in the query string.</summary>

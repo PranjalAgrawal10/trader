@@ -84,7 +84,7 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
-    /// <summary>Streaming substring search across Kite instrument CSVs for F&amp;O (NFO+BFO) or MCX. Use when the preview list has no match.</summary>
+    /// <summary>Streaming substring search across Kite instrument CSVs for F&amp;O (NFO+BFO), MCX, or NSE/BSE equity cash (<c>segment=Spot</c>).</summary>
     [Authorize]
     [HttpGet("kite/instruments/search")]
     public async Task<ActionResult<KiteInstrumentSearchDto>> SearchKiteInstruments(
@@ -104,7 +104,7 @@ public sealed class BrokerController : ControllerBase
         return Ok(dto);
     }
 
-    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1d</c> (see SPA). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply. Responses include <c>sma20</c>, <c>ema9</c>, <c>ema21</c>, <c>srSupport</c>, <c>srResistance</c> (nullable); the server requests extra history before <c>from</c> so overlays are warmed for the visible window.</summary>
+    /// <summary>Kite historical OHLCV. <c>interval</c> values: <c>1m</c> … <c>1w</c> (includes <c>4h</c> / <c>1w</c> derived server-side from Kite 60m/d candles; see README). Optional ISO <c>from</c>/<c>to</c> (UTC); otherwise defaults apply. Responses include <c>sma20</c>, <c>ema9</c>, <c>ema21</c>, <c>srSupport</c>, <c>srResistance</c> (nullable); the server requests extra history before <c>from</c> so overlays are warmed for the visible window.</summary>
     [Authorize]
     [HttpGet("kite/historical-candles")]
     public async Task<ActionResult<KiteHistoricalCandlesDto>> KiteHistoricalCandles(

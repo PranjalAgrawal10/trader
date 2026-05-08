@@ -11,7 +11,9 @@ export type ChartIntervalKey =
   | '15m'
   | '30m'
   | '1h'
+  | '4h'
   | '1d'
+  | '1w'
 
 export type ChartPointOhlc = {
   idx: number
@@ -50,8 +52,12 @@ export function intervalToMs(interval: ChartIntervalKey): number {
       return 1_800_000
     case '1h':
       return 3_600_000
+    case '4h':
+      return 14_400_000
     case '1d':
       return 86_400_000
+    case '1w':
+      return 7 * 86_400_000
     default:
       return 60_000
   }
@@ -62,6 +68,10 @@ export function candleBucketStartUtc(ms: number, interval: ChartIntervalKey): nu
   if (interval === '1d') {
     const d = new Date(ms)
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+  }
+  if (interval === '1w') {
+    const step = intervalToMs('1w')
+    return Math.floor(ms / step) * step
   }
   const step = intervalToMs(interval)
   return Math.floor(ms / step) * step
