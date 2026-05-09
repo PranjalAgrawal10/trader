@@ -166,6 +166,65 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    /// <summary>OHLC+V only for multiple intervals in one call. Use comma-separated <c>intervals</c> (e.g. <c>1m,2m,3m</c>).</summary>
+    [Authorize]
+    [HttpGet("kite/chart/historical-ohlc/multi")]
+    public async Task<ActionResult<KiteHistoricalOhlcvMultiDto>> KiteHistoricalChartOhlcvMulti(
+        [FromQuery(Name = "instrumentToken")] string? instrumentToken,
+        [FromQuery] string? intervals,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(intervals))
+        {
+            return Problem(
+                title: "Invalid intervals",
+                detail: "Provide comma-separated intervals (e.g. 1m,2m,3m).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var parsedIntervals = intervals
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (parsedIntervals.Length == 0)
+        {
+            return Problem(
+                title: "Invalid intervals",
+                detail: "Provide at least one valid interval.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var boundQueries = new List<KiteHistoricalBoundQuery>(parsedIntervals.Length);
+        foreach (var parsedInterval in parsedIntervals)
+        {
+            var binding = BindKiteHistoricalInstrumentRequest(instrumentToken, parsedInterval, from, to);
+            if (binding.Error != null)
+                return binding.Error;
+            boundQueries.Add(binding.Query!);
+        }
+
+        try
+        {
+            var fetches = boundQueries.Select(q => _broker.GetKiteHistoricalChartOhlcvAsync(
+                User.GetUserId(),
+                q.InstrumentToken,
+                q.Interval,
+                q.FromUtc,
+                q.ToUtc,
+                ct));
+            var items = await Task.WhenAll(fetches);
+            return Ok(new KiteHistoricalOhlcvMultiDto(items));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     /// <summary>Smoothing/support-resistance overlays for the trimmed window (same semantics as candles endpoint).</summary>
     [Authorize]
     [HttpGet("kite/chart/historical-overlays")]

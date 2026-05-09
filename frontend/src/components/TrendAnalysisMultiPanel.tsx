@@ -1,15 +1,23 @@
 import axios from 'axios'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Spinner, Table } from 'react-bootstrap'
-import { api } from '../api/client'
+import { fetchHistoricalChartOhlcMulti } from '../api/kiteChartHistorical'
 import { summarizeCloseLinearTrend, type CloseLinearTrendSummary } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 
-interface HistoricalCandlesResponse {
-  candles: { close: number }[]
-  interval: string
-  from: string
-  to: string
+const TREND_GROUP_FAST = new Set(['1m', '2m', '3m', '4m'])
+const TREND_GROUP_CORE = new Set(['5m', '10m', '15m', '30m'])
+
+function bucketTrendIntervals(intervals: readonly string[]): string[][] {
+  const fast: string[] = []
+  const core: string[] = []
+  const rest: string[] = []
+  for (const iv of intervals) {
+    if (TREND_GROUP_FAST.has(iv)) fast.push(iv)
+    else if (TREND_GROUP_CORE.has(iv)) core.push(iv)
+    else rest.push(iv)
+  }
+  return [fast, core, rest].filter((g) => g.length > 0)
 }
 
 function problemDetail(err: unknown): string {
@@ -76,43 +84,40 @@ export function TrendAnalysisMultiPanel({
     setLoading(true)
     setError(null)
     try {
+      const grouped = bucketTrendIntervals(selectedIntervalsOrdered)
       const results = await Promise.all(
-        selectedIntervalsOrdered.map(async (interval) => {
+        grouped.map(async (group) => {
           try {
-            const { data } = await api.get<HistoricalCandlesResponse>('/broker/kite/chart/historical-ohlc', {
-              params: {
-                instrumentToken,
-                interval,
-                ...historicalQueryExtra,
-              },
+            const data = await fetchHistoricalChartOhlcMulti(instrumentToken, group, historicalQueryExtra)
+            return data.items.map((item) => {
+              const closes = item.candles.map((c) => Number(c.close)).filter((x) => Number.isFinite(x))
+              const summary = summarizeCloseLinearTrend(closes)
+              if (!summary) return { interval: item.interval, payload: null as null }
+              return {
+                interval: item.interval,
+                payload: {
+                  bars: summary.barCount,
+                  windowDeltaPct: summary.windowDeltaPct,
+                  lrSlopePerBar: summary.slopePerBar,
+                  lrDir: classifyTrend(summary),
+                  fromIso: item.from,
+                  toIso: item.to,
+                },
+              }
             })
-            const closes = data.candles.map((c) => Number(c.close)).filter((x) => Number.isFinite(x))
-            const summary = summarizeCloseLinearTrend(closes)
-            if (!summary) {
-              return { interval, payload: null as null }
-            }
-            return {
-              interval,
-              payload: {
-                bars: summary.barCount,
-                windowDeltaPct: summary.windowDeltaPct,
-                lrSlopePerBar: summary.slopePerBar,
-                lrDir: classifyTrend(summary),
-                fromIso: data.from,
-                toIso: data.to,
-              },
-            }
           } catch (e: unknown) {
             if (axios.isAxiosError(e) && e.code === 'ERR_CANCELED') throw e
-            return { interval, payload: 'error' as 'error' }
+            return group.map((interval) => ({ interval, payload: 'error' as const }))
           }
         }),
       )
 
       const next: typeof rowsByInterval = {}
-      for (const r of results) {
-        if (r.payload === 'error') next[r.interval] = 'error'
-        else next[r.interval] = r.payload ?? null
+      for (const groupResult of results) {
+        for (const r of groupResult) {
+          if (r.payload === 'error') next[r.interval] = 'error'
+          else next[r.interval] = r.payload ?? null
+        }
       }
       setRowsByInterval(next)
     } catch (e: unknown) {

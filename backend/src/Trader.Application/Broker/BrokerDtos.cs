@@ -60,6 +60,10 @@ public sealed record KiteHistoricalOhlcvOnlyDto(
     DateTimeOffset From,
     DateTimeOffset To);
 
+/// <summary>Batch OHLC-only response across multiple requested intervals.</summary>
+public sealed record KiteHistoricalOhlcvMultiDto(
+    IReadOnlyList<KiteHistoricalOhlcvOnlyDto> Items);
+
 public sealed record KiteHistoricalOverlayPointDto(
     DateTimeOffset Time,
     decimal? Sma20,

@@ -34,6 +34,10 @@ interface OhlcOnlyResponse {
   to: string
 }
 
+export interface OhlcOnlyMultiResponse {
+  items: OhlcOnlyResponse[]
+}
+
 interface OverlaysOnlyResponse {
   points: {
     time: string
@@ -94,4 +98,17 @@ export async function fetchMergedHistoricalChartCandles(
     api.get<OverlaysOnlyResponse>('/broker/kite/chart/historical-overlays', { params, signal }),
   ])
   return mergeHistoricalSlices(ohRes.data, ovRes.data)
+}
+
+export async function fetchHistoricalChartOhlcMulti(
+  instrumentToken: string,
+  intervals: readonly string[],
+  rangeQuery: Record<string, string | undefined>,
+  signal?: AbortSignal,
+): Promise<OhlcOnlyMultiResponse> {
+  const cleaned = intervals.map((x) => x.trim()).filter((x) => x.length > 0)
+  if (cleaned.length === 0) return { items: [] }
+  const params = { instrumentToken, intervals: cleaned.join(','), ...rangeQuery }
+  const { data } = await api.get<OhlcOnlyMultiResponse>('/broker/kite/chart/historical-ohlc/multi', { params, signal })
+  return data
 }
