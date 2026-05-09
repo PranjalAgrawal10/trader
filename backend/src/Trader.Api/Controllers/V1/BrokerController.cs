@@ -209,14 +209,19 @@ public sealed class BrokerController : ControllerBase
 
         try
         {
-            var fetches = boundQueries.Select(q => _broker.GetKiteHistoricalChartOhlcvAsync(
-                User.GetUserId(),
-                q.InstrumentToken,
-                q.Interval,
-                q.FromUtc,
-                q.ToUtc,
-                ct));
-            var items = await Task.WhenAll(fetches);
+            var items = new List<KiteHistoricalOhlcvOnlyDto>(boundQueries.Count);
+            foreach (var q in boundQueries)
+            {
+                // Sequential awaits avoid concurrent use of scoped EF DbContext within one HTTP request.
+                var dto = await _broker.GetKiteHistoricalChartOhlcvAsync(
+                    User.GetUserId(),
+                    q.InstrumentToken,
+                    q.Interval,
+                    q.FromUtc,
+                    q.ToUtc,
+                    ct);
+                items.Add(dto);
+            }
             return Ok(new KiteHistoricalOhlcvMultiDto(items));
         }
         catch (InvalidOperationException ex)
