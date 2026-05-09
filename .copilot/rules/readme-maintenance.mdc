@@ -1,0 +1,14 @@
+---
+description: Keep root README in sync when behavior or docs change
+alwaysApply: true
+---
+
+# README maintenance
+
+When your changes affect **how someone clones, configures, runs, tests, or deploys** this repo—or change **architecture, ports, env vars, Docker, EF migrations location, or public API surface**—update the root **`README.md`** in the **same change** so it stays accurate.
+
+- Prefer small, factual edits (commands, paths, tables, defaults).
+- Do **not** expand README with unrelated tutorials or marketing copy.
+- If the change is purely internal refactors with zero impact on documented behavior, README updates are optional.
+
+This rule overrides the generic “no markdown docs” guidance for **`README.md`** only.

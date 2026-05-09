@@ -1,0 +1,33 @@
+core-principles
+================
+
+Scope
+-----
+Short, actionable mapping of SOLID and layering expectations for this repository.
+
+Rules
+-----
+- Layers:
+  - Domain: Entities, enums, pure domain types and value objects. No framework or infra dependencies.
+  - Application: Use cases, DTOs, input/output ports (abstractions), orchestration of domain operations. This layer depends on Domain and Abstractions only.
+  - Infrastructure: EF Core, persistence, external integrations, concrete implementations of Application Abstractions. Infrastructure depends on Application.Abstractions and Domain but NOT the other way around.
+  - API (host): Composition root, controllers, HTTP mapping, middleware, DI wiring. API depends on Application and Infrastructure.
+
+- Single Responsibility (S): Keep module responsibilities narrow. A use case class should implement one application-level responsibility.
+- Open/Closed (O): Prefer adding new implementations behind Abstractions rather than modifying existing core business logic.
+- Liskov Substitution (L): Implementations for application ports must respect the expected behavior and invariants described by the interfaces.
+- Interface Segregation (I): Keep application ports (abstractions) small and purpose-specific. Prefer multiple small interfaces to one large interface.
+- Dependency Inversion (D): High-level application code depends on abstractions. Infrastructure implements those abstractions and is injected at composition time in the API host.
+
+Practical guidelines
+--------------------
+- Put interfaces used by application logic in `backend/src/Trader.Application/Abstractions/`.
+- Concrete EF Core DbContext, repositories, and migrations belong in `backend/src/Trader.Infrastructure/`.
+- Avoid referencing Infrastructure from Domain or Application.
+- Tests may use fakes or in-memory implementations placed in `backend/tests/` or test fixtures.
+
+When changing architecture
+-------------------------
+- Document new abstraction surfaces in `Trader.Application/Abstractions` with XML doc comments and update DI registration in `Application` / `Infrastructure` DependencyInjection files.
+- Add an entry in `.cursor/rules/core-principles.mdc` (and mirror here) when introducing cross-cutting exception to these rules.
+

@@ -1,0 +1,15 @@
+---
+description: Strict React Bootstrap UI for frontend (no Tailwind/CSS frameworks for layout)
+globs: frontend/src/**/*.{tsx,ts,css}
+alwaysApply: false
+---
+
+# React Bootstrap (strict)
+
+For **`frontend`**, UI **must** use **[react-bootstrap](https://react-bootstrap.github.io/)** components plus **`bootstrap`** CSS. Do **not** add Tailwind, utility-first CSS frameworks, or ad hoc layout systems for new or refactored UI.
+
+- Import Bootstrap once (e.g. `import 'bootstrap/dist/css/bootstrap.min.css'` in `main.tsx`). Keep **`data-bs-theme="dark"`** on `<html>` in `index.html` unless product requirements change.
+- Prefer **react-bootstrap** primitives: `Container`, `Row`, `Col`, `Navbar`, `Nav`, `Card`, `Button`, `Form`, `Table`, `Alert`, `Stack`, `Spinner`, `ButtonGroup`, etc. Use **`as={Link}`** / **`as={NavLink}`** with `react-router-dom` where appropriate.
+- **Charts** (`recharts`) and **logic** (stores, `api` client) are fine; wrap chart areas in **`Card`** / **`Container`** from react-bootstrap.
+- Avoid raw `<table>` / `<button>` / `<input>` for app chrome when a react-bootstrap equivalent exists (use **`Table`**, **`Button`**, **`Form.Control`**).
+- Small **`index.css`** tweaks only if necessary (do not replace Bootstrap’s system with custom utility classes).

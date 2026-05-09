@@ -1,0 +1,25 @@
+datetime-display
+================
+
+Scope
+-----
+Rules for displaying timestamps in the SPA (tables, charts, tooltips) so the UI uses a consistent, local-time format.
+
+Rule
+----
+- Use `formatLocalDateTime` in `frontend/src/utils/formatLocalDateTime.ts` for all displayed instants.
+- Formatting must be: DD/MM/YY HH.mm.ss.fff (24-hour clock, millisecond precision) using the browser local timezone.
+
+Examples & guidance
+-------------------
+- Table columns, chart tooltips, and any user-facing logs in the SPA must call `formatLocalDateTime(date)` rather than rolling a custom formatter.
+- `datetime-local` form inputs remain `yyyy-MM-ddTHH:mm` as required by HTML; use `formatLocalDateTime` only for display/UI labels.
+
+Why
+---
+Consistent format across the app improves readability for users in the target regions and avoids mixing server UTC formatting into the UI.
+
+Note
+----
+If you need a different presentation for a specific component (relative time, short date only), create a new helper in `frontend/src/utils/` and explain the reason in a short code comment pointing to this rule.
+

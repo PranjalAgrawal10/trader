@@ -1,0 +1,12 @@
+---
+description: Trader.Infrastructure — EF, HTTP clients, DI registration
+globs: backend/src/Trader.Infrastructure/**/*.cs
+alwaysApply: false
+---
+
+# Infrastructure
+
+- **DI**: Register implementations in `DependencyInjection.AddInfrastructure`. Prefer `AddSingleton` for long-lived stateless services, `AddScoped` for repositories and `DbContext`-bound work. Keyed or factory registrations are fine when multiple implementations implement the same interface (e.g. prediction engines + registry).
+- **HttpClient**: Use `IHttpClientFactory` / `AddHttpClient<T>` for outbound calls; set `BaseAddress`, timeouts, and decompression as existing clients do.
+- **Persistence**: Repositories use `AsNoTracking()` for read-only queries; keep ordering and filters consistent with API contracts (e.g. “newest first” when documented).
+- **Secrets**: Read credentials from `IConfiguration` / environment only; never hardcode API keys in Infrastructure code paths committed to git.

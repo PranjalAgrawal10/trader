@@ -1,0 +1,30 @@
+frontend-api-patterns
+======================
+
+Purpose
+-------
+Frontend API call patterns, retry guidance, and same-origin rules specific to this repository.
+
+Rules
+-----
+- Default: SPA should call same-origin `/api` and `/hubs` in development and production unless a deliberate split-host deployment is required. See `VITE_FORCE_CROSS_ORIGIN_API` / `VITE_API_BASE_URL` for explicit split-host setups.
+- Retry policy (idempotent or safe GETs): implement exponential backoff with capped retries. Typical recommendation:
+  - Initial attempts: 3 total attempts (1 initial + 2 retries)
+  - Backoff: 200ms * 2^retryIndex (200ms, 400ms, 800ms)
+  - Add jitter (±20%) to avoid thundering herd.
+- Network errors and 5xx responses may be retried for safe requests. Do NOT retry on 401/403 (authentication/authorization) or 4xx client errors that indicate a bad request.
+- For non-idempotent calls (POST/PUT/DELETE that mutate server state) avoid transparent retries unless the server exposes an idempotency key mechanism.
+
+Implementation pointers
+-----------------------
+- `frontend/src/api/client.ts` is the place to centralize fetch/axios wrapper logic and retry behaviour. Keep configuration values (max attempts, base delay) in a single spot.
+- Respect CORS and same-origin rules: prefer same-origin to avoid preflight OPTIONS on authenticated requests. Only enable cross-origin when necessary and set `Cors__Origins__0` accordingly on the API host.
+
+Why
+---
+Consistent retry behavior avoids spamming the backend while improving resilience to transient network glitches. Same-origin default avoids unnecessary CORS preflight noise for authenticated endpoints.
+
+Reference
+---------
+- See `frontend/src/api/client.ts` for the client wrapper and retry constants. Any change to retry strategy should update that module and be reflected in this rule.
+

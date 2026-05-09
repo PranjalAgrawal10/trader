@@ -1,0 +1,42 @@
+ef-core-migrations
+===================
+
+Purpose
+-------
+Instructions and constraints for working with EF Core migrations in this repository.
+
+Rules
+-----
+- Migration source: `backend/src/Trader.Infrastructure/Migrations/` is the canonical location for EF migrations.
+- Do NOT rewrite or edit already-applied migration history that has been published to shared databases. Instead, add new migrations for schema changes.
+- Use descriptive migration names: `AddFooToBar`, `RenameXToY`, `MakeBazNullable`.
+
+Local development and CI
+------------------------
+- When building locally or in CI where MySQL or `dotnet-ef` may not be available, prefer to pass the MSBuild flag `-p:RunEfMigrationsOnBuild=false` to skip post-build migration execution. Example:
+
+  dotnet build Trader.sln -p:RunEfMigrationsOnBuild=false
+
+- To apply migrations from your machine against a real DB:
+
+  cd backend
+  dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
+
+Creating a migration
+--------------------
+- From `backend/`:
+
+  dotnet ef migrations add AddMeaningfulName --project src/Trader.Infrastructure --startup-project src/Trader.Api
+
+- After creating a migration, review generated SQL in the migration file and run the update command above against a local/dev DB to validate.
+
+Naming & review
+---------------
+- Keep migrations small and focused when possible.
+- Ensure migration Up/Down are safe for production (avoid data‑destructive operations without a migration plan).
+- Add migration tests or integration checks when schema changes affect critical paths.
+
+When in doubt
+------------
+- If you must make a breaking schema change that would invalidate old migrations in shared DBs, coordinate with the team and prefer a two-step migration (add columns then backfill then remove old columns) instead of editing history.
+

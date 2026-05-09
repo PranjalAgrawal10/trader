@@ -1,0 +1,13 @@
+---
+description: ASP.NET Core Trader.Api — routes, auth, HTTP responses
+globs: backend/src/Trader.Api/**/*.cs
+alwaysApply: false
+---
+
+# API (`Trader.Api`)
+
+- **Routing**: Controllers live under `Controllers/V1/` with `[Route("api/v{version:apiVersion}/[controller]")]`, `[ApiVersion("1.0")]`, `[ApiExplorerSettings(GroupName = "v1")]`. New public endpoints stay versioned and grouped for Swagger.
+- **Auth**: Use `[Authorize]` on controllers/actions that require a user; resolve identity via existing extensions (e.g. `User.GetUserId()`). Do not duplicate JWT parsing in controllers.
+- **Validation**: Return `Problem(title, detail, statusCode)` for bad input (400); use consistent status codes with `ApplicationExceptionFilter` for mapped exceptions—avoid ad hoc `BadRequest(object)` shapes that do not match ProblemDetails.
+- **Thin controllers**: Inject application services or registries; no EF `DbContext` or raw SQL in controllers. Request/response DTOs can live next to controllers or under `Models/`; shared contracts used across layers belong in `Trader.Application`.
+- **Cancellation**: Pass `CancellationToken` through to async application calls.

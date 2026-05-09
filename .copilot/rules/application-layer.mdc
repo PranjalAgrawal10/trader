@@ -1,0 +1,12 @@
+---
+description: Trader.Application — use cases, options, DTOs, abstractions
+globs: backend/src/Trader.Application/**/*.cs
+alwaysApply: false
+---
+
+# Application layer
+
+- **Ports**: New persistence or external integrations get an interface under `Abstractions/` (e.g. `Abstractions/Persistence`, `Abstractions/Messaging`). Infrastructure implements them; Application must not reference Infrastructure.
+- **Options**: Strongly typed options classes use `public const string SectionName = "..."` and bind via `services.Configure<T>(configuration.GetSection(T.SectionName))` in Infrastructure `DependencyInjection`. Document env aliases in **`backend/src/Trader.Api/.env.example`** when adding knobs operators set in production.
+- **Services**: Orchestrate use cases here; keep domain/invariant logic on entities or small domain helpers when it fits. Throw `InvalidOperationException` (or existing domain exceptions) for rule violations—let filters map to HTTP.
+- **DTOs**: Feature-specific records/classes used by controllers/services can live beside the feature (e.g. `Prediction/`). Avoid leaking EF entities outside Infrastructure.
