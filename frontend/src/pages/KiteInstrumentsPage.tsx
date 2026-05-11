@@ -2964,6 +2964,102 @@ function CompactPriceChart({
   )
 }
 
+const FAVORITE_TILE_AUTOMATION_ROWS_MAX = 8
+
+/** Per-tile strip: latest automation ML rows for one instrument (same payload as Auto predictions tab). */
+function FavoriteTileAutomationMlPanel({
+  instrumentToken,
+  automationRecent,
+  automationRecentLoading,
+  automationPriceModels,
+}: {
+  instrumentToken: string
+  automationRecent: readonly MlAutomationRecentRow[]
+  automationRecentLoading: boolean
+  automationPriceModels: PriceDirectionModelsApiResponse | null
+}) {
+  const rowsForSymbol = useMemo(() => {
+    const t = instrumentToken.trim()
+    return sortByPredictedAtNewestFirst(
+      automationRecent.filter((r) => r.instrumentToken.trim() === t),
+    ).slice(0, FAVORITE_TILE_AUTOMATION_ROWS_MAX)
+  }, [instrumentToken, automationRecent])
+
+  const descByEngineId = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const x of automationPriceModels?.models ?? []) {
+      const id = x.id?.trim()
+      if (id) m.set(id, x.description?.trim() ?? '')
+    }
+    return m
+  }, [automationPriceModels])
+
+  return (
+    <div className="mt-2 pt-2 border-top border-secondary-subtle">
+      <div className="small text-secondary text-uppercase mb-1" style={{ fontSize: '0.65rem' }}>
+        Auto ML predictions
+      </div>
+      <p className="text-muted mb-2" style={{ fontSize: '0.62rem' }}>
+        Same time range as the <strong>Auto predictions</strong> tab (adjust there to change this list).
+      </p>
+      {automationRecentLoading && rowsForSymbol.length === 0 ? (
+        <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.7rem' }}>
+          <Spinner animation="border" size="sm" role="status" />
+          Loading…
+        </div>
+      ) : rowsForSymbol.length === 0 ? (
+        <p className="text-muted mb-0 fst-italic" style={{ fontSize: '0.68rem' }}>
+          No automation rows in range for this symbol yet.
+        </p>
+      ) : (
+        <div className="table-responsive" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+          <Table striped bordered size="sm" className="mb-0 align-middle font-monospace" style={{ fontSize: '0.63rem' }}>
+            <thead className="table-light text-nowrap">
+              <tr>
+                <th>Time</th>
+                <th>Iv</th>
+                <th>Engine</th>
+                <th>Dir</th>
+                <th>%</th>
+                <th>Out</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rowsForSymbol.map((r) => {
+                const eng = r.engineModelId?.trim() ?? ''
+                const short = eng.length > 18 ? `${eng.slice(0, 16)}…` : eng
+                const desc = descByEngineId.get(eng)
+                return (
+                  <tr key={r.id}>
+                    <td className="text-nowrap">{formatLocalDateTime(r.predictedAt)}</td>
+                    <td>{r.interval}</td>
+                    <td className="text-truncate" style={{ maxWidth: '5.5rem' }} title={desc ? `${eng} — ${desc}` : eng || '—'}>
+                      {short || '—'}
+                    </td>
+                    <td>{r.direction}</td>
+                    <td>{r.confidence}%</td>
+                    <td
+                      className={
+                        r.outcome === 'correct'
+                          ? 'text-success'
+                          : r.outcome === 'wrong'
+                            ? 'text-danger'
+                            : 'text-muted'
+                      }
+                    >
+                      {r.outcome}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FavoritesChartsGrid({
   favorites,
   rangePreset,
@@ -2986,6 +3082,10 @@ function FavoritesChartsGrid({
   onToggleTradingLock,
   chartZoomByInstrumentToken,
   onInstrumentChartZoomChange,
+  automationRecent,
+  automationRecentLoading,
+  automationPriceModels,
+  zerodhaConnected,
 }: {
   favorites: KiteInstrumentRow[]
   rangePreset: ChartRangePreset
@@ -3008,6 +3108,10 @@ function FavoritesChartsGrid({
   onToggleTradingLock?: (r: KiteInstrumentRow) => void
   chartZoomByInstrumentToken: Record<string, number>
   onInstrumentChartZoomChange: (instrumentToken: string, bars: number | null) => void
+  automationRecent: readonly MlAutomationRecentRow[]
+  automationRecentLoading: boolean
+  automationPriceModels: PriceDirectionModelsApiResponse | null
+  zerodhaConnected: boolean
 }) {
   const favHistExtras = useMemo(() => historicalRangeQueryParams(rangePreset), [rangePreset])
   if (favorites.length === 0) return null
@@ -3112,6 +3216,14 @@ function FavoritesChartsGrid({
                   selectedIntervalsOrdered={orderTrendSelections(trendAnalysisSelections)}
                   variant="favoriteLazy"
                 />
+                {zerodhaConnected ? (
+                  <FavoriteTileAutomationMlPanel
+                    instrumentToken={row.instrumentToken}
+                    automationRecent={automationRecent}
+                    automationRecentLoading={automationRecentLoading}
+                    automationPriceModels={automationPriceModels}
+                  />
+                ) : null}
               </Card.Body>
             </Card>
           </Col>
@@ -4099,16 +4211,15 @@ export function KiteInstrumentsPage() {
     loadAutomationRecent,
   ])
 
-  // Only poll automation rows while the user is actually on the Auto predictions tab —
-  // the data isn't shown on Browse / Favorites / Locked, so a background 60s poll there
-  // just burns API quota (and triggered backend "Too many requests").
+  // Poll merged automation rows while Auto predictions, All favorites, or Locked is visible
+  // (favorite tiles show a per-symbol strip; Browse stays quiet to avoid extra API load).
   useEffect(() => {
     if (!isZerodha) {
       setAutomationRecent([])
       setAutomationPriceModels(null)
       return
     }
-    if (mainTab !== 'automation') return
+    if (!(mainTab === 'automation' || mainTab === 'favorites' || mainTab === 'tradingLocks')) return
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadAutomationRecent()
     }, 60_000)
@@ -4116,12 +4227,14 @@ export function KiteInstrumentsPage() {
   }, [isZerodha, mainTab, loadAutomationRecent])
 
   useEffect(() => {
-    if (!isZerodha || mainTab !== 'automation') return
+    if (!isZerodha) return
+    if (!(mainTab === 'automation' || mainTab === 'favorites' || mainTab === 'tradingLocks')) return
     void loadAutomationRecent()
   }, [isZerodha, mainTab, automationEmailReportRange.from, automationEmailReportRange.to, loadAutomationRecent])
 
   useEffect(() => {
-    if (!isZerodha || mainTab !== 'automation') return
+    if (!isZerodha) return
+    if (!(mainTab === 'automation' || mainTab === 'favorites' || mainTab === 'tradingLocks')) return
     void loadAutomationPriceModels()
   }, [isZerodha, mainTab, loadAutomationPriceModels])
 
@@ -4965,6 +5078,10 @@ export function KiteInstrumentsPage() {
                   listTilePrimaryLabel="★ Remove"
                   tradingLockKeySet={tradingLockKeySet}
                   onToggleTradingLock={(r) => void toggleTradingLock(r)}
+                  automationRecent={automationRecent}
+                  automationRecentLoading={automationRecentLoading}
+                  automationPriceModels={automationPriceModels}
+                  zerodhaConnected={isZerodha}
                 />
               </div>
             ) : mainTab === 'tradingLocks' ? (
@@ -5004,6 +5121,10 @@ export function KiteInstrumentsPage() {
                   onInstrumentChartZoomChange={persistInstrumentChartZoom}
                   listTilePrimaryAction={(r) => void toggleTradingLock(r)}
                   listTilePrimaryLabel="🔒 Remove lock"
+                  automationRecent={automationRecent}
+                  automationRecentLoading={automationRecentLoading}
+                  automationPriceModels={automationPriceModels}
+                  zerodhaConnected={isZerodha}
                 />
               </div>
             ) : null}
