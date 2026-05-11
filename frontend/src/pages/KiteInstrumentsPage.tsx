@@ -16,6 +16,7 @@ import {
   Button,
   ButtonGroup,
   Card,
+  Collapse,
   Col,
   Form,
   InputGroup,
@@ -170,6 +171,8 @@ interface KiteInstrumentsChartSettingsDto {
   demoAutoTradeEnabled?: boolean
   /** Fixed demo portfolio size in INR (server-defined). */
   demoAutoTradeNotionalInr?: number
+  /** Hypothetical allocation preset id (e.g. equal_split). */
+  demoAutoTradeStrategy?: string | null
 }
 
 /** GET …/demo-auto-trade/eod-summary — hypothetical same-day outcome from automation rows. */
@@ -177,17 +180,44 @@ interface DemoAutoTradeEodSummaryDto {
   reportDateIst: string
   reportTimeZoneId: string
   demoAutoTradeEnabled: boolean
+  demoAutoTradeStrategy: string
+  demoAutoTradeStrategyTitle: string
   demoNotionalInr: number
   totalSignals: number
   pendingSignals: number
   correctOutcomes: number
   wrongOutcomes: number
   skippedNoNextClose: number
-  resolvedSignalsUsedForPnl: number
+  directionalTradeableLegs: number
+  allocatedLegsForPnl: number
+  skippedLowConfidenceLegs: number
   hypotheticalTotalPnlInr: number
   pnlAllocationNote: string
   mayBeTruncated: boolean
 }
+
+const DEMO_AUTO_TRADE_STRATEGY_OPTIONS: { id: string; label: string; hint: string }[] = [
+  {
+    id: 'equal_split',
+    label: 'Equal risk per signal',
+    hint: 'Splits the demo notional evenly across every directional signal with a resolved next close.',
+  },
+  {
+    id: 'confidence_weighted',
+    label: 'Confidence-weighted',
+    hint: 'Assigns more hypothetical capital to higher-confidence model outputs (same-day legs only).',
+  },
+  {
+    id: 'high_conviction',
+    label: 'High conviction (≥65%)',
+    hint: 'Ignores legs under 65% confidence, then divides the full notional across the rest.',
+  },
+  {
+    id: 'one_signal_per_instrument',
+    label: 'One leg per symbol',
+    hint: 'Keeps only the strongest signal per instrument token to reduce duplicate engines on the same underlying.',
+  },
+]
 
 function formatInrRupee(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -1615,6 +1645,8 @@ function MlAutomationOutcomesPieGrid({
   rows: readonly MlAutomationRecentRow[]
   priceModels: PriceDirectionModelsApiResponse | null
 }) {
+  const [piesExpanded, setPiesExpanded] = useState(false)
+  const outcomesPiesCollapseId = useId()
   const modelIds = useMemo(
     () => orderedAutomationEngineIds(priceModels, rows),
     [priceModels, rows],
@@ -1632,16 +1664,36 @@ function MlAutomationOutcomesPieGrid({
 
   return (
     <div className="flex-shrink-0 overflow-visible mb-3">
-      <div className="small text-muted text-uppercase mb-2" style={{ fontSize: '0.68rem' }}>
-        Outcomes by engine — {modelIds.length} model{modelIds.length === 1 ? '' : 's'} (respects search + direction +
-        outcome + interval + engine)
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <div className="small text-muted text-uppercase mb-0" style={{ fontSize: '0.68rem' }}>
+          Outcomes by engine — {modelIds.length} model{modelIds.length === 1 ? '' : 's'} (respects search + direction +
+          outcome + interval + engine)
+        </div>
+        <Button
+          type="button"
+          variant="outline-secondary"
+          size="sm"
+          className="text-nowrap"
+          aria-expanded={piesExpanded}
+          aria-controls={outcomesPiesCollapseId}
+          onClick={() => setPiesExpanded((v) => !v)}
+        >
+          {piesExpanded ? 'Minimise pies' : 'Expand pies'}
+        </Button>
       </div>
-      <div
-        className="d-grid gap-3"
-        style={{
-          gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${ML_FULLSCREEN_PIE_MIN_COL_PX}px), 1fr))`,
-        }}
-      >
+      {!piesExpanded ? (
+        <p className="small text-secondary mb-0">
+          Charts minimised — use <strong>Expand pies</strong> to show outcome distribution per engine.
+        </p>
+      ) : null}
+      <Collapse in={piesExpanded}>
+        <div
+          id={outcomesPiesCollapseId}
+          className="d-grid gap-3"
+          style={{
+            gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${ML_FULLSCREEN_PIE_MIN_COL_PX}px), 1fr))`,
+          }}
+        >
         {modelIds.map((engineId) => {
           const counts = outcomeCountsForAutomationEngine(rows, engineId)
           const n = counts.correct + counts.wrong + counts.pending
@@ -1684,7 +1736,8 @@ function MlAutomationOutcomesPieGrid({
             </div>
           )
         })}
-      </div>
+        </div>
+      </Collapse>
     </div>
   )
 }
@@ -1833,6 +1886,8 @@ function MlAutomationDirectionVotePie({
   /** Rows returned from server before search + table filters (for caption). */
   totalLoaded: number
 }) {
+  const [pieExpanded, setPieExpanded] = useState(false)
+  const directionPieCollapseId = useId()
   const directions = useMemo(
     () =>
       rows.map((r) => r.direction as MlDirectionBias).filter((d) => d === 'up' || d === 'down' || d === 'neutral'),
@@ -1853,71 +1908,111 @@ function MlAutomationDirectionVotePie({
   return (
     <Card className="border-secondary mb-3">
       <Card.Body className="py-3">
-        <div className="small text-muted text-uppercase mb-2" style={{ fontSize: '0.68rem' }}>
-          Auto predictions — direction vote
-        </div>
-        <p className="small text-secondary mb-2" style={{ maxWidth: '44rem' }}>
-          Built from <strong>recent automation predictions</strong> currently shown in the table below (respects search,
-          direction / outcome / interval / engine filters). One count per row. Each row states the{' '}
-          <strong>ref close</strong> (price at the reference bar when the prediction was made) and, once scored, the{' '}
-          <strong>next close</strong> (price at the bar used to judge the outcome). Plurality sets consensus; ties resolve
-          to <strong>neutral</strong>.
-        </p>
-        {n === 0 ? (
-          <div
-            className="d-flex align-items-center justify-content-center border border-secondary rounded bg-body-secondary text-secondary small text-center px-2"
-            style={{ height: ML_AUTOMATION_DIRECTION_VOTE_PIE_HEIGHT }}
+        <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+          <div className="small text-muted text-uppercase mb-0" style={{ fontSize: '0.68rem' }}>
+            Auto predictions — direction vote
+          </div>
+          <Button
+            type="button"
+            variant="outline-secondary"
+            size="sm"
+            className="text-nowrap"
+            aria-expanded={pieExpanded}
+            aria-controls={directionPieCollapseId}
+            onClick={() => setPieExpanded((v) => !v)}
           >
+            {pieExpanded ? 'Minimise chart' : 'Expand chart'}
+          </Button>
+        </div>
+        {pieExpanded ? null : n === 0 ? (
+          <p className="small text-secondary mb-0" style={{ maxWidth: '44rem' }}>
             {totalLoaded === 0
               ? 'No automation rows yet — enable server auto ML for favorites and wait for scheduled runs.'
               : 'No rows match the current filters — widen filters or clear the search box.'}
-          </div>
+          </p>
         ) : (
-          <>
-            <div
-              className={`small font-monospace fw-semibold mb-2 ${
-                consensus === 'up'
-                  ? 'text-success'
-                  : consensus === 'down'
-                    ? 'text-danger'
-                    : 'text-secondary'
-              }`}
-            >
-              Consensus: {consensus != null ? consensus.toUpperCase() : '—'}
-              <span className="text-muted fw-normal ms-2">
-                ({n} row{n === 1 ? '' : 's'}
-                {totalLoaded > 0 && n !== totalLoaded ? ` · ${totalLoaded} loaded before filters` : ''})
-              </span>
-            </div>
-            <div className="overflow-visible" style={{ height: ML_AUTOMATION_DIRECTION_VOTE_PIE_HEIGHT }}>
-              <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                <PieChart margin={{ top: 10, left: 12, right: 12, bottom: 44 }}>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="44%"
-                    innerRadius={0}
-                    outerRadius="62%"
-                    paddingAngle={pieData.length > 1 ? 1.5 : 0}
-                  >
-                    {pieData.map((d) => (
-                      <Cell key={d.name} fill={d.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number, name: string) => [`${value} row(s)`, name]} />
-                  <Legend
-                    verticalAlign="bottom"
-                    align="center"
-                    layout="horizontal"
-                    wrapperStyle={{ fontSize: 12, paddingTop: 4 }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </>
+          <div
+            className={`small font-monospace fw-semibold mb-0 ${
+              consensus === 'up'
+                ? 'text-success'
+                : consensus === 'down'
+                  ? 'text-danger'
+                  : 'text-secondary'
+            }`}
+          >
+            Consensus: {consensus != null ? consensus.toUpperCase() : '—'}
+            <span className="text-muted fw-normal ms-2">
+              ({n} row{n === 1 ? '' : 's'}
+              {totalLoaded > 0 && n !== totalLoaded ? ` · ${totalLoaded} loaded before filters` : ''}) — chart minimised
+            </span>
+          </div>
         )}
+        <Collapse in={pieExpanded}>
+          <div id={directionPieCollapseId}>
+            <p className="small text-secondary mb-2 mt-2" style={{ maxWidth: '44rem' }}>
+              Built from <strong>recent automation predictions</strong> currently shown in the table below (respects search,
+              direction / outcome / interval / engine filters). One count per row. Each row states the{' '}
+              <strong>ref close</strong> (price at the reference bar when the prediction was made) and, once scored, the{' '}
+              <strong>next close</strong> (price at the bar used to judge the outcome). Plurality sets consensus; ties resolve
+              to <strong>neutral</strong>.
+            </p>
+            {n === 0 ? (
+              <div
+                className="d-flex align-items-center justify-content-center border border-secondary rounded bg-body-secondary text-secondary small text-center px-2"
+                style={{ height: ML_AUTOMATION_DIRECTION_VOTE_PIE_HEIGHT }}
+              >
+                {totalLoaded === 0
+                  ? 'No automation rows yet — enable server auto ML for favorites and wait for scheduled runs.'
+                  : 'No rows match the current filters — widen filters or clear the search box.'}
+              </div>
+            ) : (
+              <>
+                <div
+                  className={`small font-monospace fw-semibold mb-2 ${
+                    consensus === 'up'
+                      ? 'text-success'
+                      : consensus === 'down'
+                        ? 'text-danger'
+                        : 'text-secondary'
+                  }`}
+                >
+                  Consensus: {consensus != null ? consensus.toUpperCase() : '—'}
+                  <span className="text-muted fw-normal ms-2">
+                    ({n} row{n === 1 ? '' : 's'}
+                    {totalLoaded > 0 && n !== totalLoaded ? ` · ${totalLoaded} loaded before filters` : ''})
+                  </span>
+                </div>
+                <div className="overflow-visible" style={{ height: ML_AUTOMATION_DIRECTION_VOTE_PIE_HEIGHT }}>
+                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
+                    <PieChart margin={{ top: 10, left: 12, right: 12, bottom: 44 }}>
+                      <Pie
+                        data={pieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="44%"
+                        innerRadius={0}
+                        outerRadius="62%"
+                        paddingAngle={pieData.length > 1 ? 1.5 : 0}
+                      >
+                        {pieData.map((d) => (
+                          <Cell key={d.name} fill={d.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: number, name: string) => [`${value} row(s)`, name]} />
+                      <Legend
+                        verticalAlign="bottom"
+                        align="center"
+                        layout="horizontal"
+                        wrapperStyle={{ fontSize: 12, paddingTop: 4 }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
+            )}
+          </div>
+        </Collapse>
       </Card.Body>
     </Card>
   )
@@ -1935,6 +2030,8 @@ function MlFullscreenAllModelsPies({
   lightGbmHistory: readonly MlPredictionLogEntry[]
   compact?: boolean
 }) {
+  const [piesExpanded, setPiesExpanded] = useState(false)
+  const fullscreenPiesCollapseId = useId()
   const modelIds = useMemo(
     () => orderedModelIdsForFullscreenPies(priceModels, history, lightGbmHistory),
     [priceModels, history, lightGbmHistory],
@@ -1955,15 +2052,35 @@ function MlFullscreenAllModelsPies({
 
   return (
     <div className="flex-shrink-0 overflow-visible mb-4">
-      <div className="small text-muted text-uppercase mb-2" style={{ fontSize: compact ? '0.62rem' : '0.68rem' }}>
-        Prediction outcomes — all models ({modelIds.length})
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <div className="small text-muted text-uppercase mb-0" style={{ fontSize: compact ? '0.62rem' : '0.68rem' }}>
+          Prediction outcomes — all models ({modelIds.length})
+        </div>
+        <Button
+          type="button"
+          variant="outline-secondary"
+          size="sm"
+          className="text-nowrap py-0 px-2"
+          aria-expanded={piesExpanded}
+          aria-controls={fullscreenPiesCollapseId}
+          onClick={() => setPiesExpanded((v) => !v)}
+        >
+          {piesExpanded ? 'Minimise pies' : 'Expand pies'}
+        </Button>
       </div>
-      <div
-        className="d-grid gap-4"
-        style={{
-          gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${ML_FULLSCREEN_PIE_MIN_COL_PX}px), 1fr))`,
-        }}
-      >
+      {!piesExpanded ? (
+        <p className="small text-secondary mb-0" style={{ fontSize: compact ? '0.72rem' : undefined }}>
+          Charts minimised — use <strong>Expand pies</strong> to show prediction outcomes per model.
+        </p>
+      ) : null}
+      <Collapse in={piesExpanded}>
+        <div
+          id={fullscreenPiesCollapseId}
+          className="d-grid gap-4"
+          style={{
+            gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${ML_FULLSCREEN_PIE_MIN_COL_PX}px), 1fr))`,
+          }}
+        >
         {modelIds.map((modelId) => {
           const counts = mergedOutcomeCountsForModel(history, lightGbmHistory, modelId)
           const n = counts.correct + counts.wrong + counts.pending
@@ -1993,7 +2110,8 @@ function MlFullscreenAllModelsPies({
             </div>
           )
         })}
-      </div>
+        </div>
+      </Collapse>
     </div>
   )
 }
@@ -2069,6 +2187,129 @@ function automationRowCategory(
   if (upper === 'NSE' || upper === 'BSE' || upper.endsWith('_INDEX'))
     return { label: 'Spot', exchange: exch }
   return { label: exch || '—', exchange: exch }
+}
+
+type AutomationRecentSortColumn =
+  | 'predictedAt'
+  | 'symbol'
+  | 'category'
+  | 'engineModelId'
+  | 'interval'
+  | 'refClose'
+  | 'nextClose'
+  | 'direction'
+  | 'confidence'
+  | 'outcome'
+
+/** Low→high uses ascending numeric / oldest-first time / A→Z strings; reversed when <paramref name="highFirst"/>. Null next closes sort last (stable). */
+function compareAutomationRecentRows(
+  a: MlAutomationRecentRow,
+  b: MlAutomationRecentRow,
+  col: AutomationRecentSortColumn,
+  highFirst: boolean,
+  favoritesByToken?: ReadonlyMap<string, KiteInstrumentRow>,
+): number {
+  const dir = highFirst ? -1 : 1
+  const directionRank = (d: string) =>
+    d === 'down' ? 0 : d === 'neutral' ? 1 : 2
+  const outcomeRank = (o: string) =>
+    o === 'pending' ? 0 : o === 'wrong' ? 1 : 2
+
+  switch (col) {
+    case 'predictedAt': {
+      const ta = Date.parse(a.predictedAt)
+      const tb = Date.parse(b.predictedAt)
+      const va = Number.isFinite(ta) ? ta : 0
+      const vb = Number.isFinite(tb) ? tb : 0
+      if (va === vb) return 0
+      return va > vb ? dir : -dir
+    }
+    case 'symbol': {
+      const sa = formatMlAutomationSymbol(a, favoritesByToken).toLowerCase()
+      const sb = formatMlAutomationSymbol(b, favoritesByToken).toLowerCase()
+      const c = sa.localeCompare(sb, undefined, { sensitivity: 'base' })
+      if (c === 0) return 0
+      return c > 0 ? dir : -dir
+    }
+    case 'category': {
+      const ca = automationRowCategory(a, favoritesByToken).label.toLowerCase()
+      const cb = automationRowCategory(b, favoritesByToken).label.toLowerCase()
+      const c = ca.localeCompare(cb, undefined, { sensitivity: 'base' })
+      if (c === 0) return 0
+      return c > 0 ? dir : -dir
+    }
+    case 'engineModelId': {
+      const ea = (a.engineModelId ?? '').toLowerCase()
+      const eb = (b.engineModelId ?? '').toLowerCase()
+      const c = ea.localeCompare(eb, undefined, { sensitivity: 'base' })
+      if (c === 0) return 0
+      return c > 0 ? dir : -dir
+    }
+    case 'interval': {
+      const order = CHART_INTERVALS as readonly string[]
+      const ia = order.indexOf(a.interval)
+      const ib = order.indexOf(b.interval)
+      const fa = ia === -1 ? Number.MAX_SAFE_INTEGER : ia
+      const fb = ib === -1 ? Number.MAX_SAFE_INTEGER : ib
+      if (fa === fb) {
+        const t = a.interval.localeCompare(b.interval)
+        if (t === 0) return 0
+        return t > 0 ? dir : -dir
+      }
+      return fa > fb ? dir : -dir
+    }
+    case 'refClose': {
+      const va = Number.isFinite(a.refClose) ? a.refClose : 0
+      const vb = Number.isFinite(b.refClose) ? b.refClose : 0
+      if (va === vb) return 0
+      return va > vb ? dir : -dir
+    }
+    case 'nextClose': {
+      const na = a.nextClose != null && Number.isFinite(a.nextClose) ? a.nextClose : null
+      const nb = b.nextClose != null && Number.isFinite(b.nextClose) ? b.nextClose : null
+      if (na == null && nb == null) return 0
+      if (na == null) return 1
+      if (nb == null) return -1
+      if (na === nb) return 0
+      return na > nb ? dir : -dir
+    }
+    case 'direction': {
+      const ra = directionRank(a.direction)
+      const rb = directionRank(b.direction)
+      if (ra === rb) return 0
+      return ra > rb ? dir : -dir
+    }
+    case 'confidence': {
+      if (a.confidence === b.confidence) return 0
+      return a.confidence > b.confidence ? dir : -dir
+    }
+    case 'outcome': {
+      const ra = outcomeRank(a.outcome)
+      const rb = outcomeRank(b.outcome)
+      if (ra === rb) return 0
+      return ra > rb ? dir : -dir
+    }
+    default:
+      return 0
+  }
+}
+
+function sortColumnHeaderClick(
+  col: AutomationRecentSortColumn,
+  current: AutomationRecentSortColumn,
+  setCol: (c: AutomationRecentSortColumn) => void,
+  setHighFirst: (v: boolean | ((p: boolean) => boolean)) => void,
+): void {
+  if (current === col) setHighFirst((h) => !h)
+  else {
+    setCol(col)
+    setHighFirst(
+      col === 'predictedAt' ||
+        col === 'refClose' ||
+        col === 'nextClose' ||
+        col === 'confidence',
+    )
+  }
 }
 
 /** Case-insensitive match on model id, outcomes, timestamps, numeric fields, detail. */
@@ -3843,7 +4084,8 @@ export function KiteInstrumentsPage() {
   const [mlAutomationSaving, setMlAutomationSaving] = useState(false)
   const [mlAutomationError, setMlAutomationError] = useState<string | null>(null)
   const [demoAutoTradeEnabled, setDemoAutoTradeEnabled] = useState(false)
-  const [demoAutoTradeNotionalInr, setDemoAutoTradeNotionalInr] = useState(100_000)
+  const [demoAutoTradeStrategy, setDemoAutoTradeStrategy] = useState('equal_split')
+  const [demoAutoTradeNotionalInr, setDemoAutoTradeNotionalInr] = useState(10_000)
   const [demoAutoTradeSaving, setDemoAutoTradeSaving] = useState(false)
   const [demoEodSummary, setDemoEodSummary] = useState<DemoAutoTradeEodSummaryDto | null>(null)
   const [demoEodLoading, setDemoEodLoading] = useState(false)
@@ -3865,6 +4107,12 @@ export function KiteInstrumentsPage() {
     [automationRecent],
   )
   const [automationTableFilter, setAutomationTableFilter] = useState('')
+  const [automationSortColumn, setAutomationSortColumn] =
+    useState<AutomationRecentSortColumn>('predictedAt')
+  const [automationSortHighFirst, setAutomationSortHighFirst] = useState(true)
+  const [automationColFilterConfMin, setAutomationColFilterConfMin] = useState('')
+  const [automationColFilterConfMax, setAutomationColFilterConfMax] = useState('')
+  const [automationColFilterCategory, setAutomationColFilterCategory] = useState('')
   const [automationDirUp, setAutomationDirUp] = useState(true)
   const [automationDirDown, setAutomationDirDown] = useState(true)
   const [automationDirNeutral, setAutomationDirNeutral] = useState(true)
@@ -3970,7 +4218,7 @@ export function KiteInstrumentsPage() {
       ),
     [automationRecentSorted, automationTableFilter, favoriteByInstrumentToken],
   )
-  const automationRecentDisplay = useMemo(
+  const automationRecentToolbarFiltered = useMemo(
     () =>
       automationRecentFiltered.filter(
         (r) =>
@@ -3987,6 +4235,66 @@ export function KiteInstrumentsPage() {
       automationIntervalPasses,
     ],
   )
+
+  const automationCategoryFilterOptions = useMemo(() => {
+    const labels = new Set<string>()
+    for (const r of automationRecentToolbarFiltered) {
+      labels.add(automationRowCategory(r, favoriteByInstrumentToken).label)
+    }
+    return [...labels].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  }, [automationRecentToolbarFiltered, favoriteByInstrumentToken])
+
+  useEffect(() => {
+    const c = automationColFilterCategory.trim()
+    if (!c) return
+    if (!automationCategoryFilterOptions.includes(c)) setAutomationColFilterCategory('')
+  }, [automationCategoryFilterOptions, automationColFilterCategory])
+
+  const automationRecentTableFiltered = useMemo(() => {
+    let rows = automationRecentToolbarFiltered
+    const minRaw = automationColFilterConfMin.trim()
+    const maxRaw = automationColFilterConfMax.trim()
+    if (minRaw) {
+      const n = Number.parseInt(minRaw, 10)
+      if (Number.isFinite(n)) rows = rows.filter((r) => r.confidence >= n)
+    }
+    if (maxRaw) {
+      const n = Number.parseInt(maxRaw, 10)
+      if (Number.isFinite(n)) rows = rows.filter((r) => r.confidence <= n)
+    }
+    if (automationColFilterCategory.trim()) {
+      const want = automationColFilterCategory.trim()
+      rows = rows.filter(
+        (r) => automationRowCategory(r, favoriteByInstrumentToken).label === want,
+      )
+    }
+    return rows
+  }, [
+    automationRecentToolbarFiltered,
+    automationColFilterConfMin,
+    automationColFilterConfMax,
+    automationColFilterCategory,
+    favoriteByInstrumentToken,
+  ])
+
+  const automationRecentTableRows = useMemo(() => {
+    const copy = [...automationRecentTableFiltered]
+    copy.sort((a, b) =>
+      compareAutomationRecentRows(
+        a,
+        b,
+        automationSortColumn,
+        automationSortHighFirst,
+        favoriteByInstrumentToken,
+      ),
+    )
+    return copy
+  }, [
+    automationRecentTableFiltered,
+    automationSortColumn,
+    automationSortHighFirst,
+    favoriteByInstrumentToken,
+  ])
   const [chartZoomByToken, setChartZoomByToken] = useState<Record<string, number>>({})
   const [chartIntervalByToken, setChartIntervalByToken] = useState<Record<string, ChartInterval>>({})
   const chartZoomSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -4118,8 +4426,13 @@ export function KiteInstrumentsPage() {
       if (typeof data.demoAutoTradeNotionalInr === 'number' && Number.isFinite(data.demoAutoTradeNotionalInr)) {
         setDemoAutoTradeNotionalInr(data.demoAutoTradeNotionalInr)
       } else {
-        setDemoAutoTradeNotionalInr(100_000)
+        setDemoAutoTradeNotionalInr(10_000)
       }
+      const rawStrat =
+        typeof data.demoAutoTradeStrategy === 'string' ? data.demoAutoTradeStrategy.trim() : ''
+      if (rawStrat && DEMO_AUTO_TRADE_STRATEGY_OPTIONS.some((o) => o.id === rawStrat))
+        setDemoAutoTradeStrategy(rawStrat)
+      else setDemoAutoTradeStrategy('equal_split')
     } catch {
       // keep defaults
     } finally {
@@ -4140,6 +4453,8 @@ export function KiteInstrumentsPage() {
       )
       setDemoEodSummary(data)
       setDemoAutoTradeEnabled(Boolean(data.demoAutoTradeEnabled))
+      const sid = typeof data.demoAutoTradeStrategy === 'string' ? data.demoAutoTradeStrategy.trim() : ''
+      if (sid && DEMO_AUTO_TRADE_STRATEGY_OPTIONS.some((o) => o.id === sid)) setDemoAutoTradeStrategy(sid)
     } catch (err) {
       setDemoEodError(problemDetail(err))
       setDemoEodSummary(null)
@@ -4147,6 +4462,28 @@ export function KiteInstrumentsPage() {
       setDemoEodLoading(false)
     }
   }, [])
+
+  const persistDemoAutoTrade = useCallback(
+    async (nextEnabled: boolean, nextStrategy: string) => {
+      setDemoAutoTradeSaving(true)
+      setDemoEodError(null)
+      try {
+        await api.put('/broker/kite/instruments/demo-auto-trade', {
+          enabled: nextEnabled,
+          strategy: nextStrategy,
+        })
+        setDemoAutoTradeEnabled(nextEnabled)
+        setDemoAutoTradeStrategy(nextStrategy)
+        await loadDemoEodSummary()
+        await loadChartSettings()
+      } catch (err) {
+        setDemoEodError(problemDetail(err))
+      } finally {
+        setDemoAutoTradeSaving(false)
+      }
+    },
+    [loadChartSettings, loadDemoEodSummary],
+  )
 
   useEffect(() => {
     if (mainTab !== 'automation' || !chartPrefsHydrated) return
@@ -4517,29 +4854,44 @@ export function KiteInstrumentsPage() {
                           <span className="fw-semibold">
                             Enable demo auto-trade
                             <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
-                              Marks intent only. Portfolio size is fixed at{' '}
-                              <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> for hypothetical EOD results
-                              (equal split across resolved same-day automation signals).
+                              Marks intent only. Fixed demo size{' '}
+                              <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> — hypothetical same-day P&amp;L
+                              from your automation log only; pick an allocation preset below.
                             </span>
                           </span>
                         }
                         checked={demoAutoTradeEnabled}
                         disabled={demoAutoTradeSaving}
                         onChange={(e) => {
-                          const v = e.target.checked
-                          setDemoAutoTradeSaving(true)
-                          setDemoEodError(null)
-                          void api
-                            .put('/broker/kite/instruments/demo-auto-trade', { enabled: v })
-                            .then(() => {
-                              setDemoAutoTradeEnabled(v)
-                              void loadDemoEodSummary()
-                              void loadChartSettings()
-                            })
-                            .catch((err) => setDemoEodError(problemDetail(err)))
-                            .finally(() => setDemoAutoTradeSaving(false))
+                          void persistDemoAutoTrade(e.target.checked, demoAutoTradeStrategy)
                         }}
                       />
+                      <Form.Group className="mt-2 mb-0" controlId="demo-auto-trade-strategy">
+                        <Form.Label className="small text-secondary mb-1">Allocation preset (hypothetical)</Form.Label>
+                        <Form.Select
+                          size="sm"
+                          value={demoAutoTradeStrategy}
+                          disabled={demoAutoTradeSaving}
+                          aria-label="Demo auto-trade allocation strategy"
+                          onChange={(e) => {
+                            const next = e.target.value
+                            void persistDemoAutoTrade(demoAutoTradeEnabled, next)
+                          }}
+                        >
+                          {DEMO_AUTO_TRADE_STRATEGY_OPTIONS.map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </Form.Select>
+                        <Form.Text className="text-muted d-block" style={{ fontSize: '0.7rem' }}>
+                          {
+                            DEMO_AUTO_TRADE_STRATEGY_OPTIONS.find((o) => o.id === demoAutoTradeStrategy)
+                              ?.hint
+                          }{' '}
+                          Not financial advice; no live orders.
+                        </Form.Text>
+                      </Form.Group>
                     </Col>
                     <Col xs={12} md="auto" className="d-flex flex-wrap gap-2 align-items-start justify-content-md-end">
                       <Button
@@ -4578,6 +4930,10 @@ export function KiteInstrumentsPage() {
                           {formatInrRupee(demoEodSummary.demoNotionalInr)}
                         </Col>
                         <Col xs={6} sm={4} className="text-secondary">
+                          Preset
+                        </Col>
+                        <Col xs={6} sm={8}>{demoEodSummary.demoAutoTradeStrategyTitle}</Col>
+                        <Col xs={6} sm={4} className="text-secondary">
                           Signals (day)
                         </Col>
                         <Col xs={6} sm={8}>
@@ -4589,11 +4945,23 @@ export function KiteInstrumentsPage() {
                           ) : null}
                         </Col>
                         <Col xs={6} sm={4} className="text-secondary">
-                          Pending / resolved legs
+                          Pending / directional (priced)
                         </Col>
                         <Col xs={6} sm={8}>
-                          {demoEodSummary.pendingSignals} / {demoEodSummary.resolvedSignalsUsedForPnl}
+                          {demoEodSummary.pendingSignals} / {demoEodSummary.directionalTradeableLegs}
                         </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Allocated legs
+                        </Col>
+                        <Col xs={6} sm={8}>{demoEodSummary.allocatedLegsForPnl}</Col>
+                        {demoEodSummary.skippedLowConfidenceLegs > 0 ? (
+                          <>
+                            <Col xs={6} sm={4} className="text-secondary">
+                              Below confidence cutoff
+                            </Col>
+                            <Col xs={6} sm={8}>{demoEodSummary.skippedLowConfidenceLegs}</Col>
+                          </>
+                        ) : null}
                         <Col xs={6} sm={4} className="text-secondary">
                           Correct / wrong
                         </Col>
@@ -5121,8 +5489,14 @@ export function KiteInstrumentsPage() {
                 </div>
               ) : null}
               </div>
-              <MlAutomationDirectionVotePie rows={automationRecentDisplay} totalLoaded={automationRecent.length} />
-              <MlAutomationOutcomesPieGrid rows={automationRecentDisplay} priceModels={automationPriceModels} />
+              <MlAutomationDirectionVotePie
+                rows={automationRecentTableFiltered}
+                totalLoaded={automationRecent.length}
+              />
+              <MlAutomationOutcomesPieGrid
+                rows={automationRecentTableFiltered}
+                priceModels={automationPriceModels}
+              />
               <Row className="align-items-end g-2 mb-2">
                 <Col xs={12} md="auto">
                   <div className="small text-secondary text-uppercase mb-0 text-nowrap">Recent auto predictions</div>
@@ -5139,10 +5513,116 @@ export function KiteInstrumentsPage() {
                   />
                 </Col>
               </Row>
-              {automationRecent.length > 0 && automationRecentDisplay.length !== automationRecent.length ? (
+              <Row className="g-2 mb-2 align-items-end small">
+                <Col xs={12} sm={6} md={4} lg={3}>
+                  <Form.Group className="mb-0">
+                    <Form.Label className="small text-secondary mb-0">Sort column</Form.Label>
+                    <Form.Select
+                      size="sm"
+                      value={automationSortColumn}
+                      aria-label="Sort automation table by column"
+                      onChange={(e) => {
+                        const col = e.target.value as AutomationRecentSortColumn
+                        setAutomationSortColumn(col)
+                        setAutomationSortHighFirst(
+                          col === 'predictedAt' ||
+                            col === 'refClose' ||
+                            col === 'nextClose' ||
+                            col === 'confidence',
+                        )
+                      }}
+                    >
+                      <option value="predictedAt">Time (predicted)</option>
+                      <option value="symbol">Symbol</option>
+                      <option value="category">Category</option>
+                      <option value="engineModelId">Engine</option>
+                      <option value="interval">Interval</option>
+                      <option value="refClose">Ref close</option>
+                      <option value="nextClose">Next close</option>
+                      <option value="direction">Direction</option>
+                      <option value="confidence">Confidence %</option>
+                      <option value="outcome">Outcome</option>
+                    </Form.Select>
+                  </Form.Group>
+                </Col>
+                <Col xs={12} sm={6} md={3} lg={2}>
+                  <Form.Group className="mb-0">
+                    <Form.Label className="small text-secondary mb-0">Order</Form.Label>
+                    <Form.Select
+                      size="sm"
+                      value={automationSortHighFirst ? 'high' : 'low'}
+                      aria-label="Sort order low to high or high to low"
+                      onChange={(e) => setAutomationSortHighFirst(e.target.value === 'high')}
+                    >
+                      <option value="high">High → low</option>
+                      <option value="low">Low → high</option>
+                    </Form.Select>
+                  </Form.Group>
+                </Col>
+                <Col xs={6} sm={4} md={2} lg={2}>
+                  <Form.Group className="mb-0">
+                    <Form.Label className="small text-secondary mb-0">Min conf %</Form.Label>
+                    <Form.Control
+                      size="sm"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={100}
+                      placeholder="—"
+                      value={automationColFilterConfMin}
+                      onChange={(e) => setAutomationColFilterConfMin(e.target.value)}
+                      aria-label="Minimum confidence percent"
+                    />
+                  </Form.Group>
+                </Col>
+                <Col xs={6} sm={4} md={2} lg={2}>
+                  <Form.Group className="mb-0">
+                    <Form.Label className="small text-secondary mb-0">Max conf %</Form.Label>
+                    <Form.Control
+                      size="sm"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      max={100}
+                      placeholder="—"
+                      value={automationColFilterConfMax}
+                      onChange={(e) => setAutomationColFilterConfMax(e.target.value)}
+                      aria-label="Maximum confidence percent"
+                    />
+                  </Form.Group>
+                </Col>
+                <Col xs={12} sm={4} md={3} lg={3}>
+                  <Form.Group className="mb-0">
+                    <Form.Label className="small text-secondary mb-0">Category</Form.Label>
+                    <Form.Select
+                      size="sm"
+                      value={automationColFilterCategory}
+                      aria-label="Filter by category"
+                      onChange={(e) => setAutomationColFilterCategory(e.target.value)}
+                    >
+                      <option value="">All categories</option>
+                      {automationCategoryFilterOptions.map((lab) => (
+                        <option key={lab} value={lab}>
+                          {lab}
+                        </option>
+                      ))}
+                    </Form.Select>
+                  </Form.Group>
+                </Col>
+              </Row>
+              {automationRecent.length > 0 ? (
                 <div className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
-                  Showing {automationRecentDisplay.length} of {automationRecent.length} row
-                  {automationRecent.length === 1 ? '' : 's'} (search + table filters above)
+                  Table: <strong>{automationRecentTableRows.length}</strong> row(s)
+                  {automationRecentTableFiltered.length !== automationRecentToolbarFiltered.length ? (
+                    <>
+                      {' '}
+                      (<strong>{automationRecentTableFiltered.length}</strong> after column filters)
+                    </>
+                  ) : null}
+                  {' · '}
+                  <strong>{automationRecentToolbarFiltered.length}</strong> after search &amp; toggle filters ·{' '}
+                  <strong>{automationRecent.length}</strong> in loaded range. Sort: column headers or Sort column /
+                  Order (low→high / high→low).
                 </div>
               ) : null}
               <div
@@ -5155,20 +5635,266 @@ export function KiteInstrumentsPage() {
                 <Table striped bordered size="sm" className="mb-0 align-middle">
                   <thead className="table-light">
                     <tr className="text-nowrap">
-                      <th>Time</th>
-                      <th>Symbol</th>
-                      <th title="Browse-tab category resolved from the row's exchange (NFO/BFO → F&O, MCX → Commodities, NSE/BSE → Spot)">
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'predictedAt'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Sort by prediction time · click again to reverse"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'predictedAt',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Time
+                        {automationSortColumn === 'predictedAt' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'symbol'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Sort by symbol"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'symbol',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Symbol
+                        {automationSortColumn === 'symbol' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'category'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Browse-tab category from the row's exchange (NFO/BFO→F&amp;O, MCX→Commodities, NSE/BSE→Spot)"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'category',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
                         Category
+                        {automationSortColumn === 'category' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
                       </th>
-                      <th>Engine</th>
-                      <th>Interval</th>
-                      <th title="Close of the reference bar when the prediction ran">Ref close</th>
-                      <th title="Close of the next bar used to score the prediction (empty while pending)">
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'engineModelId'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Sort by engine model id"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'engineModelId',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Engine
+                        {automationSortColumn === 'engineModelId' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'interval'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Sort by bar size (chart order)"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'interval',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Interval
+                        {automationSortColumn === 'interval' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'refClose'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Close of the reference bar when the prediction ran"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'refClose',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Ref close
+                        {automationSortColumn === 'refClose' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'nextClose'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Close of the next bar used to score the prediction (pending rows sort last)"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'nextClose',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
                         Next close
+                        {automationSortColumn === 'nextClose' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
                       </th>
-                      <th>Dir</th>
-                      <th title="Engine confidence for this prediction (0–100%)">Conf %</th>
-                      <th>Outcome</th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'direction'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Sort: down · neutral · up"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'direction',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Dir
+                        {automationSortColumn === 'direction' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'confidence'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Engine confidence for this prediction (0–100%)"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'confidence',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Conf %
+                        {automationSortColumn === 'confidence' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
+                      <th
+                        role="columnheader"
+                        aria-sort={
+                          automationSortColumn === 'outcome'
+                            ? automationSortHighFirst
+                              ? 'descending'
+                              : 'ascending'
+                            : undefined
+                        }
+                        className="user-select-none"
+                        style={{ cursor: 'pointer' }}
+                        title="Sort: pending · wrong · correct"
+                        onClick={() =>
+                          sortColumnHeaderClick(
+                            'outcome',
+                            automationSortColumn,
+                            setAutomationSortColumn,
+                            setAutomationSortHighFirst,
+                          )
+                        }
+                      >
+                        Outcome
+                        {automationSortColumn === 'outcome' ? (
+                          <span className="ms-1 text-primary">{automationSortHighFirst ? '↓' : '↑'}</span>
+                        ) : null}
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="font-monospace">
@@ -5178,14 +5904,22 @@ export function KiteInstrumentsPage() {
                           No automation rows yet.
                         </td>
                       </tr>
-                    ) : automationRecentDisplay.length === 0 && automationRecent.length > 0 ? (
+                    ) : automationRecentToolbarFiltered.length === 0 && automationRecent.length > 0 ? (
                       <tr>
                         <td colSpan={10} className="text-secondary small fst-italic">
-                          No rows match this filter.
+                          No rows match search or toggle filters above.
+                        </td>
+                      </tr>
+                    ) : automationRecentTableFiltered.length === 0 &&
+                      automationRecentToolbarFiltered.length > 0 ? (
+                      <tr>
+                        <td colSpan={10} className="text-secondary small fst-italic">
+                          No rows match column filters (confidence range / category). Clear min/max/category to see
+                          rows.
                         </td>
                       </tr>
                     ) : (
-                      automationRecentDisplay.map((r) => {
+                      automationRecentTableRows.map((r) => {
                         const category = automationRowCategory(r, favoriteByInstrumentToken)
                         return (
                         <tr key={r.id}>

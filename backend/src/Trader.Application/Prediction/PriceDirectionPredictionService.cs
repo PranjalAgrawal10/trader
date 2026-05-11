@@ -623,21 +623,28 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
 
         var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtc).ToList();
         var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
-        var totals = DemoAutoTradeEodSummaryCalculator.Compute(inWindow, notional);
+        var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(inWindow, notional, normStrategy);
+        var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
+        var note = DemoAutoTradeEodSummaryCalculator.BuildAllocationNote(normStrategy, totals);
 
         return new DemoAutoTradeEodSummaryDto(
             date,
             tzId,
             chartRow.DemoAutoTradeEnabled ?? false,
+            stratMeta.Code,
+            stratMeta.Title,
             notional,
             totals.TotalSignals,
             totals.PendingSignals,
             totals.CorrectOutcomes,
             totals.WrongOutcomes,
             totals.SkippedNoNextClose,
-            totals.ResolvedSignalsUsedForPnl,
+            totals.DirectionalTradeableLegs,
+            totals.AllocatedLegsForPnl,
+            totals.SkippedLowConfidenceLegs,
             totals.HypotheticalTotalPnlInr,
-            DemoAutoTradeEodSummaryCalculator.AllocationNote,
+            note,
             rows.Count >= MaxAutomationHistoryTake);
     }
 }

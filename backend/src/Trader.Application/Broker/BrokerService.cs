@@ -701,11 +701,22 @@ public sealed class BrokerService : IBrokerService
             row.FavoriteMlAutomationMinSecondsAfterBarOpen,
             ParseTrendAnalysisIntervalsFromJson(row.TrendAnalysisIntervalsJson),
             row.DemoAutoTradeEnabled ?? false,
-            DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr);
+            DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr,
+            DemoAutoTradeStrategyIds.NormalizeOrDefault(row.DemoAutoTradeStrategy));
     }
 
-    public Task SetDemoAutoTradeEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default) =>
-        _kiteChartSettings.SetDemoAutoTradeEnabledAsync(userId, enabled, ct);
+    public async Task SetDemoAutoTradePreferencesAsync(
+        Guid userId,
+        bool enabled,
+        string? strategyRaw,
+        CancellationToken ct = default)
+    {
+        string? normalized = null;
+        if (!string.IsNullOrWhiteSpace(strategyRaw))
+            normalized = DemoAutoTradeStrategyIds.ParseRequired(strategyRaw);
+
+        await _kiteChartSettings.SetDemoAutoTradePreferencesAsync(userId, enabled, normalized, ct).ConfigureAwait(false);
+    }
 
     public async Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default)
     {

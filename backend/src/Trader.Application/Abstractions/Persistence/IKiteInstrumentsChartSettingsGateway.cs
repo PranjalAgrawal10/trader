@@ -13,7 +13,8 @@ public sealed record KiteInstrumentsChartSettingsState(
     /// <summary>JSON array string from DB on read; on save, non-null replaces <c>KiteInstrumentsTrendAnalysisIntervalsJson</c>.</summary>
     string? TrendAnalysisIntervalsJson = null,
     int? FavoriteMlAutomationMinSecondsAfterBarOpen = null,
-    bool? DemoAutoTradeEnabled = null);
+    bool? DemoAutoTradeEnabled = null,
+    string? DemoAutoTradeStrategy = null);
 
 public interface IKiteInstrumentsChartSettingsGateway
 {
@@ -41,6 +42,6 @@ public interface IKiteInstrumentsChartSettingsGateway
     /// <summary>Persists only the per-instrument chart interval override map JSON (other chart fields unchanged).</summary>
     Task SaveChartIntervalByInstrumentTokenJsonAsync(Guid userId, string? chartIntervalByInstrumentTokenJson, CancellationToken ct = default);
 
-    /// <summary>Persists instruments-page demo auto-trade toggle (no live orders).</summary>
-    Task SetDemoAutoTradeEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default);
+    /// <summary>Persists instruments-page demo auto-trade toggle and optional strategy (canonical id when non-null).</summary>
+    Task SetDemoAutoTradePreferencesAsync(Guid userId, bool enabled, string? normalizedStrategyOrNull, CancellationToken ct = default);
 }

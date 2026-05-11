@@ -139,12 +139,17 @@ public sealed record KiteInstrumentsChartSettingsDto(
     /// <summary>Demo auto-trade intent (no live orders).</summary>
     bool DemoAutoTradeEnabled = false,
     /// <summary>Fixed demo portfolio notional in INR for UI and EOD math.</summary>
-    decimal DemoAutoTradeNotionalInr = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr);
+    decimal DemoAutoTradeNotionalInr = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr,
+    /// <summary>Allocation preset slug (<see cref="DemoAutoTradeStrategyIds"/>).</summary>
+    string? DemoAutoTradeStrategy = null);
 
 /// <summary>Toggle persisted demo auto-trade (no broker orders).</summary>
 public sealed class DemoAutoTradePutDto
 {
     public bool Enabled { get; set; }
+
+    /// <summary>Strategy id (<see cref="DemoAutoTradeStrategyIds"/>); omit or null to keep the stored preset.</summary>
+    public string? Strategy { get; set; }
 }
 
 /// <summary>Hypothetical same-calendar-day (report TZ) outcome from merged automation rows.</summary>
@@ -152,13 +157,17 @@ public sealed record DemoAutoTradeEodSummaryDto(
     DateOnly ReportDateIst,
     string ReportTimeZoneId,
     bool DemoAutoTradeEnabled,
+    string DemoAutoTradeStrategy,
+    string DemoAutoTradeStrategyTitle,
     decimal DemoNotionalInr,
     int TotalSignals,
     int PendingSignals,
     int CorrectOutcomes,
     int WrongOutcomes,
     int SkippedNoNextClose,
-    int ResolvedSignalsUsedForPnl,
+    int DirectionalTradeableLegs,
+    int AllocatedLegsForPnl,
+    int SkippedLowConfidenceLegs,
     decimal HypotheticalTotalPnlInr,
     string PnlAllocationNote,
     bool MayBeTruncated);

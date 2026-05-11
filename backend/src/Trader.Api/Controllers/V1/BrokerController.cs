@@ -466,13 +466,13 @@ public sealed class BrokerController : ControllerBase
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON { \"enabled\": bool }.",
+                detail: "Send JSON { \"enabled\": bool, optional \"strategy\": \"equal_split\" | … }.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
         try
         {
-            await _broker.SetDemoAutoTradeEnabledAsync(User.GetUserId(), body.Enabled, ct);
+            await _broker.SetDemoAutoTradePreferencesAsync(User.GetUserId(), body.Enabled, body.Strategy, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)

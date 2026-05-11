@@ -91,8 +91,8 @@ public interface IBrokerService
     /// <summary>Updates favorite-ML automation toggle and optional per-user candle interval / new-pass throttle.</summary>
     Task SetFavoriteMlAutomationAsync(Guid userId, FavoriteMlAutomationPutDto body, CancellationToken ct = default);
 
-    /// <summary>Persists demo auto-trade toggle (no live orders; EOD summary is hypothetical).</summary>
-    Task SetDemoAutoTradeEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default);
+    /// <summary>Persists demo auto-trade toggle and optional strategy preset (no live orders).</summary>
+    Task SetDemoAutoTradePreferencesAsync(Guid userId, bool enabled, string? strategyRaw, CancellationToken ct = default);
 
     /// <summary>Updates or clears saved zoom (visible bar count) for one instrument token.</summary>
     Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default);

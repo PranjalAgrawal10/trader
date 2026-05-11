@@ -44,6 +44,9 @@ public class User
     /// <summary>UI-only demo flag: no live orders; EOD summary uses hypothetical allocation from automation rows.</summary>
     public bool DemoAutoTradeEnabled { get; set; }
 
+    /// <summary>Demo allocation preset id (SPA/server constant: default <c>equal_split</c>). Does not execute trades.</summary>
+    public string DemoAutoTradeStrategy { get; set; } = "equal_split";
+
     /// <summary>When true, server background job may run ML predictions for <see cref="KiteFavoriteInstruments"/> (requires global automation + Kite session).</summary>
     public bool FavoriteMlAutomationEnabled { get; set; }
 

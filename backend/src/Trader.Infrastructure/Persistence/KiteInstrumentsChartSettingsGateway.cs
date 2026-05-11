@@ -26,7 +26,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
                 u.FavoriteMlAutomationPollIntervalSeconds,
                 u.KiteInstrumentsTrendAnalysisIntervalsJson,
                 u.FavoriteMlAutomationMinSecondsAfterBarOpen,
-                u.DemoAutoTradeEnabled))
+                u.DemoAutoTradeEnabled,
+                u.DemoAutoTradeStrategy))
             .FirstOrDefaultAsync(ct);
 
     public async Task SaveAsync(Guid userId, KiteInstrumentsChartSettingsState settings, CancellationToken ct = default)
@@ -98,11 +99,17 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task SetDemoAutoTradeEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default)
+    public async Task SetDemoAutoTradePreferencesAsync(
+        Guid userId,
+        bool enabled,
+        string? normalizedStrategyOrNull,
+        CancellationToken ct = default)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
                    ?? throw new InvalidOperationException("User not found.");
         user.DemoAutoTradeEnabled = enabled;
+        if (!string.IsNullOrWhiteSpace(normalizedStrategyOrNull))
+            user.DemoAutoTradeStrategy = normalizedStrategyOrNull.Trim();
         await _db.SaveChangesAsync(ct);
     }
 }
