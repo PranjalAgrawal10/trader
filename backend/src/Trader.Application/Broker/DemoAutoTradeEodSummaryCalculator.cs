@@ -30,6 +30,14 @@ public static class DemoAutoTradeEodSummaryCalculator
         return DateOnly.FromDateTime(nowLocal);
     }
 
+    /// <summary>Calendar date in <paramref name="timeZoneId"/> for an instant stored as UTC.</summary>
+    public static DateOnly GetLocalDateOnly(DateTimeOffset instantUtc, string timeZoneId)
+    {
+        var tz = ResolveTimeZone(timeZoneId);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(instantUtc.UtcDateTime, tz);
+        return DateOnly.FromDateTime(local);
+    }
+
     public static string BuildAllocationNote(string strategyId, DemoAutoTradeEodTotals totals)
     {
         var norm = DemoAutoTradeStrategyIds.NormalizeOrDefault(strategyId);
@@ -113,8 +121,36 @@ public static class DemoAutoTradeEodSummaryCalculator
                         .First())
                 .ToList();
         }
+        else if (string.Equals(strategy, DemoAutoTradeStrategyIds.OneSignalPerEngine, StringComparison.Ordinal))
+        {
+            positioned = directionalTradeable
+                .GroupBy(
+                    r => string.IsNullOrWhiteSpace(r.EngineModelId) ? "(unknown)" : r.EngineModelId.Trim(),
+                    StringComparer.Ordinal)
+                .Select(g =>
+                    g.OrderByDescending(x => x.Confidence)
+                        .ThenByDescending(x => x.PredictedAt)
+                        .First())
+                .ToList();
+        }
+        else if (string.Equals(strategy, DemoAutoTradeStrategyIds.TopHalfConfidence, StringComparison.Ordinal))
+        {
+            var sorted = directionalTradeable
+                .OrderByDescending(r => r.Confidence)
+                .ThenByDescending(r => r.PredictedAt)
+                .ToList();
+            var k = (sorted.Count + 1) / 2;
+            positioned = sorted.Take(k).ToList();
+        }
 
         var legList = positioned.ToList();
+
+        if (string.Equals(strategy, DemoAutoTradeStrategyIds.OneSignalPerInstrument, StringComparison.Ordinal)
+            || string.Equals(strategy, DemoAutoTradeStrategyIds.OneSignalPerEngine, StringComparison.Ordinal)
+            || string.Equals(strategy, DemoAutoTradeStrategyIds.TopHalfConfidence, StringComparison.Ordinal))
+        {
+            skippedLowConfidence = Math.Max(0, directionalTradeable.Count - legList.Count);
+        }
 
         Dictionary<Guid, decimal> allocations;
         if (legList.Count == 0)
@@ -122,6 +158,15 @@ public static class DemoAutoTradeEodSummaryCalculator
         else if (string.Equals(strategy, DemoAutoTradeStrategyIds.ConfidenceWeighted, StringComparison.Ordinal))
         {
             allocations = ConfidenceWeightedAllocation(legList, totalNotionalInr);
+        }
+        else if (string.Equals(strategy, DemoAutoTradeStrategyIds.SignalStrengthSquared, StringComparison.Ordinal))
+        {
+            allocations = SquaredConfidenceAllocation(legList, totalNotionalInr);
+        }
+        else if (string.Equals(strategy, DemoAutoTradeStrategyIds.ImpliedEdgeWeighted, StringComparison.Ordinal))
+        {
+            allocations = ImpliedEdgeWeightedAllocation(legList, totalNotionalInr);
+            skippedLowConfidence = legList.Count(r => r.Confidence <= 50);
         }
         else
         {
@@ -175,6 +220,62 @@ public static class DemoAutoTradeEodSummaryCalculator
         {
             var w = weightsById[r.Id];
             allocations[r.Id] = sumWeights <= 0m ? 0m : totalNotionalInr * (w / sumWeights);
+        }
+
+        return allocations;
+    }
+
+    private static Dictionary<Guid, decimal> SquaredConfidenceAllocation(
+        IReadOnlyList<MlAutomationPredictionListItemDto> legs,
+        decimal totalNotionalInr)
+    {
+        decimal sumWeights = 0m;
+        var weightsById = new Dictionary<Guid, decimal>();
+        foreach (var r in legs)
+        {
+            var b = (decimal)Math.Clamp(r.Confidence, 1, 100);
+            var w = b * b;
+            weightsById[r.Id] = w;
+            sumWeights += w;
+        }
+
+        var allocations = new Dictionary<Guid, decimal>();
+        foreach (var r in legs)
+        {
+            var w = weightsById[r.Id];
+            allocations[r.Id] = sumWeights <= 0m ? 0m : totalNotionalInr * (w / sumWeights);
+        }
+
+        return allocations;
+    }
+
+    /// <summary>Weights ∝ max(0, 2p−1) for p = confidence in [0,1]. All weights zero → no allocation.</summary>
+    private static Dictionary<Guid, decimal> ImpliedEdgeWeightedAllocation(
+        IReadOnlyList<MlAutomationPredictionListItemDto> legs,
+        decimal totalNotionalInr)
+    {
+        decimal sumWeights = 0m;
+        var weightsById = new Dictionary<Guid, decimal>();
+        foreach (var r in legs)
+        {
+            var p = Math.Clamp(r.Confidence, 0, 100) / 100m;
+            var w = Math.Max(0m, 2m * p - 1m);
+            weightsById[r.Id] = w;
+            sumWeights += w;
+        }
+
+        var allocations = new Dictionary<Guid, decimal>();
+        if (sumWeights <= 0m)
+        {
+            foreach (var r in legs)
+                allocations[r.Id] = 0m;
+            return allocations;
+        }
+
+        foreach (var r in legs)
+        {
+            var w = weightsById[r.Id];
+            allocations[r.Id] = totalNotionalInr * (w / sumWeights);
         }
 
         return allocations;

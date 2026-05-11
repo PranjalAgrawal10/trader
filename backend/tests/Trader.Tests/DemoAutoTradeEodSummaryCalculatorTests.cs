@@ -178,6 +178,162 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
     }
 
     [Fact]
+    public void One_signal_per_engine_keeps_highest_confidence_per_engine_id()
+    {
+        var low = Row(
+            Guid.Parse("00000000-0000-4000-8000-000000000031"),
+            "100",
+            "up",
+            55,
+            "eng-a");
+        var high = Row(
+            Guid.Parse("00000000-0000-4000-8000-000000000032"),
+            "200",
+            "up",
+            90,
+            "eng-a");
+        var otherEngine = Row(
+            Guid.Parse("00000000-0000-4000-8000-000000000033"),
+            "300",
+            "up",
+            40,
+            "eng-b");
+
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { low, high, otherEngine },
+            9_000m,
+            DemoAutoTradeStrategyIds.OneSignalPerEngine);
+
+        Assert.Equal(3, totals.DirectionalTradeableLegs);
+        Assert.Equal(1, totals.SkippedLowConfidenceLegs); // one duplicate eng-a leg dropped
+        Assert.Equal(2, totals.AllocatedLegsForPnl);
+        // high: +1% on 4500; otherEngine: +1% on 4500 → 90
+        Assert.Equal(90m, totals.HypotheticalTotalPnlInr);
+    }
+
+    [Fact]
+    public void Top_half_confidence_keeps_upper_half_then_equal_split()
+    {
+        var rows = new[]
+        {
+            Mk(Guid.Parse("00000000-0000-4000-8000-000000000041"), 30),
+            Mk(Guid.Parse("00000000-0000-4000-8000-000000000042"), 50),
+            Mk(Guid.Parse("00000000-0000-4000-8000-000000000043"), 70),
+        };
+
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(rows, 10_000m, DemoAutoTradeStrategyIds.TopHalfConfidence);
+
+        Assert.Equal(3, totals.DirectionalTradeableLegs);
+        Assert.Equal(1, totals.SkippedLowConfidenceLegs);
+        Assert.Equal(2, totals.AllocatedLegsForPnl);
+        // top 2: 70 and 50, 5k each, both +1% → 100
+        Assert.Equal(100m, totals.HypotheticalTotalPnlInr);
+    }
+
+    [Fact]
+    public void Signal_strength_squared_concentrates_notional_on_high_confidence()
+    {
+        var low = SqRow(Guid.Parse("00000000-0000-4000-8000-000000000051"), 50);
+        var high = SqRow(Guid.Parse("00000000-0000-4000-8000-000000000052"), 100);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { low, high },
+            10_000m,
+            DemoAutoTradeStrategyIds.SignalStrengthSquared);
+        // weights 50² : 100² = 1:4 → 2k / 8k notionals, both +1% → 100
+        Assert.Equal(100m, totals.HypotheticalTotalPnlInr);
+    }
+
+    [Fact]
+    public void Implied_edge_weighted_zero_when_all_confidence_at_or_below_fifty()
+    {
+        var a = EdgeRow(Guid.Parse("00000000-0000-4000-8000-000000000061"), 50);
+        var b = EdgeRow(Guid.Parse("00000000-0000-4000-8000-000000000062"), 40);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { a, b },
+            10_000m,
+            DemoAutoTradeStrategyIds.ImpliedEdgeWeighted);
+        Assert.Equal(0, totals.AllocatedLegsForPnl);
+        Assert.Equal(0m, totals.HypotheticalTotalPnlInr);
+        Assert.Equal(2, totals.SkippedLowConfidenceLegs);
+    }
+
+    [Fact]
+    public void DemoAutoTradeStrategyIds_ParseRequired_rejects_unknown_slug()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            DemoAutoTradeStrategyIds.ParseRequired("not-a-real-strategy"));
+        Assert.Contains("Unknown demo strategy", ex.Message);
+    }
+
+    private static MlAutomationPredictionListItemDto Row(Guid id, string token, string dir, int conf, string engine) =>
+        new(
+            id,
+            DateTimeOffset.Parse("2026-05-11T12:00:00Z"),
+            token,
+            "S",
+            "NSE",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T08:00:00Z"),
+            100m,
+            dir,
+            conf,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            101m,
+            engine);
+
+    private static MlAutomationPredictionListItemDto Mk(Guid id, int conf) =>
+        new(
+            id,
+            DateTimeOffset.Parse("2026-05-11T12:00:00Z"),
+            "1",
+            "S",
+            "NSE",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T08:00:00Z"),
+            100m,
+            "up",
+            conf,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            101m,
+            "e");
+
+    private static MlAutomationPredictionListItemDto SqRow(Guid id, int conf) =>
+        new(
+            id,
+            DateTimeOffset.Parse("2026-05-11T12:00:00Z"),
+            "1",
+            "S",
+            "NSE",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T08:00:00Z"),
+            100m,
+            "up",
+            conf,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            101m,
+            "e");
+
+    private static MlAutomationPredictionListItemDto EdgeRow(Guid id, int conf) =>
+        new(
+            id,
+            DateTimeOffset.Parse("2026-05-11T12:00:00Z"),
+            "1",
+            "S",
+            "NSE",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T08:00:00Z"),
+            100m,
+            "up",
+            conf,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            101m,
+            "e");
+
+    [Fact]
     public void GetLocalDayBoundsUtc_kolkata_midnight_spans_expected_utc_window()
     {
         var (from, to) = DemoAutoTradeEodSummaryCalculator.GetLocalDayBoundsUtc(
@@ -186,5 +342,14 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
 
         Assert.True(from < to);
         Assert.Equal(TimeSpan.FromHours(24), to - from);
+    }
+
+    [Fact]
+    public void GetLocalDateOnly_kolkata_maps_utc_noon_to_same_calendar_day()
+    {
+        var d = DemoAutoTradeEodSummaryCalculator.GetLocalDateOnly(
+            DateTimeOffset.Parse("2026-05-11T06:30:00Z"),
+            "Asia/Kolkata");
+        Assert.Equal(new DateOnly(2026, 5, 11), d);
     }
 }

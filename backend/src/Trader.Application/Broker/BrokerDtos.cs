@@ -172,6 +172,58 @@ public sealed record DemoAutoTradeEodSummaryDto(
     string PnlAllocationNote,
     bool MayBeTruncated);
 
+/// <summary>One calendar day in report TZ within <see cref="DemoAutoTradeFullReportDto"/>.</summary>
+public sealed record DemoAutoTradeFullReportDailyDto(
+    DateOnly ReportDate,
+    int TotalSignals,
+    int PendingSignals,
+    int CorrectOutcomes,
+    int WrongOutcomes,
+    int SkippedNoNextClose,
+    int DirectionalTradeableLegs,
+    int AllocatedLegsForPnl,
+    int SkippedLowConfidenceLegs,
+    decimal HypotheticalTotalPnlInr,
+    string PnlAllocationNote);
+
+/// <summary>Counts for a slice (engine or interval) over the report window.</summary>
+public sealed record DemoAutoTradeFullReportSliceCountsDto(
+    string Key,
+    int Total,
+    int Pending,
+    int Correct,
+    int Wrong);
+
+/// <summary>
+/// Hypothetical demo auto-trade report: settings, per-day P&amp;L from automation rows, aggregates, and outcome/direction slices.
+/// No broker orders; same math as <see cref="DemoAutoTradeEodSummaryDto"/> per day.
+/// </summary>
+public sealed record DemoAutoTradeFullReportDto(
+    DateTimeOffset GeneratedAtUtc,
+    string ReportTimeZoneId,
+    DateTimeOffset FromUtcInclusive,
+    DateTimeOffset ToUtcExclusive,
+    string ReportRangeSummary,
+    bool DemoAutoTradeEnabled,
+    bool FavoriteMlAutomationEnabled,
+    string DemoAutoTradeStrategy,
+    string DemoAutoTradeStrategyTitle,
+    decimal DemoNotionalInrPerDay,
+    IReadOnlyList<DemoAutoTradeFullReportDailyDto> DailySummaries,
+    int TotalSignalsInRange,
+    int PendingSignalsInRange,
+    int CorrectOutcomesInRange,
+    int WrongOutcomesInRange,
+    int DirectionalTradeableLegsInRange,
+    decimal HypotheticalTotalPnlInrSummedDays,
+    int DirectionCountUp,
+    int DirectionCountDown,
+    int DirectionCountNeutral,
+    IReadOnlyList<DemoAutoTradeFullReportSliceCountsDto> OutcomesByEngine,
+    IReadOnlyList<DemoAutoTradeFullReportSliceCountsDto> OutcomesByInterval,
+    string Disclaimer,
+    bool MayBeTruncated);
+
 /// <summary>Background favorite-ML automation toggle and optional per-user candle interval / new-pass throttle.</summary>
 public sealed class FavoriteMlAutomationPutDto
 {

@@ -83,4 +83,15 @@ public interface IPriceDirectionPredictionService
         Guid userId,
         DateOnly? reportDateIst,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Hypothetical demo auto-trade report over <c>[fromUtcInclusive, toUtcExclusive)</c> on <c>PredictedAtUtc</c>.
+    /// When both bounds are null, uses the last 7 local calendar days in <c>FavoriteMlAutomation:ReportTimeZoneId</c> (through end of today).
+    /// Max span 93 days when both are set.
+    /// </summary>
+    Task<DemoAutoTradeFullReportDto> GetDemoAutoTradeFullReportAsync(
+        Guid userId,
+        DateTimeOffset? fromUtcInclusive,
+        DateTimeOffset? toUtcExclusive,
+        CancellationToken ct = default);
 }

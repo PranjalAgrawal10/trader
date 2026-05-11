@@ -515,6 +515,30 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Full hypothetical demo auto-trade report: per-day P&amp;L, aggregates, direction and outcome slices over merged automation rows.
+    /// Optional <c>fromUtc</c> + <c>toUtcExclusive</c> (PredictedAt half-open); omit both for last 7 local calendar days in report TZ. Max 93 days.
+    /// </summary>
+    [Authorize]
+    [HttpGet("kite/instruments/demo-auto-trade/full-report")]
+    public async Task<ActionResult<DemoAutoTradeFullReportDto>> GetDemoAutoTradeFullReport(
+        [FromQuery] DateTimeOffset? fromUtc = null,
+        [FromQuery] DateTimeOffset? toUtcExclusive = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var dto = await _priceDirectionPredictions
+                .GetDemoAutoTradeFullReportAsync(User.GetUserId(), fromUtc, toUtcExclusive, ct)
+                .ConfigureAwait(false);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     [Authorize]
     [HttpPut("kite/instruments/favorite-ml-automation")]
     public async Task<IActionResult> PutFavoriteMlAutomation([FromBody] FavoriteMlAutomationPutDto? body, CancellationToken ct)

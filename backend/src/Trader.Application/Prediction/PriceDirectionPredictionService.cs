@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Broker;
@@ -646,5 +647,195 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             totals.HypotheticalTotalPnlInr,
             note,
             rows.Count >= MaxAutomationHistoryTake);
+    }
+
+    /// <inheritdoc />
+    public async Task<DemoAutoTradeFullReportDto> GetDemoAutoTradeFullReportAsync(
+        Guid userId,
+        DateTimeOffset? fromUtcInclusive,
+        DateTimeOffset? toUtcExclusive,
+        CancellationToken ct = default)
+    {
+        if (fromUtcInclusive.HasValue != toUtcExclusive.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Provide both fromUtc and toUtcExclusive as ISO-8601 instants, or omit both.");
+        }
+
+        const int maxReportRangeDays = 93;
+
+        var chartRow = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("User not found.");
+
+        var tzId = string.IsNullOrWhiteSpace(_favoriteMlAutomationOpts.Value.ReportTimeZoneId)
+            ? "Asia/Kolkata"
+            : _favoriteMlAutomationOpts.Value.ReportTimeZoneId.Trim();
+
+        DateTimeOffset fromUtc;
+        DateTimeOffset toUtcExcl;
+        if (!fromUtcInclusive.HasValue)
+        {
+            var today = DemoAutoTradeEodSummaryCalculator.GetTodayInTimeZone(tzId);
+            var startDate = today.AddDays(-6);
+            fromUtc = DemoAutoTradeEodSummaryCalculator.GetLocalDayBoundsUtc(startDate, tzId).FromUtcInclusive;
+            toUtcExcl = DemoAutoTradeEodSummaryCalculator.GetLocalDayBoundsUtc(today, tzId).ToUtcExclusive;
+        }
+        else
+        {
+            fromUtc = fromUtcInclusive.Value;
+            toUtcExcl = toUtcExclusive!.Value;
+            if (toUtcExcl <= fromUtc)
+            {
+                throw new InvalidOperationException(
+                    "fromUtc must be strictly before toUtcExclusive.");
+            }
+
+            var spanDays = (toUtcExcl - fromUtc).TotalDays;
+            if (spanDays <= 0 || spanDays > maxReportRangeDays)
+            {
+                throw new InvalidOperationException(
+                    $"Report range exceeds {maxReportRangeDays} days between start and end, or bounds are invalid.");
+            }
+        }
+
+        var rows = await ListAutomationRecentAsync(userId, MaxAutomationHistoryTake, fromUtc, toUtcExcl, ct)
+            .ConfigureAwait(false);
+
+        var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtcExcl).ToList();
+        var mayBeTruncated = rows.Count >= MaxAutomationHistoryTake;
+
+        var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
+        var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
+        var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
+
+        var dailySummaries = inWindow
+            .GroupBy(r => DemoAutoTradeEodSummaryCalculator.GetLocalDateOnly(r.PredictedAt, tzId))
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var list = g.ToList();
+                var t = DemoAutoTradeEodSummaryCalculator.Compute(list, notional, normStrategy);
+                var note = DemoAutoTradeEodSummaryCalculator.BuildAllocationNote(normStrategy, t);
+                return new DemoAutoTradeFullReportDailyDto(
+                    g.Key,
+                    t.TotalSignals,
+                    t.PendingSignals,
+                    t.CorrectOutcomes,
+                    t.WrongOutcomes,
+                    t.SkippedNoNextClose,
+                    t.DirectionalTradeableLegs,
+                    t.AllocatedLegsForPnl,
+                    t.SkippedLowConfidenceLegs,
+                    t.HypotheticalTotalPnlInr,
+                    note);
+            })
+            .ToList();
+
+        var sumDailyPnl = dailySummaries.Sum(d => d.HypotheticalTotalPnlInr);
+        var sumDirLegs = dailySummaries.Sum(d => d.DirectionalTradeableLegs);
+
+        var pending = 0;
+        var correct = 0;
+        var wrong = 0;
+        var up = 0;
+        var down = 0;
+        var neutral = 0;
+        foreach (var r in inWindow)
+        {
+            if (string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase))
+                pending++;
+            else if (string.Equals(r.Outcome, "correct", StringComparison.OrdinalIgnoreCase))
+                correct++;
+            else if (string.Equals(r.Outcome, "wrong", StringComparison.OrdinalIgnoreCase))
+                wrong++;
+
+            var d = (r.Direction ?? string.Empty).Trim();
+            if (d.Equals("up", StringComparison.OrdinalIgnoreCase))
+                up++;
+            else if (d.Equals("down", StringComparison.OrdinalIgnoreCase))
+                down++;
+            else
+                neutral++;
+        }
+
+        static void BumpOutcome(Dictionary<string, (int T, int P, int C, int W)> map, string key, string outcome)
+        {
+            if (!map.TryGetValue(key, out var v))
+                v = (0, 0, 0, 0);
+            var t = v.T + 1;
+            int p = v.P, c = v.C, w = v.W;
+            if (string.Equals(outcome, "pending", StringComparison.OrdinalIgnoreCase))
+                p++;
+            else if (string.Equals(outcome, "correct", StringComparison.OrdinalIgnoreCase))
+                c++;
+            else if (string.Equals(outcome, "wrong", StringComparison.OrdinalIgnoreCase))
+                w++;
+            map[key] = (t, p, c, w);
+        }
+
+        var byEngine = new Dictionary<string, (int T, int P, int C, int W)>(StringComparer.Ordinal);
+        var byInterval = new Dictionary<string, (int T, int P, int C, int W)>(StringComparer.Ordinal);
+        foreach (var r in inWindow)
+        {
+            var eng = string.IsNullOrWhiteSpace(r.EngineModelId) ? "(unknown)" : r.EngineModelId.Trim();
+            BumpOutcome(byEngine, eng, r.Outcome);
+            var iv = string.IsNullOrWhiteSpace(r.Interval) ? "(unknown)" : r.Interval.Trim();
+            BumpOutcome(byInterval, iv, r.Outcome);
+        }
+
+        var engineDtos = byEngine
+            .Select(kv => new DemoAutoTradeFullReportSliceCountsDto(
+                kv.Key,
+                kv.Value.T,
+                kv.Value.P,
+                kv.Value.C,
+                kv.Value.W))
+            .OrderByDescending(x => x.Total)
+            .ToList();
+
+        var intervalDtos = byInterval
+            .Select(kv => new DemoAutoTradeFullReportSliceCountsDto(
+                kv.Key,
+                kv.Value.T,
+                kv.Value.P,
+                kv.Value.C,
+                kv.Value.W))
+            .OrderByDescending(x => x.Total)
+            .ThenBy(x => x.Key, StringComparer.Ordinal)
+            .ToList();
+
+        var startLocal = DemoAutoTradeEodSummaryCalculator.GetLocalDateOnly(fromUtc, tzId);
+        var endLocal = DemoAutoTradeEodSummaryCalculator.GetLocalDateOnly(toUtcExcl.AddTicks(-1), tzId);
+        var rangeSummary = $"{startLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} → {endLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({tzId})";
+
+        const string disclaimer =
+            "Hypothetical demo only: each calendar day applies the full demo notional to that day's automation signals under your saved allocation preset. " +
+            "No brokerage, slippage, leverage, or live orders. Not financial advice.";
+
+        return new DemoAutoTradeFullReportDto(
+            GeneratedAtUtc: DateTimeOffset.UtcNow,
+            ReportTimeZoneId: tzId,
+            FromUtcInclusive: fromUtc,
+            ToUtcExclusive: toUtcExcl,
+            ReportRangeSummary: rangeSummary,
+            DemoAutoTradeEnabled: chartRow.DemoAutoTradeEnabled ?? false,
+            FavoriteMlAutomationEnabled: chartRow.FavoriteMlAutomationEnabled ?? false,
+            DemoAutoTradeStrategy: stratMeta.Code,
+            DemoAutoTradeStrategyTitle: stratMeta.Title,
+            DemoNotionalInrPerDay: notional,
+            DailySummaries: dailySummaries,
+            TotalSignalsInRange: inWindow.Count,
+            PendingSignalsInRange: pending,
+            CorrectOutcomesInRange: correct,
+            WrongOutcomesInRange: wrong,
+            DirectionalTradeableLegsInRange: sumDirLegs,
+            HypotheticalTotalPnlInrSummedDays: decimal.Round(sumDailyPnl, 2, MidpointRounding.AwayFromZero),
+            DirectionCountUp: up,
+            DirectionCountDown: down,
+            DirectionCountNeutral: neutral,
+            OutcomesByEngine: engineDtos,
+            OutcomesByInterval: intervalDtos,
+            Disclaimer: disclaimer,
+            MayBeTruncated: mayBeTruncated);
     }
 }

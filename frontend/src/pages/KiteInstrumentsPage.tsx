@@ -196,6 +196,56 @@ interface DemoAutoTradeEodSummaryDto {
   mayBeTruncated: boolean
 }
 
+/** GET …/demo-auto-trade/full-report — multi-day hypothetical demo + slices. */
+interface DemoAutoTradeFullReportDailyDto {
+  reportDate: string
+  totalSignals: number
+  pendingSignals: number
+  correctOutcomes: number
+  wrongOutcomes: number
+  skippedNoNextClose: number
+  directionalTradeableLegs: number
+  allocatedLegsForPnl: number
+  skippedLowConfidenceLegs: number
+  hypotheticalTotalPnlInr: number
+  pnlAllocationNote: string
+}
+
+interface DemoAutoTradeFullReportSliceDto {
+  key: string
+  total: number
+  pending: number
+  correct: number
+  wrong: number
+}
+
+interface DemoAutoTradeFullReportDto {
+  generatedAtUtc: string
+  reportTimeZoneId: string
+  fromUtcInclusive: string
+  toUtcExclusive: string
+  reportRangeSummary: string
+  demoAutoTradeEnabled: boolean
+  favoriteMlAutomationEnabled: boolean
+  demoAutoTradeStrategy: string
+  demoAutoTradeStrategyTitle: string
+  demoNotionalInrPerDay: number
+  dailySummaries: DemoAutoTradeFullReportDailyDto[]
+  totalSignalsInRange: number
+  pendingSignalsInRange: number
+  correctOutcomesInRange: number
+  wrongOutcomesInRange: number
+  directionalTradeableLegsInRange: number
+  hypotheticalTotalPnlInrSummedDays: number
+  directionCountUp: number
+  directionCountDown: number
+  directionCountNeutral: number
+  outcomesByEngine: DemoAutoTradeFullReportSliceDto[]
+  outcomesByInterval: DemoAutoTradeFullReportSliceDto[]
+  disclaimer: string
+  mayBeTruncated: boolean
+}
+
 const DEMO_AUTO_TRADE_STRATEGY_OPTIONS: { id: string; label: string; hint: string }[] = [
   {
     id: 'equal_split',
@@ -216,6 +266,26 @@ const DEMO_AUTO_TRADE_STRATEGY_OPTIONS: { id: string; label: string; hint: strin
     id: 'one_signal_per_instrument',
     label: 'One leg per symbol',
     hint: 'Keeps only the strongest signal per instrument token to reduce duplicate engines on the same underlying.',
+  },
+  {
+    id: 'signal_strength_squared',
+    label: 'Quadratic confidence',
+    hint: 'Capital weights scale with confidence² (normalized)—common way to lean harder into the model’s strongest scores.',
+  },
+  {
+    id: 'implied_edge_weighted',
+    label: 'Implied edge (fractional)',
+    hint: 'Uses weight ∝ max(0, 2×p−1) for p = confidence/100 (toy fractional-Kelly style); signals at or below 50% get no notional.',
+  },
+  {
+    id: 'one_signal_per_engine',
+    label: 'One leg per engine',
+    hint: 'Per ML engine id, keeps the best directional signal that day—diversifies across models instead of symbols.',
+  },
+  {
+    id: 'top_half_confidence',
+    label: 'Top half by confidence',
+    hint: 'Keeps only the upper half of directional legs ranked by confidence, then splits notional evenly (median-cut concentration).',
   },
 ]
 
@@ -4090,6 +4160,9 @@ export function KiteInstrumentsPage() {
   const [demoEodSummary, setDemoEodSummary] = useState<DemoAutoTradeEodSummaryDto | null>(null)
   const [demoEodLoading, setDemoEodLoading] = useState(false)
   const [demoEodError, setDemoEodError] = useState<string | null>(null)
+  const [demoFullReport, setDemoFullReport] = useState<DemoAutoTradeFullReportDto | null>(null)
+  const [demoFullReportLoading, setDemoFullReportLoading] = useState(false)
+  const [demoFullReportError, setDemoFullReportError] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
@@ -4462,6 +4535,58 @@ export function KiteInstrumentsPage() {
       setDemoEodLoading(false)
     }
   }, [])
+
+  const loadDemoFullReport = useCallback(
+    async (mode: 'seven' | 'merged') => {
+      setDemoFullReportLoading(true)
+      setDemoFullReportError(null)
+      try {
+        let path = '/broker/kite/instruments/demo-auto-trade/full-report'
+        if (mode === 'merged') {
+          const fromTrim = automationEmailReportRange.from.trim()
+          const toTrim = automationEmailReportRange.to.trim()
+          if (!fromTrim || !toTrim) {
+            setDemoFullReportError(
+              'Set both From and To under Merged log range & email, or use Last 7 report days.',
+            )
+            setDemoFullReport(null)
+            return
+          }
+          const fromMs = Date.parse(fromTrim)
+          const toMs = Date.parse(toTrim)
+          if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+            setDemoFullReportError('Invalid date/time in From / To.')
+            setDemoFullReport(null)
+            return
+          }
+          if (fromMs >= toMs) {
+            setDemoFullReportError('From must be strictly before To (half-open range on PredictedAt).')
+            setDemoFullReport(null)
+            return
+          }
+          const maxSpanMs = 93 * 24 * 60 * 60 * 1000
+          if (toMs - fromMs > maxSpanMs) {
+            setDemoFullReportError('Range cannot exceed 93 days.')
+            setDemoFullReport(null)
+            return
+          }
+          const q = new URLSearchParams({
+            fromUtc: new Date(fromMs).toISOString(),
+            toUtcExclusive: new Date(toMs).toISOString(),
+          })
+          path = `${path}?${q.toString()}`
+        }
+        const { data } = await api.get<DemoAutoTradeFullReportDto>(path)
+        setDemoFullReport(data)
+      } catch (err) {
+        setDemoFullReportError(problemDetail(err))
+        setDemoFullReport(null)
+      } finally {
+        setDemoFullReportLoading(false)
+      }
+    },
+    [automationEmailReportRange.from, automationEmailReportRange.to],
+  )
 
   const persistDemoAutoTrade = useCallback(
     async (nextEnabled: boolean, nextStrategy: string) => {
@@ -4990,6 +5115,234 @@ export function KiteInstrumentsPage() {
                       </p>
                     </div>
                   ) : null}
+
+                  <div className="mt-4 pt-3 border-top border-secondary-subtle">
+                    <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-2">
+                      Full demo auto-trade report
+                    </h6>
+                    <p className="small text-secondary mb-2">
+                      Per-day hypothetical P&amp;L (same rules as EOD), totals, direction mix, and outcomes by engine /
+                      interval. Default window is the last <strong>7</strong> calendar days in the server report timezone;
+                      or reuse <strong>From / To</strong> from <em>Merged log range &amp; email</em> below.
+                    </p>
+                    <div className="d-flex flex-wrap gap-2 mb-2">
+                      <Button
+                        type="button"
+                        variant="outline-primary"
+                        size="sm"
+                        disabled={demoFullReportLoading || !isZerodha}
+                        onClick={() => void loadDemoFullReport('seven')}
+                      >
+                        {demoFullReportLoading ? 'Loading…' : 'Load (last 7 days)'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline-primary"
+                        size="sm"
+                        disabled={demoFullReportLoading || !isZerodha}
+                        onClick={() => void loadDemoFullReport('merged')}
+                      >
+                        {demoFullReportLoading ? 'Loading…' : 'Load (merged log range)'}
+                      </Button>
+                      {demoFullReport ? (
+                        <Button
+                          type="button"
+                          variant="outline-secondary"
+                          size="sm"
+                          disabled={!demoFullReport}
+                          onClick={() => {
+                            const blob = new Blob([JSON.stringify(demoFullReport, null, 2)], {
+                              type: 'application/json',
+                            })
+                            const a = document.createElement('a')
+                            a.href = URL.createObjectURL(blob)
+                            a.download = `demo-auto-trade-full-report-${demoFullReport.generatedAtUtc.slice(0, 19).replace(/[:T]/g, '-')}.json`
+                            a.click()
+                            URL.revokeObjectURL(a.href)
+                          }}
+                        >
+                          Download JSON
+                        </Button>
+                      ) : null}
+                    </div>
+                    {demoFullReportError ? (
+                      <Alert variant="warning" className="py-2 small mb-2">
+                        {demoFullReportError}
+                      </Alert>
+                    ) : null}
+                    {demoFullReport ? (
+                      <div className="small">
+                        <p className="text-muted mb-2" style={{ fontSize: '0.72rem' }}>
+                          {demoFullReport.disclaimer}{' '}
+                          {demoFullReport.mayBeTruncated ? (
+                            <span className="text-warning">Row cap reached; counts may be incomplete.</span>
+                          ) : null}
+                        </p>
+                        <Row className="g-2 mb-2">
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Range
+                          </Col>
+                          <Col xs={6} sm={8} className="font-monospace">
+                            {demoFullReport.reportRangeSummary}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Generated (UTC)
+                          </Col>
+                          <Col xs={6} sm={8} className="font-monospace">
+                            {demoFullReport.generatedAtUtc}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Demo / automation flags
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            demo {demoFullReport.demoAutoTradeEnabled ? 'on' : 'off'} · favorites ML{' '}
+                            {demoFullReport.favoriteMlAutomationEnabled ? 'on' : 'off'}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Preset / notional per day
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.demoAutoTradeStrategyTitle} ·{' '}
+                            {formatInrRupee(demoFullReport.demoNotionalInrPerDay)}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Signals (range)
+                          </Col>
+                          <Col xs={6} sm={8}>{demoFullReport.totalSignalsInRange}</Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Pending / correct / wrong
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.pendingSignalsInRange} / {demoFullReport.correctOutcomesInRange} /{' '}
+                            {demoFullReport.wrongOutcomesInRange}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Direction up / down / neutral
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.directionCountUp} / {demoFullReport.directionCountDown} /{' '}
+                            {demoFullReport.directionCountNeutral}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Σ daily hypothetical P&amp;L
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            <span
+                              className={
+                                demoFullReport.hypotheticalTotalPnlInrSummedDays > 0
+                                  ? 'text-success fw-semibold'
+                                  : demoFullReport.hypotheticalTotalPnlInrSummedDays < 0
+                                    ? 'text-danger fw-semibold'
+                                    : 'text-body-secondary'
+                              }
+                            >
+                              {formatInrRupee(demoFullReport.hypotheticalTotalPnlInrSummedDays)}
+                            </span>
+                            <span className="text-muted ms-1">
+                              (sum of per-day legs; {demoFullReport.directionalTradeableLegsInRange} directional leg-days)
+                            </span>
+                          </Col>
+                        </Row>
+                        {demoFullReport.dailySummaries.length > 0 ? (
+                          <>
+                            <div className="fw-semibold text-secondary mb-1 mt-2">Per calendar day</div>
+                            <div className="table-responsive border border-secondary-subtle rounded mb-3">
+                              <Table size="sm" striped bordered hover className="mb-0 small">
+                                <thead>
+                                  <tr>
+                                    <th>Date</th>
+                                    <th className="text-end">Signals</th>
+                                    <th className="text-end">P&amp;L</th>
+                                    <th className="text-end">Dir. legs</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {demoFullReport.dailySummaries.map((d) => (
+                                    <tr key={d.reportDate}>
+                                      <td className="font-monospace">{d.reportDate}</td>
+                                      <td className="text-end">{d.totalSignals}</td>
+                                      <td
+                                        className={`text-end fw-semibold ${
+                                          d.hypotheticalTotalPnlInr > 0
+                                            ? 'text-success'
+                                            : d.hypotheticalTotalPnlInr < 0
+                                              ? 'text-danger'
+                                              : ''
+                                        }`}
+                                      >
+                                        {formatInrRupee(d.hypotheticalTotalPnlInr)}
+                                      </td>
+                                      <td className="text-end">{d.directionalTradeableLegs}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </Table>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-muted mb-2">No automation rows in this window.</p>
+                        )}
+                        {demoFullReport.outcomesByEngine.length > 0 ? (
+                          <>
+                            <div className="fw-semibold text-secondary mb-1">Outcomes by engine</div>
+                            <div className="table-responsive border border-secondary-subtle rounded mb-3">
+                              <Table size="sm" striped bordered hover className="mb-0 small">
+                                <thead>
+                                  <tr>
+                                    <th>Engine</th>
+                                    <th className="text-end">Total</th>
+                                    <th className="text-end">Pending</th>
+                                    <th className="text-end">Correct</th>
+                                    <th className="text-end">Wrong</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {demoFullReport.outcomesByEngine.map((r) => (
+                                    <tr key={r.key}>
+                                      <td className="font-monospace text-break">{r.key}</td>
+                                      <td className="text-end">{r.total}</td>
+                                      <td className="text-end">{r.pending}</td>
+                                      <td className="text-end">{r.correct}</td>
+                                      <td className="text-end">{r.wrong}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </Table>
+                            </div>
+                          </>
+                        ) : null}
+                        {demoFullReport.outcomesByInterval.length > 0 ? (
+                          <>
+                            <div className="fw-semibold text-secondary mb-1">Outcomes by interval</div>
+                            <div className="table-responsive border border-secondary-subtle rounded mb-0">
+                              <Table size="sm" striped bordered hover className="mb-0 small">
+                                <thead>
+                                  <tr>
+                                    <th>Interval</th>
+                                    <th className="text-end">Total</th>
+                                    <th className="text-end">Pending</th>
+                                    <th className="text-end">Correct</th>
+                                    <th className="text-end">Wrong</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {demoFullReport.outcomesByInterval.map((r) => (
+                                    <tr key={r.key}>
+                                      <td className="font-monospace">{r.key}</td>
+                                      <td className="text-end">{r.total}</td>
+                                      <td className="text-end">{r.pending}</td>
+                                      <td className="text-end">{r.correct}</td>
+                                      <td className="text-end">{r.wrong}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </Table>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
