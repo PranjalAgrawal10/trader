@@ -482,6 +482,40 @@ public sealed class BrokerController : ControllerBase
     }
 
     /// <summary>
+    /// Hypothetical demo legs for a calendar day (report TZ): one row per merged automation signal after trading-lock filter, with allocation status and per-leg P&amp;L when allocated.
+    /// </summary>
+    [Authorize]
+    [HttpGet("kite/instruments/demo-auto-trade/today-legs")]
+    public async Task<ActionResult<DemoAutoTradeTodayLegsDto>> GetDemoAutoTradeTodayLegs(
+        [FromQuery] string? date,
+        CancellationToken ct)
+    {
+        DateOnly? reportDate = null;
+        if (!string.IsNullOrWhiteSpace(date))
+        {
+            if (!DateOnly.TryParse(date.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            {
+                return Problem(
+                    title: "Invalid date",
+                    detail: "Use optional query date=yyyy-MM-dd (calendar day in report timezone).",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            reportDate = parsed;
+        }
+
+        try
+        {
+            var dto = await _priceDirectionPredictions.GetDemoAutoTradeTodayLegsAsync(User.GetUserId(), reportDate, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>
     /// Hypothetical demo P&amp;L for a calendar day in <c>FavoriteMlAutomation:ReportTimeZoneId</c> (default IST) from merged automation predictions.
     /// </summary>
     [Authorize]

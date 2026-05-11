@@ -601,6 +601,41 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         };
     }
 
+    private static async Task<HashSet<string>> GetTradingLockInstrumentTokenSetAsync(
+        IBrokerService broker,
+        Guid userId,
+        CancellationToken ct)
+    {
+        var locksDto = await broker.GetKiteTradingLocksAsync(userId, ct).ConfigureAwait(false);
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var it in locksDto.Items)
+        {
+            var t = it.InstrumentToken?.Trim();
+            if (!string.IsNullOrEmpty(t))
+                set.Add(t);
+        }
+
+        return set;
+    }
+
+    private static List<MlAutomationPredictionListItemDto> FilterAutomationRowsForDemoTrade(
+        IReadOnlyList<MlAutomationPredictionListItemDto> inWindow,
+        HashSet<string> tradingLockTokens)
+    {
+        if (tradingLockTokens.Count == 0)
+            return new List<MlAutomationPredictionListItemDto>();
+
+        var list = new List<MlAutomationPredictionListItemDto>(inWindow.Count);
+        foreach (var r in inWindow)
+        {
+            var tok = (r.InstrumentToken ?? string.Empty).Trim();
+            if (tok.Length > 0 && tradingLockTokens.Contains(tok))
+                list.Add(r);
+        }
+
+        return list;
+    }
+
     /// <inheritdoc />
     public async Task<DemoAutoTradeEodSummaryDto> GetDemoAutoTradeEodSummaryAsync(
         Guid userId,
@@ -626,12 +661,18 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             .ConfigureAwait(false);
 
         var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtc).ToList();
+        var lockTokens = await GetTradingLockInstrumentTokenSetAsync(_broker, userId, ct).ConfigureAwait(false);
+        var lockedInstrumentCount = lockTokens.Count;
+        var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
         var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
-        var totals = DemoAutoTradeEodSummaryCalculator.Compute(inWindow, notional, normStrategy, chargeParams);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(forDemo, notional, normStrategy, chargeParams);
         var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
         var note = DemoAutoTradeEodSummaryCalculator.BuildAllocationNote(normStrategy, totals);
+        note += lockedInstrumentCount == 0
+            ? " Demo auto-trade uses no automation rows when there are zero Locked for trading instruments."
+            : $" Demo auto-trade uses only automation rows for instruments in Locked for trading ({lockedInstrumentCount} instrument(s)).";
         var ch = _demoAutoTradeOpts.Value.Charges;
         var chargesEnabled = ch.Enabled;
         var flatInr = chargesEnabled ? Math.Max(0m, ch.RoundTripFlatInrPerLeg) : 0m;
@@ -659,7 +700,62 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             totals.HypotheticalChargesInr,
             totals.HypotheticalTotalPnlInr,
             note,
+            lockedInstrumentCount,
             rows.Count >= MaxAutomationHistoryTake);
+    }
+
+    /// <inheritdoc />
+    public async Task<DemoAutoTradeTodayLegsDto> GetDemoAutoTradeTodayLegsAsync(
+        Guid userId,
+        DateOnly? reportDateIst,
+        CancellationToken ct = default)
+    {
+        var chartRow = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("User not found.");
+
+        var tzId = string.IsNullOrWhiteSpace(_favoriteMlAutomationOpts.Value.ReportTimeZoneId)
+            ? "Asia/Kolkata"
+            : _favoriteMlAutomationOpts.Value.ReportTimeZoneId.Trim();
+
+        var date = reportDateIst ?? DemoAutoTradeEodSummaryCalculator.GetTodayInTimeZone(tzId);
+        var (fromUtc, toUtc) = DemoAutoTradeEodSummaryCalculator.GetLocalDayBoundsUtc(date, tzId);
+
+        var rows = await ListAutomationRecentAsync(
+                userId,
+                MaxAutomationHistoryTake,
+                fromUtc,
+                toUtc,
+                ct)
+            .ConfigureAwait(false);
+
+        var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtc).ToList();
+        var lockTokens = await GetTradingLockInstrumentTokenSetAsync(_broker, userId, ct).ConfigureAwait(false);
+        var lockedInstrumentCount = lockTokens.Count;
+        var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
+        var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
+        var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
+        var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
+        var (_, legs) = DemoAutoTradeEodSummaryCalculator.ComputeWithLegRows(forDemo, notional, normStrategy, chargeParams);
+        var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
+        var ch = _demoAutoTradeOpts.Value.Charges;
+        var chargesEnabled = ch.Enabled;
+        var flatInr = chargesEnabled ? Math.Max(0m, ch.RoundTripFlatInrPerLeg) : 0m;
+        var turnoverBps = chargesEnabled ? Math.Max(0m, ch.RoundTripTurnoverBps) : 0m;
+
+        return new DemoAutoTradeTodayLegsDto(
+            GeneratedAtUtc: DateTimeOffset.UtcNow,
+            ReportDate: date,
+            ReportTimeZoneId: tzId,
+            DemoAutoTradeEnabled: chartRow.DemoAutoTradeEnabled ?? false,
+            DemoAutoTradeStrategy: stratMeta.Code,
+            DemoAutoTradeStrategyTitle: stratMeta.Title,
+            DemoNotionalInr: notional,
+            DemoAutoTradeLockedInstrumentCount: lockedInstrumentCount,
+            DemoAutoTradeChargesEnabled: chargesEnabled,
+            DemoAutoTradeRoundTripFlatInrPerLeg: flatInr,
+            DemoAutoTradeRoundTripTurnoverBps: turnoverBps,
+            Legs: legs,
+            MayBeTruncated: rows.Count >= MaxAutomationHistoryTake);
     }
 
     /// <inheritdoc />
@@ -717,6 +813,10 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtcExcl).ToList();
         var mayBeTruncated = rows.Count >= MaxAutomationHistoryTake;
 
+        var lockTokens = await GetTradingLockInstrumentTokenSetAsync(_broker, userId, ct).ConfigureAwait(false);
+        var lockedInstrumentCount = lockTokens.Count;
+        var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
+
         var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
@@ -726,7 +826,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var flatInr = chargesEnabled ? Math.Max(0m, ch.RoundTripFlatInrPerLeg) : 0m;
         var turnoverBps = chargesEnabled ? Math.Max(0m, ch.RoundTripTurnoverBps) : 0m;
 
-        var dailySummaries = inWindow
+        var dailySummaries = forDemo
             .GroupBy(r => DemoAutoTradeEodSummaryCalculator.GetLocalDateOnly(r.PredictedAt, tzId))
             .OrderBy(g => g.Key)
             .Select(g =>
@@ -762,7 +862,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var up = 0;
         var down = 0;
         var neutral = 0;
-        foreach (var r in inWindow)
+        foreach (var r in forDemo)
         {
             if (string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase))
                 pending++;
@@ -797,7 +897,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
 
         var byEngine = new Dictionary<string, (int T, int P, int C, int W)>(StringComparer.Ordinal);
         var byInterval = new Dictionary<string, (int T, int P, int C, int W)>(StringComparer.Ordinal);
-        foreach (var r in inWindow)
+        foreach (var r in forDemo)
         {
             var eng = string.IsNullOrWhiteSpace(r.EngineModelId) ? "(unknown)" : r.EngineModelId.Trim();
             BumpOutcome(byEngine, eng, r.Outcome);
@@ -832,6 +932,9 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
 
         var disclaimer =
             "Hypothetical demo only: each calendar day applies the full demo notional to that day's automation signals under your saved allocation preset. " +
+            (lockedInstrumentCount == 0
+                ? "No instruments are in Locked for trading; this report uses zero automation rows for demo math. "
+                : $"Only automation rows for instruments in Locked for trading ({lockedInstrumentCount} instrument(s)) are included. ") +
             (chargesEnabled
                 ? "Approximate F&O-style round-trip fees (flat per allocated leg + turnover bps from host DemoAutoTrade:Charges) are deducted from gross P&L. "
                 : "Fees are off (DemoAutoTrade:Charges:Enabled = false); gross equals net. ") +
@@ -852,7 +955,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             flatInr,
             turnoverBps,
             DailySummaries: dailySummaries,
-            TotalSignalsInRange: inWindow.Count,
+            TotalSignalsInRange: forDemo.Count,
             PendingSignalsInRange: pending,
             CorrectOutcomesInRange: correct,
             WrongOutcomesInRange: wrong,
@@ -866,6 +969,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             OutcomesByEngine: engineDtos,
             OutcomesByInterval: intervalDtos,
             Disclaimer: disclaimer,
+            DemoAutoTradeLockedInstrumentCount: lockedInstrumentCount,
             MayBeTruncated: mayBeTruncated);
     }
 }

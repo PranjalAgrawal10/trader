@@ -198,6 +198,8 @@ interface DemoAutoTradeEodSummaryDto {
   hypotheticalChargesInr: number
   hypotheticalTotalPnlInr: number
   pnlAllocationNote: string
+  /** Distinct instruments in Locked for trading used to filter rows for demo math. */
+  demoAutoTradeLockedInstrumentCount: number
   mayBeTruncated: boolean
 }
 
@@ -255,6 +257,45 @@ interface DemoAutoTradeFullReportDto {
   outcomesByEngine: DemoAutoTradeFullReportSliceDto[]
   outcomesByInterval: DemoAutoTradeFullReportSliceDto[]
   disclaimer: string
+  demoAutoTradeLockedInstrumentCount: number
+  mayBeTruncated: boolean
+}
+
+/** GET …/demo-auto-trade/today-legs — per-signal hypothetical demo legs (report day, trading locks). */
+interface DemoAutoTradeLegRowDto {
+  predictionId: string
+  predictedAtUtc: string
+  instrumentToken: string
+  tradingsymbol: string | null
+  exchange: string | null
+  interval: string
+  engineModelId: string
+  direction: string
+  confidence: number
+  outcome: string
+  refClose: number
+  nextClose: number | null
+  status: string
+  statusDetail: string | null
+  allocatedNotionalInr: number
+  legGrossPnlInr: number
+  legFeesInr: number
+  legNetPnlInr: number
+}
+
+interface DemoAutoTradeTodayLegsDto {
+  generatedAtUtc: string
+  reportDate: string
+  reportTimeZoneId: string
+  demoAutoTradeEnabled: boolean
+  demoAutoTradeStrategy: string
+  demoAutoTradeStrategyTitle: string
+  demoNotionalInr: number
+  demoAutoTradeLockedInstrumentCount: number
+  demoAutoTradeChargesEnabled: boolean
+  demoAutoTradeRoundTripFlatInrPerLeg: number
+  demoAutoTradeRoundTripTurnoverBps: number
+  legs: DemoAutoTradeLegRowDto[]
   mayBeTruncated: boolean
 }
 
@@ -307,6 +348,20 @@ function formatInrRupee(amount: number): string {
     currency: 'INR',
     maximumFractionDigits: 0,
   }).format(amount)
+}
+
+function formatDemoAutoTradeLegStatus(status: string): string {
+  const m: Record<string, string> = {
+    pending: 'Pending',
+    allocated: 'Allocated',
+    excluded_neutral: 'Excluded · neutral',
+    excluded_no_price: 'Excluded · no price',
+    excluded_not_directional: 'Excluded · direction',
+    excluded_low_confidence: 'Excluded · confidence',
+    excluded_by_strategy: 'Excluded · preset',
+    excluded_zero_allocation: 'Excluded · zero weight',
+  }
+  return m[status] ?? status
 }
 
 /** Nested shape from broker list / movers API (camelCase JSON). */
@@ -4175,6 +4230,9 @@ export function KiteInstrumentsPage() {
   const [demoFullReport, setDemoFullReport] = useState<DemoAutoTradeFullReportDto | null>(null)
   const [demoFullReportLoading, setDemoFullReportLoading] = useState(false)
   const [demoFullReportError, setDemoFullReportError] = useState<string | null>(null)
+  const [demoTodayLegs, setDemoTodayLegs] = useState<DemoAutoTradeTodayLegsDto | null>(null)
+  const [demoTodayLegsLoading, setDemoTodayLegsLoading] = useState(false)
+  const [demoTodayLegsError, setDemoTodayLegsError] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
@@ -4548,6 +4606,22 @@ export function KiteInstrumentsPage() {
     }
   }, [])
 
+  const loadDemoTodayLegs = useCallback(async () => {
+    try {
+      setDemoTodayLegsLoading(true)
+      setDemoTodayLegsError(null)
+      const { data } = await api.get<DemoAutoTradeTodayLegsDto>(
+        '/broker/kite/instruments/demo-auto-trade/today-legs',
+      )
+      setDemoTodayLegs(data)
+    } catch (err) {
+      setDemoTodayLegsError(problemDetail(err))
+      setDemoTodayLegs(null)
+    } finally {
+      setDemoTodayLegsLoading(false)
+    }
+  }, [])
+
   const loadDemoFullReport = useCallback(
     async (mode: 'seven' | 'merged') => {
       setDemoFullReportLoading(true)
@@ -4612,6 +4686,7 @@ export function KiteInstrumentsPage() {
         setDemoAutoTradeEnabled(nextEnabled)
         setDemoAutoTradeStrategy(nextStrategy)
         await loadDemoEodSummary()
+        await loadDemoTodayLegs()
         await loadChartSettings()
       } catch (err) {
         setDemoEodError(problemDetail(err))
@@ -4619,7 +4694,7 @@ export function KiteInstrumentsPage() {
         setDemoAutoTradeSaving(false)
       }
     },
-    [loadChartSettings, loadDemoEodSummary],
+    [loadChartSettings, loadDemoEodSummary, loadDemoTodayLegs],
   )
 
   useEffect(() => {
@@ -4696,6 +4771,15 @@ export function KiteInstrumentsPage() {
   }, [])
 
   const isZerodha = provider?.toLowerCase() === 'zerodha'
+
+  useEffect(() => {
+    if (mainTab !== 'automation' || !chartPrefsHydrated || !isZerodha) return
+    void loadDemoTodayLegs()
+    const id = window.setInterval(() => {
+      void loadDemoTodayLegs()
+    }, 12_000)
+    return () => window.clearInterval(id)
+  }, [mainTab, chartPrefsHydrated, isZerodha, loadDemoTodayLegs])
 
   const loadAutomationPriceModels = useCallback(async () => {
     if (!isZerodha) {
@@ -4898,6 +4982,11 @@ export function KiteInstrumentsPage() {
     void loadTradingLocks()
   }, [isZerodha, loadFavorites, loadTradingLocks])
 
+  useEffect(() => {
+    if (!(mainTab === 'automation' && isZerodha)) return
+    void loadTradingLocks()
+  }, [mainTab, isZerodha, loadTradingLocks])
+
   return (
     <Layout>
       <h1 className="h3 mb-1">F&O, spot & commodities</h1>
@@ -4971,432 +5060,11 @@ export function KiteInstrumentsPage() {
                 </Alert>
               ) : null}
 
-              <div className="rounded-3 border border-info border-opacity-25 shadow-sm overflow-hidden">
-                <div className="px-3 py-2 border-bottom border-info border-opacity-25 bg-body-secondary d-flex flex-wrap align-items-center justify-content-between gap-2">
-                  <span className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-0">
-                    Demo auto-trade
-                  </span>
-                  <Badge bg="info" pill className="small">
-                    No live orders
-                  </Badge>
-                </div>
-                <div className="p-3 p-md-4 bg-body-tertiary bg-opacity-25">
-                  <Row className="g-3 align-items-start">
-                    <Col xs={12} md>
-                      <Form.Check
-                        type="switch"
-                        id="demo-auto-trade-switch"
-                        className="mb-2"
-                        label={
-                          <span className="fw-semibold">
-                            Enable demo auto-trade
-                            <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
-                              Marks intent only. Fixed demo size{' '}
-                              <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> — hypothetical same-day gross
-                              and net P&amp;L from your automation log (host <span className="font-monospace">DemoAutoTrade:Charges</span>{' '}
-                              applies flat + turnover fees when enabled); pick an allocation preset below.
-                            </span>
-                          </span>
-                        }
-                        checked={demoAutoTradeEnabled}
-                        disabled={demoAutoTradeSaving}
-                        onChange={(e) => {
-                          void persistDemoAutoTrade(e.target.checked, demoAutoTradeStrategy)
-                        }}
-                      />
-                      <Form.Group className="mt-2 mb-0" controlId="demo-auto-trade-strategy">
-                        <Form.Label className="small text-secondary mb-1">Allocation preset (hypothetical)</Form.Label>
-                        <Form.Select
-                          size="sm"
-                          value={demoAutoTradeStrategy}
-                          disabled={demoAutoTradeSaving}
-                          aria-label="Demo auto-trade allocation strategy"
-                          onChange={(e) => {
-                            const next = e.target.value
-                            void persistDemoAutoTrade(demoAutoTradeEnabled, next)
-                          }}
-                        >
-                          {DEMO_AUTO_TRADE_STRATEGY_OPTIONS.map((o) => (
-                            <option key={o.id} value={o.id}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </Form.Select>
-                        <Form.Text className="text-muted d-block" style={{ fontSize: '0.7rem' }}>
-                          {
-                            DEMO_AUTO_TRADE_STRATEGY_OPTIONS.find((o) => o.id === demoAutoTradeStrategy)
-                              ?.hint
-                          }{' '}
-                          Not financial advice; no live orders.
-                        </Form.Text>
-                      </Form.Group>
-                    </Col>
-                    <Col xs={12} md="auto" className="d-flex flex-wrap gap-2 align-items-start justify-content-md-end">
-                      <Button
-                        type="button"
-                        variant="outline-primary"
-                        size="sm"
-                        disabled={demoEodLoading}
-                        onClick={() => void loadDemoEodSummary()}
-                      >
-                        {demoEodLoading ? 'Loading…' : 'Refresh EOD summary'}
-                      </Button>
-                    </Col>
-                  </Row>
-                  {demoEodError ? (
-                    <Alert variant="warning" className="py-2 small mt-3 mb-0">
-                      {demoEodError}
-                    </Alert>
-                  ) : null}
-                  {demoEodSummary ? (
-                    <div className="mt-3 pt-3 border-top border-secondary-subtle">
-                      <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-3">
-                        End-of-day outcome (hypothetical)
-                      </h6>
-                      <Row className="g-2 small">
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Report day
-                        </Col>
-                        <Col xs={6} sm={8} className="font-monospace">
-                          {demoEodSummary.reportDateIst}{' '}
-                          <span className="text-muted">({demoEodSummary.reportTimeZoneId})</span>
-                        </Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Demo notional
-                        </Col>
-                        <Col xs={6} sm={8}>
-                          {formatInrRupee(demoEodSummary.demoNotionalInr)}
-                        </Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Preset
-                        </Col>
-                        <Col xs={6} sm={8}>{demoEodSummary.demoAutoTradeStrategyTitle}</Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Signals (day)
-                        </Col>
-                        <Col xs={6} sm={8}>
-                          {demoEodSummary.totalSignals}
-                          {demoEodSummary.mayBeTruncated ? (
-                            <span className="text-warning ms-1" title="Loaded row cap reached; counts may be incomplete.">
-                              (may be truncated)
-                            </span>
-                          ) : null}
-                        </Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Pending / directional (priced)
-                        </Col>
-                        <Col xs={6} sm={8}>
-                          {demoEodSummary.pendingSignals} / {demoEodSummary.directionalTradeableLegs}
-                        </Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Allocated legs
-                        </Col>
-                        <Col xs={6} sm={8}>{demoEodSummary.allocatedLegsForPnl}</Col>
-                        {demoEodSummary.skippedLowConfidenceLegs > 0 ? (
-                          <>
-                            <Col xs={6} sm={4} className="text-secondary">
-                              Below confidence cutoff
-                            </Col>
-                            <Col xs={6} sm={8}>{demoEodSummary.skippedLowConfidenceLegs}</Col>
-                          </>
-                        ) : null}
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Correct / wrong
-                        </Col>
-                        <Col xs={6} sm={8}>
-                          {demoEodSummary.correctOutcomes} / {demoEodSummary.wrongOutcomes}
-                        </Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Fee model (host)
-                        </Col>
-                        <Col xs={6} sm={8}>
-                          {demoEodSummary.demoAutoTradeChargesEnabled ? (
-                            <span>
-                              On — {formatInrRupee(demoEodSummary.demoAutoTradeRoundTripFlatInrPerLeg)} / leg +{' '}
-                              {demoEodSummary.demoAutoTradeRoundTripTurnoverBps} bps turnover
-                            </span>
-                          ) : (
-                            <span className="text-muted">Off (gross = net)</span>
-                          )}
-                        </Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Gross P&amp;L
-                        </Col>
-                        <Col xs={6} sm={8}>{formatInrRupee(demoEodSummary.hypotheticalGrossPnlInr)}</Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Est. charges
-                        </Col>
-                        <Col xs={6} sm={8}>{formatInrRupee(demoEodSummary.hypotheticalChargesInr)}</Col>
-                        <Col xs={6} sm={4} className="text-secondary">
-                          Net P&amp;L (after fees)
-                        </Col>
-                        <Col xs={6} sm={8}>
-                          <span
-                            className={
-                              demoEodSummary.hypotheticalTotalPnlInr > 0
-                                ? 'text-success fw-semibold'
-                                : demoEodSummary.hypotheticalTotalPnlInr < 0
-                                  ? 'text-danger fw-semibold'
-                                  : 'text-body-secondary'
-                            }
-                          >
-                            {formatInrRupee(demoEodSummary.hypotheticalTotalPnlInr)}
-                          </span>
-                        </Col>
-                      </Row>
-                      <p className="text-muted mb-0 mt-2" style={{ fontSize: '0.72rem' }}>
-                        {demoEodSummary.pnlAllocationNote}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  <div className="mt-4 pt-3 border-top border-secondary-subtle">
-                    <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-2">
-                      Full demo auto-trade report
-                    </h6>
-                    <p className="small text-secondary mb-2">
-                      Per-day hypothetical P&amp;L (same rules as EOD), totals, direction mix, and outcomes by engine /
-                      interval. Default window is the last <strong>7</strong> calendar days in the server report timezone;
-                      or reuse <strong>From / To</strong> from <em>Merged log range &amp; email</em> below.
-                    </p>
-                    <div className="d-flex flex-wrap gap-2 mb-2">
-                      <Button
-                        type="button"
-                        variant="outline-primary"
-                        size="sm"
-                        disabled={demoFullReportLoading || !isZerodha}
-                        onClick={() => void loadDemoFullReport('seven')}
-                      >
-                        {demoFullReportLoading ? 'Loading…' : 'Load (last 7 days)'}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline-primary"
-                        size="sm"
-                        disabled={demoFullReportLoading || !isZerodha}
-                        onClick={() => void loadDemoFullReport('merged')}
-                      >
-                        {demoFullReportLoading ? 'Loading…' : 'Load (merged log range)'}
-                      </Button>
-                      {demoFullReport ? (
-                        <Button
-                          type="button"
-                          variant="outline-secondary"
-                          size="sm"
-                          disabled={!demoFullReport}
-                          onClick={() => {
-                            const blob = new Blob([JSON.stringify(demoFullReport, null, 2)], {
-                              type: 'application/json',
-                            })
-                            const a = document.createElement('a')
-                            a.href = URL.createObjectURL(blob)
-                            a.download = `demo-auto-trade-full-report-${demoFullReport.generatedAtUtc.slice(0, 19).replace(/[:T]/g, '-')}.json`
-                            a.click()
-                            URL.revokeObjectURL(a.href)
-                          }}
-                        >
-                          Download JSON
-                        </Button>
-                      ) : null}
-                    </div>
-                    {demoFullReportError ? (
-                      <Alert variant="warning" className="py-2 small mb-2">
-                        {demoFullReportError}
-                      </Alert>
-                    ) : null}
-                    {demoFullReport ? (
-                      <div className="small">
-                        <p className="text-muted mb-2" style={{ fontSize: '0.72rem' }}>
-                          {demoFullReport.disclaimer}{' '}
-                          {demoFullReport.mayBeTruncated ? (
-                            <span className="text-warning">Row cap reached; counts may be incomplete.</span>
-                          ) : null}
-                        </p>
-                        <Row className="g-2 mb-2">
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Range
-                          </Col>
-                          <Col xs={6} sm={8} className="font-monospace">
-                            {demoFullReport.reportRangeSummary}
-                          </Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Generated (UTC)
-                          </Col>
-                          <Col xs={6} sm={8} className="font-monospace">
-                            {demoFullReport.generatedAtUtc}
-                          </Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Demo / automation flags
-                          </Col>
-                          <Col xs={6} sm={8}>
-                            demo {demoFullReport.demoAutoTradeEnabled ? 'on' : 'off'} · favorites ML{' '}
-                            {demoFullReport.favoriteMlAutomationEnabled ? 'on' : 'off'}
-                          </Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Preset / notional per day
-                          </Col>
-                          <Col xs={6} sm={8}>
-                            {demoFullReport.demoAutoTradeStrategyTitle} ·{' '}
-                            {formatInrRupee(demoFullReport.demoNotionalInrPerDay)}
-                          </Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Fee model (host)
-                          </Col>
-                          <Col xs={6} sm={8}>
-                            {demoFullReport.demoAutoTradeChargesEnabled ? (
-                              <span>
-                                On — {formatInrRupee(demoFullReport.demoAutoTradeRoundTripFlatInrPerLeg)} / leg +{' '}
-                                {demoFullReport.demoAutoTradeRoundTripTurnoverBps} bps
-                              </span>
-                            ) : (
-                              <span className="text-muted">Off</span>
-                            )}
-                          </Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Signals (range)
-                          </Col>
-                          <Col xs={6} sm={8}>{demoFullReport.totalSignalsInRange}</Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Pending / correct / wrong
-                          </Col>
-                          <Col xs={6} sm={8}>
-                            {demoFullReport.pendingSignalsInRange} / {demoFullReport.correctOutcomesInRange} /{' '}
-                            {demoFullReport.wrongOutcomesInRange}
-                          </Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Direction up / down / neutral
-                          </Col>
-                          <Col xs={6} sm={8}>
-                            {demoFullReport.directionCountUp} / {demoFullReport.directionCountDown} /{' '}
-                            {demoFullReport.directionCountNeutral}
-                          </Col>
-                          <Col xs={6} sm={4} className="text-secondary">
-                            Σ gross / charges / net
-                          </Col>
-                          <Col xs={6} sm={8}>
-                            {formatInrRupee(demoFullReport.hypotheticalGrossPnlInrSummedDays)} /{' '}
-                            {formatInrRupee(demoFullReport.hypotheticalChargesInrSummedDays)} /{' '}
-                            <span
-                              className={
-                                demoFullReport.hypotheticalTotalPnlInrSummedDays > 0
-                                  ? 'text-success fw-semibold'
-                                  : demoFullReport.hypotheticalTotalPnlInrSummedDays < 0
-                                    ? 'text-danger fw-semibold'
-                                    : 'text-body-secondary'
-                              }
-                            >
-                              {formatInrRupee(demoFullReport.hypotheticalTotalPnlInrSummedDays)}
-                            </span>
-                            <span className="text-muted ms-1">
-                              ({demoFullReport.directionalTradeableLegsInRange} directional leg-days)
-                            </span>
-                          </Col>
-                        </Row>
-                        {demoFullReport.dailySummaries.length > 0 ? (
-                          <>
-                            <div className="fw-semibold text-secondary mb-1 mt-2">Per calendar day</div>
-                            <div className="table-responsive border border-secondary-subtle rounded mb-3">
-                              <Table size="sm" striped bordered hover className="mb-0 small">
-                                <thead>
-                                  <tr>
-                                    <th>Date</th>
-                                    <th className="text-end">Signals</th>
-                                    <th className="text-end">Gross</th>
-                                    <th className="text-end">Fees</th>
-                                    <th className="text-end">Net</th>
-                                    <th className="text-end">Dir. legs</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {demoFullReport.dailySummaries.map((d) => (
-                                    <tr key={d.reportDate}>
-                                      <td className="font-monospace">{d.reportDate}</td>
-                                      <td className="text-end">{d.totalSignals}</td>
-                                      <td className="text-end">{formatInrRupee(d.hypotheticalGrossPnlInr)}</td>
-                                      <td className="text-end">{formatInrRupee(d.hypotheticalChargesInr)}</td>
-                                      <td
-                                        className={`text-end fw-semibold ${
-                                          d.hypotheticalTotalPnlInr > 0
-                                            ? 'text-success'
-                                            : d.hypotheticalTotalPnlInr < 0
-                                              ? 'text-danger'
-                                              : ''
-                                        }`}
-                                      >
-                                        {formatInrRupee(d.hypotheticalTotalPnlInr)}
-                                      </td>
-                                      <td className="text-end">{d.directionalTradeableLegs}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </Table>
-                            </div>
-                          </>
-                        ) : (
-                          <p className="text-muted mb-2">No automation rows in this window.</p>
-                        )}
-                        {demoFullReport.outcomesByEngine.length > 0 ? (
-                          <>
-                            <div className="fw-semibold text-secondary mb-1">Outcomes by engine</div>
-                            <div className="table-responsive border border-secondary-subtle rounded mb-3">
-                              <Table size="sm" striped bordered hover className="mb-0 small">
-                                <thead>
-                                  <tr>
-                                    <th>Engine</th>
-                                    <th className="text-end">Total</th>
-                                    <th className="text-end">Pending</th>
-                                    <th className="text-end">Correct</th>
-                                    <th className="text-end">Wrong</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {demoFullReport.outcomesByEngine.map((r) => (
-                                    <tr key={r.key}>
-                                      <td className="font-monospace text-break">{r.key}</td>
-                                      <td className="text-end">{r.total}</td>
-                                      <td className="text-end">{r.pending}</td>
-                                      <td className="text-end">{r.correct}</td>
-                                      <td className="text-end">{r.wrong}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </Table>
-                            </div>
-                          </>
-                        ) : null}
-                        {demoFullReport.outcomesByInterval.length > 0 ? (
-                          <>
-                            <div className="fw-semibold text-secondary mb-1">Outcomes by interval</div>
-                            <div className="table-responsive border border-secondary-subtle rounded mb-0">
-                              <Table size="sm" striped bordered hover className="mb-0 small">
-                                <thead>
-                                  <tr>
-                                    <th>Interval</th>
-                                    <th className="text-end">Total</th>
-                                    <th className="text-end">Pending</th>
-                                    <th className="text-end">Correct</th>
-                                    <th className="text-end">Wrong</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {demoFullReport.outcomesByInterval.map((r) => (
-                                    <tr key={r.key}>
-                                      <td className="font-monospace">{r.key}</td>
-                                      <td className="text-end">{r.total}</td>
-                                      <td className="text-end">{r.pending}</td>
-                                      <td className="text-end">{r.correct}</td>
-                                      <td className="text-end">{r.wrong}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </Table>
-                            </div>
-                          </>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
+              <div className="border-bottom border-secondary-subtle pb-3 mb-1">
+                <h2 className="h6 text-body mb-1">Auto ML predictions</h2>
+                <p className="small text-secondary mb-0">
+                  Server schedule, merged log, charts, and the recent automation table cover favorites in the loaded range.
+                </p>
               </div>
 
               <div className="rounded-3 border border-secondary-subtle shadow-sm overflow-hidden">
@@ -6377,6 +6045,617 @@ export function KiteInstrumentsPage() {
                   </tbody>
                 </Table>
               </div>
+              <div className="border-top border-secondary-subtle pt-4 mt-1 mb-2">
+                <h2 className="h6 text-body mb-1">Demo auto-trade</h2>
+                <p className="small text-secondary mb-0">
+                  Hypothetical EOD and multi-day reports use only automation rows whose instrument token is in{' '}
+                  <strong>Locked for trading</strong> ({tradingLocks.length} saved lock{tradingLocks.length === 1 ? '' : 's'}). Add or remove locks on that tab; refresh EOD after changing locks.
+                </p>
+              </div>
+
+              <div className="rounded-3 border border-info border-opacity-25 shadow-sm overflow-hidden">
+                <div className="px-3 py-2 border-bottom border-info border-opacity-25 bg-body-secondary d-flex flex-wrap align-items-center justify-content-between gap-2">
+                  <span className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-0">
+                    Demo auto-trade
+                  </span>
+                  <div className="d-flex flex-wrap gap-1 align-items-center">
+                    <Badge bg="info" pill className="small">
+                      No live orders
+                    </Badge>
+                    <Badge bg="secondary" pill className="small">
+                      Locked symbols only
+                    </Badge>
+                  </div>
+                </div>
+                <div className="p-3 p-md-4 bg-body-tertiary bg-opacity-25">
+                  <Row className="g-3 align-items-start">
+                    <Col xs={12} md>
+                      <Form.Check
+                        type="switch"
+                        id="demo-auto-trade-switch"
+                        className="mb-2"
+                        label={
+                          <span className="fw-semibold">
+                            Enable demo auto-trade
+                            <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
+                              Marks intent only. Fixed demo size{' '}
+                              <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> — hypothetical same-day gross
+                              and net P&amp;L from automation rows for instruments in <strong>Locked for trading</strong> only (server filters by lock tokens; host{' '}
+                              <span className="font-monospace">DemoAutoTrade:Charges</span>{' '}
+                              applies flat + turnover fees when enabled). Pick an allocation preset below.
+                            </span>
+                          </span>
+                        }
+                        checked={demoAutoTradeEnabled}
+                        disabled={demoAutoTradeSaving}
+                        onChange={(e) => {
+                          void persistDemoAutoTrade(e.target.checked, demoAutoTradeStrategy)
+                        }}
+                      />
+                      <Form.Group className="mt-2 mb-0" controlId="demo-auto-trade-strategy">
+                        <Form.Label className="small text-secondary mb-1">Allocation preset (hypothetical)</Form.Label>
+                        <Form.Select
+                          size="sm"
+                          value={demoAutoTradeStrategy}
+                          disabled={demoAutoTradeSaving}
+                          aria-label="Demo auto-trade allocation strategy"
+                          onChange={(e) => {
+                            const next = e.target.value
+                            void persistDemoAutoTrade(demoAutoTradeEnabled, next)
+                          }}
+                        >
+                          {DEMO_AUTO_TRADE_STRATEGY_OPTIONS.map((o) => (
+                            <option key={o.id} value={o.id}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </Form.Select>
+                        <Form.Text className="text-muted d-block" style={{ fontSize: '0.7rem' }}>
+                          {
+                            DEMO_AUTO_TRADE_STRATEGY_OPTIONS.find((o) => o.id === demoAutoTradeStrategy)
+                              ?.hint
+                          }{' '}
+                          Not financial advice; no live orders.
+                        </Form.Text>
+                      </Form.Group>
+                    </Col>
+                    <Col xs={12} md="auto" className="d-flex flex-wrap gap-2 align-items-start justify-content-md-end">
+                      <Button
+                        type="button"
+                        variant="outline-primary"
+                        size="sm"
+                        disabled={demoEodLoading}
+                        onClick={() => void loadDemoEodSummary()}
+                      >
+                        {demoEodLoading ? 'Loading…' : 'Refresh EOD summary'}
+                      </Button>
+                    </Col>
+                  </Row>
+                  <div className="mt-3 pt-3 border-top border-secondary-subtle">
+                    <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                      <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-0">
+                        Today&apos;s hypothetical legs (live)
+                      </h6>
+                      <div className="d-flex flex-wrap align-items-center gap-2 small text-muted">
+                        {demoTodayLegsLoading ? <span>Refreshing…</span> : null}
+                        {demoTodayLegs ? (
+                          <span className="font-monospace" title="Last server snapshot (UTC)">
+                            {demoTodayLegs.generatedAtUtc.slice(0, 19)}Z
+                          </span>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="outline-secondary"
+                          size="sm"
+                          disabled={demoTodayLegsLoading || !isZerodha}
+                          onClick={() => void loadDemoTodayLegs()}
+                        >
+                          Refresh now
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="small text-secondary mb-2">
+                      Same calendar day and <strong>Locked for trading</strong> filter as EOD; rows refresh about every{' '}
+                      <strong>12s</strong> while this tab is open. Status shows whether the preset allocated notional to each
+                      signal.
+                    </p>
+                    {demoTodayLegsError ? (
+                      <Alert variant="warning" className="py-2 small mb-2">
+                        {demoTodayLegsError}
+                      </Alert>
+                    ) : null}
+                    <div
+                      className="table-responsive border border-secondary-subtle rounded mb-0"
+                      style={{ maxHeight: 'min(420px, 55vh)', overflowY: 'auto' }}
+                    >
+                      <Table size="sm" striped bordered hover className="mb-0 small align-middle">
+                        <thead className="table-light text-nowrap">
+                          <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Dir</th>
+                            <th className="text-end">Conf</th>
+                            <th>Outcome</th>
+                            <th>Status</th>
+                            <th className="text-end">Alloc</th>
+                            <th className="text-end">Gross</th>
+                            <th className="text-end">Fees</th>
+                            <th className="text-end">Net</th>
+                            <th>Engine</th>
+                          </tr>
+                        </thead>
+                        <tbody className="font-monospace">
+                          {!demoTodayLegs || demoTodayLegs.legs.length === 0 ? (
+                            <tr>
+                              <td colSpan={11} className="text-secondary small">
+                                {demoTodayLegsLoading
+                                  ? 'Loading legs…'
+                                  : 'No demo legs for today (add trading locks or wait for automation rows).'}
+                              </td>
+                            </tr>
+                          ) : (
+                            demoTodayLegs.legs.map((leg) => {
+                              const fav = favoriteByInstrumentToken.get(leg.instrumentToken)
+                              const sym = leg.tradingsymbol?.trim()
+                                ? leg.exchange?.trim()
+                                  ? `${leg.tradingsymbol.trim()} (${leg.exchange.trim()})`
+                                  : leg.tradingsymbol.trim()
+                                : fav
+                                  ? `${fav.tradingsymbol} (${fav.exchange})`
+                                  : leg.instrumentToken
+                              return (
+                                <tr key={leg.predictionId}>
+                                  <td className="small">{formatLocalDateTime(leg.predictedAtUtc)}</td>
+                                  <td className="small" title={`Token ${leg.instrumentToken}`}>
+                                    {sym}
+                                  </td>
+                                  <td>{leg.direction}</td>
+                                  <td className="text-end">{leg.confidence}%</td>
+                                  <td
+                                    className={
+                                      leg.outcome === 'correct'
+                                        ? 'text-success'
+                                        : leg.outcome === 'wrong'
+                                          ? 'text-danger'
+                                          : 'text-muted'
+                                    }
+                                  >
+                                    {leg.outcome}
+                                  </td>
+                                  <td className="small text-wrap" style={{ maxWidth: '10rem' }}>
+                                    <span
+                                      className={
+                                        leg.status === 'allocated'
+                                          ? 'text-success'
+                                          : leg.status === 'pending'
+                                            ? 'text-warning'
+                                            : 'text-secondary'
+                                      }
+                                    >
+                                      {formatDemoAutoTradeLegStatus(leg.status)}
+                                    </span>
+                                    {leg.statusDetail ? (
+                                      <span className="d-block text-muted" style={{ fontSize: '0.68rem' }}>
+                                        {leg.statusDetail}
+                                      </span>
+                                    ) : null}
+                                  </td>
+                                  <td className="text-end">
+                                    {leg.allocatedNotionalInr > 0 ? formatInrRupee(leg.allocatedNotionalInr) : '—'}
+                                  </td>
+                                  <td className="text-end">
+                                    {leg.status === 'allocated' ? formatInrRupee(leg.legGrossPnlInr) : '—'}
+                                  </td>
+                                  <td className="text-end">
+                                    {leg.status === 'allocated' ? formatInrRupee(leg.legFeesInr) : '—'}
+                                  </td>
+                                  <td
+                                    className={`text-end fw-semibold ${
+                                      leg.legNetPnlInr > 0
+                                        ? 'text-success'
+                                        : leg.legNetPnlInr < 0
+                                          ? 'text-danger'
+                                          : ''
+                                    }`}
+                                  >
+                                    {leg.status === 'allocated' ? formatInrRupee(leg.legNetPnlInr) : '—'}
+                                  </td>
+                                  <td
+                                    className="small text-truncate"
+                                    style={{ maxWidth: '7rem' }}
+                                    title={leg.engineModelId}
+                                  >
+                                    {leg.engineModelId}
+                                  </td>
+                                </tr>
+                              )
+                            })
+                          )}
+                        </tbody>
+                      </Table>
+                    </div>
+                    {demoTodayLegs?.mayBeTruncated ? (
+                      <p className="text-warning small mb-0 mt-2" style={{ fontSize: '0.72rem' }}>
+                        Automation fetch hit row cap; legs may omit older signals for this day.
+                      </p>
+                    ) : null}
+                  </div>
+                  {demoEodError ? (
+                    <Alert variant="warning" className="py-2 small mt-3 mb-0">
+                      {demoEodError}
+                    </Alert>
+                  ) : null}
+                  {demoEodSummary ? (
+                    <div className="mt-3 pt-3 border-top border-secondary-subtle">
+                      <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-3">
+                        End-of-day outcome (hypothetical)
+                      </h6>
+                      <Row className="g-2 small">
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Report day
+                        </Col>
+                        <Col xs={6} sm={8} className="font-monospace">
+                          {demoEodSummary.reportDateIst}{' '}
+                          <span className="text-muted">({demoEodSummary.reportTimeZoneId})</span>
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Demo notional
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {formatInrRupee(demoEodSummary.demoNotionalInr)}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Preset
+                        </Col>
+                        <Col xs={6} sm={8}>{demoEodSummary.demoAutoTradeStrategyTitle}</Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Locked instruments (demo)
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.demoAutoTradeLockedInstrumentCount ?? 0}
+                          {(demoEodSummary.demoAutoTradeLockedInstrumentCount ?? 0) === 0 ? (
+                            <span className="text-warning ms-1 small">
+                              No locks — server uses zero automation rows for this demo.
+                            </span>
+                          ) : null}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Signals (day)
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.totalSignals}
+                          {demoEodSummary.mayBeTruncated ? (
+                            <span className="text-warning ms-1" title="Loaded row cap reached; counts may be incomplete.">
+                              (may be truncated)
+                            </span>
+                          ) : null}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Pending / directional (priced)
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.pendingSignals} / {demoEodSummary.directionalTradeableLegs}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Allocated legs
+                        </Col>
+                        <Col xs={6} sm={8}>{demoEodSummary.allocatedLegsForPnl}</Col>
+                        {demoEodSummary.skippedLowConfidenceLegs > 0 ? (
+                          <>
+                            <Col xs={6} sm={4} className="text-secondary">
+                              Below confidence cutoff
+                            </Col>
+                            <Col xs={6} sm={8}>{demoEodSummary.skippedLowConfidenceLegs}</Col>
+                          </>
+                        ) : null}
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Correct / wrong
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.correctOutcomes} / {demoEodSummary.wrongOutcomes}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Fee model (host)
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.demoAutoTradeChargesEnabled ? (
+                            <span>
+                              On — {formatInrRupee(demoEodSummary.demoAutoTradeRoundTripFlatInrPerLeg)} / leg +{' '}
+                              {demoEodSummary.demoAutoTradeRoundTripTurnoverBps} bps turnover
+                            </span>
+                          ) : (
+                            <span className="text-muted">Off (gross = net)</span>
+                          )}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Gross P&amp;L
+                        </Col>
+                        <Col xs={6} sm={8}>{formatInrRupee(demoEodSummary.hypotheticalGrossPnlInr)}</Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Est. charges
+                        </Col>
+                        <Col xs={6} sm={8}>{formatInrRupee(demoEodSummary.hypotheticalChargesInr)}</Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Net P&amp;L (after fees)
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          <span
+                            className={
+                              demoEodSummary.hypotheticalTotalPnlInr > 0
+                                ? 'text-success fw-semibold'
+                                : demoEodSummary.hypotheticalTotalPnlInr < 0
+                                  ? 'text-danger fw-semibold'
+                                  : 'text-body-secondary'
+                            }
+                          >
+                            {formatInrRupee(demoEodSummary.hypotheticalTotalPnlInr)}
+                          </span>
+                        </Col>
+                      </Row>
+                      <p className="text-muted mb-0 mt-2" style={{ fontSize: '0.72rem' }}>
+                        {demoEodSummary.pnlAllocationNote}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-4 pt-3 border-top border-secondary-subtle">
+                    <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-2">
+                      Full demo auto-trade report
+                    </h6>
+                    <p className="small text-secondary mb-2">
+                      Per-day hypothetical P&amp;L (same rules as EOD), totals, direction mix, and outcomes by engine /
+                      interval — <strong>locked instruments only</strong>. Default window is the last <strong>7</strong> calendar days in the server report timezone;
+                      or reuse <strong>From / To</strong> from <em>Merged log range &amp; email</em> above.
+                    </p>
+                    <div className="d-flex flex-wrap gap-2 mb-2">
+                      <Button
+                        type="button"
+                        variant="outline-primary"
+                        size="sm"
+                        disabled={demoFullReportLoading || !isZerodha}
+                        onClick={() => void loadDemoFullReport('seven')}
+                      >
+                        {demoFullReportLoading ? 'Loading…' : 'Load (last 7 days)'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline-primary"
+                        size="sm"
+                        disabled={demoFullReportLoading || !isZerodha}
+                        onClick={() => void loadDemoFullReport('merged')}
+                      >
+                        {demoFullReportLoading ? 'Loading…' : 'Load (merged log range)'}
+                      </Button>
+                      {demoFullReport ? (
+                        <Button
+                          type="button"
+                          variant="outline-secondary"
+                          size="sm"
+                          disabled={!demoFullReport}
+                          onClick={() => {
+                            const blob = new Blob([JSON.stringify(demoFullReport, null, 2)], {
+                              type: 'application/json',
+                            })
+                            const a = document.createElement('a')
+                            a.href = URL.createObjectURL(blob)
+                            a.download = `demo-auto-trade-full-report-${demoFullReport.generatedAtUtc.slice(0, 19).replace(/[:T]/g, '-')}.json`
+                            a.click()
+                            URL.revokeObjectURL(a.href)
+                          }}
+                        >
+                          Download JSON
+                        </Button>
+                      ) : null}
+                    </div>
+                    {demoFullReportError ? (
+                      <Alert variant="warning" className="py-2 small mb-2">
+                        {demoFullReportError}
+                      </Alert>
+                    ) : null}
+                    {demoFullReport ? (
+                      <div className="small">
+                        <p className="text-muted mb-2" style={{ fontSize: '0.72rem' }}>
+                          {demoFullReport.disclaimer}{' '}
+                          {demoFullReport.mayBeTruncated ? (
+                            <span className="text-warning">Row cap reached; counts may be incomplete.</span>
+                          ) : null}
+                        </p>
+                        <Row className="g-2 mb-2">
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Range
+                          </Col>
+                          <Col xs={6} sm={8} className="font-monospace">
+                            {demoFullReport.reportRangeSummary}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Generated (UTC)
+                          </Col>
+                          <Col xs={6} sm={8} className="font-monospace">
+                            {demoFullReport.generatedAtUtc}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Demo / automation flags
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            demo {demoFullReport.demoAutoTradeEnabled ? 'on' : 'off'} · favorites ML{' '}
+                            {demoFullReport.favoriteMlAutomationEnabled ? 'on' : 'off'}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Locked instruments (demo)
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.demoAutoTradeLockedInstrumentCount ?? 0}
+                            {(demoFullReport.demoAutoTradeLockedInstrumentCount ?? 0) === 0 ? (
+                              <span className="text-warning ms-1 small">No locks in scope for demo math.</span>
+                            ) : null}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Preset / notional per day
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.demoAutoTradeStrategyTitle} ·{' '}
+                            {formatInrRupee(demoFullReport.demoNotionalInrPerDay)}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Fee model (host)
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.demoAutoTradeChargesEnabled ? (
+                              <span>
+                                On — {formatInrRupee(demoFullReport.demoAutoTradeRoundTripFlatInrPerLeg)} / leg +{' '}
+                                {demoFullReport.demoAutoTradeRoundTripTurnoverBps} bps
+                              </span>
+                            ) : (
+                              <span className="text-muted">Off</span>
+                            )}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Signals (range)
+                          </Col>
+                          <Col xs={6} sm={8}>{demoFullReport.totalSignalsInRange}</Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Pending / correct / wrong
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.pendingSignalsInRange} / {demoFullReport.correctOutcomesInRange} /{' '}
+                            {demoFullReport.wrongOutcomesInRange}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Direction up / down / neutral
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.directionCountUp} / {demoFullReport.directionCountDown} /{' '}
+                            {demoFullReport.directionCountNeutral}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
+                            Σ gross / charges / net
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {formatInrRupee(demoFullReport.hypotheticalGrossPnlInrSummedDays)} /{' '}
+                            {formatInrRupee(demoFullReport.hypotheticalChargesInrSummedDays)} /{' '}
+                            <span
+                              className={
+                                demoFullReport.hypotheticalTotalPnlInrSummedDays > 0
+                                  ? 'text-success fw-semibold'
+                                  : demoFullReport.hypotheticalTotalPnlInrSummedDays < 0
+                                    ? 'text-danger fw-semibold'
+                                    : 'text-body-secondary'
+                              }
+                            >
+                              {formatInrRupee(demoFullReport.hypotheticalTotalPnlInrSummedDays)}
+                            </span>
+                            <span className="text-muted ms-1">
+                              ({demoFullReport.directionalTradeableLegsInRange} directional leg-days)
+                            </span>
+                          </Col>
+                        </Row>
+                        {demoFullReport.dailySummaries.length > 0 ? (
+                          <>
+                            <div className="fw-semibold text-secondary mb-1 mt-2">Per calendar day</div>
+                            <div className="table-responsive border border-secondary-subtle rounded mb-3">
+                              <Table size="sm" striped bordered hover className="mb-0 small">
+                                <thead>
+                                  <tr>
+                                    <th>Date</th>
+                                    <th className="text-end">Signals</th>
+                                    <th className="text-end">Gross</th>
+                                    <th className="text-end">Fees</th>
+                                    <th className="text-end">Net</th>
+                                    <th className="text-end">Dir. legs</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {demoFullReport.dailySummaries.map((d) => (
+                                    <tr key={d.reportDate}>
+                                      <td className="font-monospace">{d.reportDate}</td>
+                                      <td className="text-end">{d.totalSignals}</td>
+                                      <td className="text-end">{formatInrRupee(d.hypotheticalGrossPnlInr)}</td>
+                                      <td className="text-end">{formatInrRupee(d.hypotheticalChargesInr)}</td>
+                                      <td
+                                        className={`text-end fw-semibold ${
+                                          d.hypotheticalTotalPnlInr > 0
+                                            ? 'text-success'
+                                            : d.hypotheticalTotalPnlInr < 0
+                                              ? 'text-danger'
+                                              : ''
+                                        }`}
+                                      >
+                                        {formatInrRupee(d.hypotheticalTotalPnlInr)}
+                                      </td>
+                                      <td className="text-end">{d.directionalTradeableLegs}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </Table>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-muted mb-2">No automation rows in this window.</p>
+                        )}
+                        {demoFullReport.outcomesByEngine.length > 0 ? (
+                          <>
+                            <div className="fw-semibold text-secondary mb-1">Outcomes by engine</div>
+                            <div className="table-responsive border border-secondary-subtle rounded mb-3">
+                              <Table size="sm" striped bordered hover className="mb-0 small">
+                                <thead>
+                                  <tr>
+                                    <th>Engine</th>
+                                    <th className="text-end">Total</th>
+                                    <th className="text-end">Pending</th>
+                                    <th className="text-end">Correct</th>
+                                    <th className="text-end">Wrong</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {demoFullReport.outcomesByEngine.map((r) => (
+                                    <tr key={r.key}>
+                                      <td className="font-monospace text-break">{r.key}</td>
+                                      <td className="text-end">{r.total}</td>
+                                      <td className="text-end">{r.pending}</td>
+                                      <td className="text-end">{r.correct}</td>
+                                      <td className="text-end">{r.wrong}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </Table>
+                            </div>
+                          </>
+                        ) : null}
+                        {demoFullReport.outcomesByInterval.length > 0 ? (
+                          <>
+                            <div className="fw-semibold text-secondary mb-1">Outcomes by interval</div>
+                            <div className="table-responsive border border-secondary-subtle rounded mb-0">
+                              <Table size="sm" striped bordered hover className="mb-0 small">
+                                <thead>
+                                  <tr>
+                                    <th>Interval</th>
+                                    <th className="text-end">Total</th>
+                                    <th className="text-end">Pending</th>
+                                    <th className="text-end">Correct</th>
+                                    <th className="text-end">Wrong</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {demoFullReport.outcomesByInterval.map((r) => (
+                                    <tr key={r.key}>
+                                      <td className="font-monospace">{r.key}</td>
+                                      <td className="text-end">{r.total}</td>
+                                      <td className="text-end">{r.pending}</td>
+                                      <td className="text-end">{r.correct}</td>
+                                      <td className="text-end">{r.wrong}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </Table>
+                            </div>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
             </div>
             ) : null}
 

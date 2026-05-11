@@ -365,6 +365,39 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             "e");
 
     [Fact]
+    public void ComputeWithLegRows_totals_match_Compute_and_allocated_leg_present()
+    {
+        var rows = new[]
+        {
+            new MlAutomationPredictionListItemDto(
+                Guid.Parse("00000000-0000-4000-8000-000000000041"),
+                DateTimeOffset.Parse("2026-05-11T10:00:00Z"),
+                "256265",
+                "NIFTY",
+                "NFO",
+                "5m",
+                DateTimeOffset.Parse("2026-05-11T09:30:00Z"),
+                100m,
+                "up",
+                72,
+                "correct",
+                DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+                101m,
+                "mlnet-sdca-logistic-v1"),
+        };
+        var fees = new DemoAutoTradeChargeParameters(true, 40m, 2m);
+        var a = DemoAutoTradeEodSummaryCalculator.Compute(rows, 10_000m, DemoAutoTradeStrategyIds.EqualSplit, fees);
+        var (b, legs) = DemoAutoTradeEodSummaryCalculator.ComputeWithLegRows(
+            rows,
+            10_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            fees);
+        Assert.Equal(a, b);
+        Assert.Single(legs);
+        Assert.Equal("allocated", legs[0].Status);
+    }
+
+    [Fact]
     public void GetLocalDayBoundsUtc_kolkata_midnight_spans_expected_utc_window()
     {
         var (from, to) = DemoAutoTradeEodSummaryCalculator.GetLocalDayBoundsUtc(

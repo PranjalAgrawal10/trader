@@ -85,6 +85,14 @@ public interface IPriceDirectionPredictionService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Per-row hypothetical demo legs for <paramref name="reportDateIst"/> (report TZ calendar day), same lock filter and allocation as EOD.
+    /// </summary>
+    Task<DemoAutoTradeTodayLegsDto> GetDemoAutoTradeTodayLegsAsync(
+        Guid userId,
+        DateOnly? reportDateIst,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Hypothetical demo auto-trade report over <c>[fromUtcInclusive, toUtcExclusive)</c> on <c>PredictedAtUtc</c>.
     /// When both bounds are null, uses the last 7 local calendar days in <c>FavoriteMlAutomation:ReportTimeZoneId</c> (through end of today).
     /// Max span 93 days when both are set.

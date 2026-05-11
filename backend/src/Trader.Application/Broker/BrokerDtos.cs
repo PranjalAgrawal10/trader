@@ -175,6 +175,46 @@ public sealed record DemoAutoTradeEodSummaryDto(
     decimal HypotheticalChargesInr,
     decimal HypotheticalTotalPnlInr,
     string PnlAllocationNote,
+    /// <summary>Distinct instruments in <see cref="KiteTradingLocksListDto"/> used to filter automation rows for this demo.</summary>
+    int DemoAutoTradeLockedInstrumentCount,
+    bool MayBeTruncated);
+
+/// <summary>One merged automation row scored for hypothetical demo auto-trade (same allocation rules as EOD).</summary>
+public sealed record DemoAutoTradeLegRowDto(
+    Guid PredictionId,
+    DateTimeOffset PredictedAtUtc,
+    string InstrumentToken,
+    string? Tradingsymbol,
+    string? Exchange,
+    string Interval,
+    string EngineModelId,
+    string Direction,
+    int Confidence,
+    string Outcome,
+    decimal RefClose,
+    decimal? NextClose,
+    /// <summary><c>allocated</c>, <c>pending</c>, or <c>excluded_*</c>.</summary>
+    string Status,
+    string? StatusDetail,
+    decimal AllocatedNotionalInr,
+    decimal LegGrossPnlInr,
+    decimal LegFeesInr,
+    decimal LegNetPnlInr);
+
+/// <summary>Live-refresh payload: per-row hypothetical demo legs for the report calendar day (trading-lock filter applied server-side).</summary>
+public sealed record DemoAutoTradeTodayLegsDto(
+    DateTimeOffset GeneratedAtUtc,
+    DateOnly ReportDate,
+    string ReportTimeZoneId,
+    bool DemoAutoTradeEnabled,
+    string DemoAutoTradeStrategy,
+    string DemoAutoTradeStrategyTitle,
+    decimal DemoNotionalInr,
+    int DemoAutoTradeLockedInstrumentCount,
+    bool DemoAutoTradeChargesEnabled,
+    decimal DemoAutoTradeRoundTripFlatInrPerLeg,
+    decimal DemoAutoTradeRoundTripTurnoverBps,
+    IReadOnlyList<DemoAutoTradeLegRowDto> Legs,
     bool MayBeTruncated);
 
 /// <summary>One calendar day in report TZ within <see cref="DemoAutoTradeFullReportDto"/>.</summary>
@@ -234,6 +274,8 @@ public sealed record DemoAutoTradeFullReportDto(
     IReadOnlyList<DemoAutoTradeFullReportSliceCountsDto> OutcomesByEngine,
     IReadOnlyList<DemoAutoTradeFullReportSliceCountsDto> OutcomesByInterval,
     string Disclaimer,
+    /// <summary>Distinct instruments in <see cref="KiteTradingLocksListDto"/> used to filter automation rows for this demo.</summary>
+    int DemoAutoTradeLockedInstrumentCount,
     bool MayBeTruncated);
 
 /// <summary>Background favorite-ML automation toggle and optional per-user candle interval / new-pass throttle.</summary>
