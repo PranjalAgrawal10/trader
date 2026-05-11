@@ -1823,7 +1823,7 @@ function MlAutomationOutcomesPieGrid({
           Charts minimised — use <strong>Expand pies</strong> to show outcome distribution per engine.
         </p>
       ) : null}
-      <Collapse in={piesExpanded}>
+      <Collapse in={piesExpanded} mountOnEnter unmountOnExit>
         <div
           id={outcomesPiesCollapseId}
           className="d-grid gap-3"
@@ -2084,7 +2084,7 @@ function MlAutomationDirectionVotePie({
             </span>
           </div>
         )}
-        <Collapse in={pieExpanded}>
+        <Collapse in={pieExpanded} mountOnEnter unmountOnExit>
           <div id={directionPieCollapseId}>
             <p className="small text-secondary mb-2 mt-2" style={{ maxWidth: '44rem' }}>
               Built from <strong>recent automation predictions</strong> currently shown in the table below (respects search,
@@ -2210,7 +2210,7 @@ function MlFullscreenAllModelsPies({
           Charts minimised — use <strong>Expand pies</strong> to show prediction outcomes per model.
         </p>
       ) : null}
-      <Collapse in={piesExpanded}>
+      <Collapse in={piesExpanded} mountOnEnter unmountOnExit>
         <div
           id={fullscreenPiesCollapseId}
           className="d-grid gap-4"
