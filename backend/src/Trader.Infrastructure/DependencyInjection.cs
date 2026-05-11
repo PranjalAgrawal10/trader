@@ -39,6 +39,7 @@ public static class DependencyInjection
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
         services.Configure<LiveCandlesOptions>(configuration.GetSection(LiveCandlesOptions.SectionName));
         services.Configure<FavoriteMlAutomationOptions>(configuration.GetSection(FavoriteMlAutomationOptions.SectionName));
+        services.Configure<DemoAutoTradeOptions>(configuration.GetSection(DemoAutoTradeOptions.SectionName));
         services.Configure<PriceDirectionPredictionOptions>(configuration.GetSection(PriceDirectionPredictionOptions.SectionName));
 
         services.AddSingleton<IKiteOAuthStateCodec, KiteOAuthStateCodec>();

@@ -28,6 +28,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     private readonly IKiteInstrumentsChartSettingsGateway _kiteChartSettings;
     private readonly IOptionsSnapshot<PriceDirectionPredictionOptions> _opts;
     private readonly IOptionsSnapshot<FavoriteMlAutomationOptions> _favoriteMlAutomationOpts;
+    private readonly IOptionsSnapshot<DemoAutoTradeOptions> _demoAutoTradeOpts;
 
     public PriceDirectionPredictionService(
         IBrokerService broker,
@@ -36,7 +37,8 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         IMlLightGbmTripleBarrierPredictionRepository lightGbmPredictions,
         IKiteInstrumentsChartSettingsGateway kiteChartSettings,
         IOptionsSnapshot<PriceDirectionPredictionOptions> opts,
-        IOptionsSnapshot<FavoriteMlAutomationOptions> favoriteMlAutomationOpts)
+        IOptionsSnapshot<FavoriteMlAutomationOptions> favoriteMlAutomationOpts,
+        IOptionsSnapshot<DemoAutoTradeOptions> demoAutoTradeOpts)
     {
         _broker = broker;
         _engines = engines;
@@ -45,6 +47,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         _kiteChartSettings = kiteChartSettings;
         _opts = opts;
         _favoriteMlAutomationOpts = favoriteMlAutomationOpts;
+        _demoAutoTradeOpts = demoAutoTradeOpts;
     }
 
     public async Task<PriceDirectionPredictionEnvelope> PredictForInstrumentAsync(
@@ -625,9 +628,14 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtc).ToList();
         var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
-        var totals = DemoAutoTradeEodSummaryCalculator.Compute(inWindow, notional, normStrategy);
+        var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(inWindow, notional, normStrategy, chargeParams);
         var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
         var note = DemoAutoTradeEodSummaryCalculator.BuildAllocationNote(normStrategy, totals);
+        var ch = _demoAutoTradeOpts.Value.Charges;
+        var chargesEnabled = ch.Enabled;
+        var flatInr = chargesEnabled ? Math.Max(0m, ch.RoundTripFlatInrPerLeg) : 0m;
+        var turnoverBps = chargesEnabled ? Math.Max(0m, ch.RoundTripTurnoverBps) : 0m;
 
         return new DemoAutoTradeEodSummaryDto(
             date,
@@ -644,6 +652,11 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             totals.DirectionalTradeableLegs,
             totals.AllocatedLegsForPnl,
             totals.SkippedLowConfidenceLegs,
+            chargesEnabled,
+            flatInr,
+            turnoverBps,
+            totals.HypotheticalGrossPnlInr,
+            totals.HypotheticalChargesInr,
             totals.HypotheticalTotalPnlInr,
             note,
             rows.Count >= MaxAutomationHistoryTake);
@@ -707,6 +720,11 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
+        var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
+        var ch = _demoAutoTradeOpts.Value.Charges;
+        var chargesEnabled = ch.Enabled;
+        var flatInr = chargesEnabled ? Math.Max(0m, ch.RoundTripFlatInrPerLeg) : 0m;
+        var turnoverBps = chargesEnabled ? Math.Max(0m, ch.RoundTripTurnoverBps) : 0m;
 
         var dailySummaries = inWindow
             .GroupBy(r => DemoAutoTradeEodSummaryCalculator.GetLocalDateOnly(r.PredictedAt, tzId))
@@ -714,7 +732,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             .Select(g =>
             {
                 var list = g.ToList();
-                var t = DemoAutoTradeEodSummaryCalculator.Compute(list, notional, normStrategy);
+                var t = DemoAutoTradeEodSummaryCalculator.Compute(list, notional, normStrategy, chargeParams);
                 var note = DemoAutoTradeEodSummaryCalculator.BuildAllocationNote(normStrategy, t);
                 return new DemoAutoTradeFullReportDailyDto(
                     g.Key,
@@ -726,11 +744,15 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
                     t.DirectionalTradeableLegs,
                     t.AllocatedLegsForPnl,
                     t.SkippedLowConfidenceLegs,
+                    t.HypotheticalGrossPnlInr,
+                    t.HypotheticalChargesInr,
                     t.HypotheticalTotalPnlInr,
                     note);
             })
             .ToList();
 
+        var sumDailyGross = dailySummaries.Sum(d => d.HypotheticalGrossPnlInr);
+        var sumDailyCharges = dailySummaries.Sum(d => d.HypotheticalChargesInr);
         var sumDailyPnl = dailySummaries.Sum(d => d.HypotheticalTotalPnlInr);
         var sumDirLegs = dailySummaries.Sum(d => d.DirectionalTradeableLegs);
 
@@ -808,9 +830,12 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var endLocal = DemoAutoTradeEodSummaryCalculator.GetLocalDateOnly(toUtcExcl.AddTicks(-1), tzId);
         var rangeSummary = $"{startLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} → {endLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({tzId})";
 
-        const string disclaimer =
+        var disclaimer =
             "Hypothetical demo only: each calendar day applies the full demo notional to that day's automation signals under your saved allocation preset. " +
-            "No brokerage, slippage, leverage, or live orders. Not financial advice.";
+            (chargesEnabled
+                ? "Approximate F&O-style round-trip fees (flat per allocated leg + turnover bps from host DemoAutoTrade:Charges) are deducted from gross P&L. "
+                : "Fees are off (DemoAutoTrade:Charges:Enabled = false); gross equals net. ") +
+            "Slippage, leverage, margin, STT/contract specifics, and live orders are not modelled. Not financial advice.";
 
         return new DemoAutoTradeFullReportDto(
             GeneratedAtUtc: DateTimeOffset.UtcNow,
@@ -823,12 +848,17 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             DemoAutoTradeStrategy: stratMeta.Code,
             DemoAutoTradeStrategyTitle: stratMeta.Title,
             DemoNotionalInrPerDay: notional,
+            chargesEnabled,
+            flatInr,
+            turnoverBps,
             DailySummaries: dailySummaries,
             TotalSignalsInRange: inWindow.Count,
             PendingSignalsInRange: pending,
             CorrectOutcomesInRange: correct,
             WrongOutcomesInRange: wrong,
             DirectionalTradeableLegsInRange: sumDirLegs,
+            HypotheticalGrossPnlInrSummedDays: decimal.Round(sumDailyGross, 2, MidpointRounding.AwayFromZero),
+            HypotheticalChargesInrSummedDays: decimal.Round(sumDailyCharges, 2, MidpointRounding.AwayFromZero),
             HypotheticalTotalPnlInrSummedDays: decimal.Round(sumDailyPnl, 2, MidpointRounding.AwayFromZero),
             DirectionCountUp: up,
             DirectionCountDown: down,

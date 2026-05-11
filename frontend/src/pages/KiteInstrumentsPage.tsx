@@ -191,6 +191,11 @@ interface DemoAutoTradeEodSummaryDto {
   directionalTradeableLegs: number
   allocatedLegsForPnl: number
   skippedLowConfidenceLegs: number
+  demoAutoTradeChargesEnabled: boolean
+  demoAutoTradeRoundTripFlatInrPerLeg: number
+  demoAutoTradeRoundTripTurnoverBps: number
+  hypotheticalGrossPnlInr: number
+  hypotheticalChargesInr: number
   hypotheticalTotalPnlInr: number
   pnlAllocationNote: string
   mayBeTruncated: boolean
@@ -207,6 +212,8 @@ interface DemoAutoTradeFullReportDailyDto {
   directionalTradeableLegs: number
   allocatedLegsForPnl: number
   skippedLowConfidenceLegs: number
+  hypotheticalGrossPnlInr: number
+  hypotheticalChargesInr: number
   hypotheticalTotalPnlInr: number
   pnlAllocationNote: string
 }
@@ -230,12 +237,17 @@ interface DemoAutoTradeFullReportDto {
   demoAutoTradeStrategy: string
   demoAutoTradeStrategyTitle: string
   demoNotionalInrPerDay: number
+  demoAutoTradeChargesEnabled: boolean
+  demoAutoTradeRoundTripFlatInrPerLeg: number
+  demoAutoTradeRoundTripTurnoverBps: number
   dailySummaries: DemoAutoTradeFullReportDailyDto[]
   totalSignalsInRange: number
   pendingSignalsInRange: number
   correctOutcomesInRange: number
   wrongOutcomesInRange: number
   directionalTradeableLegsInRange: number
+  hypotheticalGrossPnlInrSummedDays: number
+  hypotheticalChargesInrSummedDays: number
   hypotheticalTotalPnlInrSummedDays: number
   directionCountUp: number
   directionCountDown: number
@@ -4980,8 +4992,9 @@ export function KiteInstrumentsPage() {
                             Enable demo auto-trade
                             <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
                               Marks intent only. Fixed demo size{' '}
-                              <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> — hypothetical same-day P&amp;L
-                              from your automation log only; pick an allocation preset below.
+                              <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> — hypothetical same-day gross
+                              and net P&amp;L from your automation log (host <span className="font-monospace">DemoAutoTrade:Charges</span>{' '}
+                              applies flat + turnover fees when enabled); pick an allocation preset below.
                             </span>
                           </span>
                         }
@@ -5094,7 +5107,28 @@ export function KiteInstrumentsPage() {
                           {demoEodSummary.correctOutcomes} / {demoEodSummary.wrongOutcomes}
                         </Col>
                         <Col xs={6} sm={4} className="text-secondary">
-                          Hypothetical P&amp;L
+                          Fee model (host)
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.demoAutoTradeChargesEnabled ? (
+                            <span>
+                              On — {formatInrRupee(demoEodSummary.demoAutoTradeRoundTripFlatInrPerLeg)} / leg +{' '}
+                              {demoEodSummary.demoAutoTradeRoundTripTurnoverBps} bps turnover
+                            </span>
+                          ) : (
+                            <span className="text-muted">Off (gross = net)</span>
+                          )}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Gross P&amp;L
+                        </Col>
+                        <Col xs={6} sm={8}>{formatInrRupee(demoEodSummary.hypotheticalGrossPnlInr)}</Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Est. charges
+                        </Col>
+                        <Col xs={6} sm={8}>{formatInrRupee(demoEodSummary.hypotheticalChargesInr)}</Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Net P&amp;L (after fees)
                         </Col>
                         <Col xs={6} sm={8}>
                           <span
@@ -5206,6 +5240,19 @@ export function KiteInstrumentsPage() {
                             {formatInrRupee(demoFullReport.demoNotionalInrPerDay)}
                           </Col>
                           <Col xs={6} sm={4} className="text-secondary">
+                            Fee model (host)
+                          </Col>
+                          <Col xs={6} sm={8}>
+                            {demoFullReport.demoAutoTradeChargesEnabled ? (
+                              <span>
+                                On — {formatInrRupee(demoFullReport.demoAutoTradeRoundTripFlatInrPerLeg)} / leg +{' '}
+                                {demoFullReport.demoAutoTradeRoundTripTurnoverBps} bps
+                              </span>
+                            ) : (
+                              <span className="text-muted">Off</span>
+                            )}
+                          </Col>
+                          <Col xs={6} sm={4} className="text-secondary">
                             Signals (range)
                           </Col>
                           <Col xs={6} sm={8}>{demoFullReport.totalSignalsInRange}</Col>
@@ -5224,9 +5271,11 @@ export function KiteInstrumentsPage() {
                             {demoFullReport.directionCountNeutral}
                           </Col>
                           <Col xs={6} sm={4} className="text-secondary">
-                            Σ daily hypothetical P&amp;L
+                            Σ gross / charges / net
                           </Col>
                           <Col xs={6} sm={8}>
+                            {formatInrRupee(demoFullReport.hypotheticalGrossPnlInrSummedDays)} /{' '}
+                            {formatInrRupee(demoFullReport.hypotheticalChargesInrSummedDays)} /{' '}
                             <span
                               className={
                                 demoFullReport.hypotheticalTotalPnlInrSummedDays > 0
@@ -5239,7 +5288,7 @@ export function KiteInstrumentsPage() {
                               {formatInrRupee(demoFullReport.hypotheticalTotalPnlInrSummedDays)}
                             </span>
                             <span className="text-muted ms-1">
-                              (sum of per-day legs; {demoFullReport.directionalTradeableLegsInRange} directional leg-days)
+                              ({demoFullReport.directionalTradeableLegsInRange} directional leg-days)
                             </span>
                           </Col>
                         </Row>
@@ -5252,7 +5301,9 @@ export function KiteInstrumentsPage() {
                                   <tr>
                                     <th>Date</th>
                                     <th className="text-end">Signals</th>
-                                    <th className="text-end">P&amp;L</th>
+                                    <th className="text-end">Gross</th>
+                                    <th className="text-end">Fees</th>
+                                    <th className="text-end">Net</th>
                                     <th className="text-end">Dir. legs</th>
                                   </tr>
                                 </thead>
@@ -5261,6 +5312,8 @@ export function KiteInstrumentsPage() {
                                     <tr key={d.reportDate}>
                                       <td className="font-monospace">{d.reportDate}</td>
                                       <td className="text-end">{d.totalSignals}</td>
+                                      <td className="text-end">{formatInrRupee(d.hypotheticalGrossPnlInr)}</td>
+                                      <td className="text-end">{formatInrRupee(d.hypotheticalChargesInr)}</td>
                                       <td
                                         className={`text-end fw-semibold ${
                                           d.hypotheticalTotalPnlInr > 0

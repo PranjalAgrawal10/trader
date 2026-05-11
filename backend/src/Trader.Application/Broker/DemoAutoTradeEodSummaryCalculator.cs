@@ -51,13 +51,21 @@ public static class DemoAutoTradeEodSummaryCalculator
         if (totals.SkippedLowConfidenceLegs > 0)
             legNote += $" {totals.SkippedLowConfidenceLegs} leg(s) below the confidence cutoff were excluded.";
         legNote += " " + explain;
+        if (totals.HypotheticalChargesInr > 0m)
+        {
+            legNote +=
+                $" Approximate round-trip fees applied: {totals.HypotheticalChargesInr:0.##} INR " +
+                $"(gross {totals.HypotheticalGrossPnlInr:0.##} → net {totals.HypotheticalTotalPnlInr:0.##}).";
+        }
+
         return baseNote + legNote;
     }
 
     public static DemoAutoTradeEodTotals Compute(
         IReadOnlyList<MlAutomationPredictionListItemDto> rows,
         decimal totalNotionalInr,
-        string? strategyCode)
+        string? strategyCode,
+        DemoAutoTradeChargeParameters? charges = null)
     {
         var strategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(strategyCode);
         var totalSignals = rows.Count;
@@ -174,7 +182,12 @@ public static class DemoAutoTradeEodSummaryCalculator
             allocations = legList.ToDictionary(r => r.Id, _ => legAmt);
         }
 
-        decimal totalPnl = 0m;
+        var applyCharges = charges is { ApplyRoundTripCosts: true };
+        var flatPerLeg = charges?.RoundTripFlatInrPerLeg ?? 0m;
+        var turnoverBps = charges?.RoundTripTurnoverBps ?? 0m;
+
+        decimal grossPnl = 0m;
+        decimal feesInr = 0m;
         foreach (var r in directionalTradeable)
         {
             if (!allocations.TryGetValue(r.Id, out var notionalAllocated) || notionalAllocated <= 0m)
@@ -185,9 +198,12 @@ public static class DemoAutoTradeEodSummaryCalculator
             if (ret is null)
                 continue;
 
-            totalPnl += notionalAllocated * ret.Value;
+            grossPnl += notionalAllocated * ret.Value;
+            if (applyCharges)
+                feesInr += flatPerLeg + Math.Abs(notionalAllocated) * (turnoverBps / 10000m);
         }
 
+        var netPnl = grossPnl - feesInr;
         var allocatedCount = allocations.Values.Count(v => v > 0m);
 
         return new DemoAutoTradeEodTotals(
@@ -199,7 +215,9 @@ public static class DemoAutoTradeEodSummaryCalculator
             DirectionalTradeableLegs: directionalTradeable.Count,
             AllocatedLegsForPnl: allocatedCount,
             SkippedLowConfidenceLegs: skippedLowConfidence,
-            HypotheticalTotalPnlInr: decimal.Round(totalPnl, 2, MidpointRounding.AwayFromZero));
+            HypotheticalGrossPnlInr: decimal.Round(grossPnl, 2, MidpointRounding.AwayFromZero),
+            HypotheticalChargesInr: decimal.Round(feesInr, 2, MidpointRounding.AwayFromZero),
+            HypotheticalTotalPnlInr: decimal.Round(netPnl, 2, MidpointRounding.AwayFromZero));
     }
 
     private static Dictionary<Guid, decimal> ConfidenceWeightedAllocation(
@@ -337,4 +355,9 @@ public sealed record DemoAutoTradeEodTotals(
     /// <summary>Rows that receive a positive hypothetical notional under the chosen strategy.</summary>
     int AllocatedLegsForPnl,
     int SkippedLowConfidenceLegs,
+    /// <summary>Hypothetical P&amp;L before host-configured round-trip fees.</summary>
+    decimal HypotheticalGrossPnlInr,
+    /// <summary>Sum of flat + turnover-based fees per allocated leg (INR).</summary>
+    decimal HypotheticalChargesInr,
+    /// <summary>Hypothetical P&amp;L after fees (gross − charges).</summary>
     decimal HypotheticalTotalPnlInr);

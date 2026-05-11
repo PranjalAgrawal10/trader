@@ -6,6 +6,37 @@ namespace Trader.Tests;
 public sealed class DemoAutoTradeEodSummaryCalculatorTests
 {
     [Fact]
+    public void Charges_flat_and_turnover_bps_reduce_net_on_allocated_leg()
+    {
+        var row = new MlAutomationPredictionListItemDto(
+            Guid.Parse("00000000-0000-4000-8000-000000000071"),
+            DateTimeOffset.Parse("2026-05-11T10:00:00Z"),
+            "256265",
+            "NIFTY",
+            "NFO",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T09:30:00Z"),
+            100m,
+            "up",
+            72,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            101m,
+            "mlnet-sdca-logistic-v1");
+
+        var fees = new DemoAutoTradeChargeParameters(true, 40m, 2m);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { row },
+            10_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            fees);
+
+        Assert.Equal(100m, totals.HypotheticalGrossPnlInr);
+        Assert.Equal(42m, totals.HypotheticalChargesInr); // 40 + 10000 * 2 / 10000
+        Assert.Equal(58m, totals.HypotheticalTotalPnlInr);
+    }
+
+    [Fact]
     public void EqualSplit_single_up_correct_one_percent_gain_full_notional_leg()
     {
         var row = new MlAutomationPredictionListItemDto(
