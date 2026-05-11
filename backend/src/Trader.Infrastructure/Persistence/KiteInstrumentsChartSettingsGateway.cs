@@ -24,7 +24,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
                 u.FavoriteMlAutomationEnabled,
                 u.FavoriteMlAutomationInterval,
                 u.FavoriteMlAutomationPollIntervalSeconds,
-                u.KiteInstrumentsTrendAnalysisIntervalsJson))
+                u.KiteInstrumentsTrendAnalysisIntervalsJson,
+                u.FavoriteMlAutomationMinSecondsAfterBarOpen))
             .FirstOrDefaultAsync(ct);
 
     public async Task SaveAsync(Guid userId, KiteInstrumentsChartSettingsState settings, CancellationToken ct = default)
@@ -55,6 +56,7 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         bool enabled,
         string? favoriteMlAutomationInterval,
         int? favoriteMlAutomationPollIntervalSeconds,
+        int? favoriteMlAutomationMinSecondsAfterBarOpen,
         CancellationToken ct = default)
     {
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
@@ -62,6 +64,7 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         user.FavoriteMlAutomationEnabled = enabled;
         user.FavoriteMlAutomationInterval = favoriteMlAutomationInterval;
         user.FavoriteMlAutomationPollIntervalSeconds = favoriteMlAutomationPollIntervalSeconds;
+        user.FavoriteMlAutomationMinSecondsAfterBarOpen = favoriteMlAutomationMinSecondsAfterBarOpen;
         await _db.SaveChangesAsync(ct);
     }
 

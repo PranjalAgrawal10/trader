@@ -49,6 +49,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.FavoriteMlAutomationEnabled).HasDefaultValue(false);
             e.Property(x => x.FavoriteMlAutomationInterval).HasMaxLength(16);
             e.Property(x => x.FavoriteMlAutomationLastNewPassUtc).HasColumnType("datetime(6)");
+            e.Property(x => x.FavoriteMlAutomationMinSecondsAfterBarOpen);
             e.Property(x => x.TotpSecretProtected);
             e.Property(x => x.TotpPendingSecretProtected);
             e.Property(x => x.TotpRecoveryCodesProtected);

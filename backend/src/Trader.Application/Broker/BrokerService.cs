@@ -16,6 +16,7 @@ public sealed class BrokerService : IBrokerService
     private const int ChartZoomMaxBars = 500_000;
     private const int FavoriteMlThrottleMinMinutes = 1;
     private const int FavoriteMlThrottleMaxMinutes = 1440;
+    private const int FavoriteMlMinSecondsAfterBarOpenMax = 86_400;
     private static readonly JsonSerializerOptions ChartZoomJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -697,6 +698,7 @@ public sealed class BrokerService : IBrokerService
             row.FavoriteMlAutomationEnabled ?? false,
             row.FavoriteMlAutomationInterval,
             ThrottleSecondsToApiMinutes(row.FavoriteMlAutomationPollIntervalSeconds),
+            row.FavoriteMlAutomationMinSecondsAfterBarOpen,
             ParseTrendAnalysisIntervalsFromJson(row.TrendAnalysisIntervalsJson));
     }
 
@@ -893,8 +895,37 @@ public sealed class BrokerService : IBrokerService
                 pollToStore = m * 60;
         }
 
+        int? minAfterOpenToStore = row.FavoriteMlAutomationMinSecondsAfterBarOpen;
+        var minEl = body.MinSecondsAfterBarOpenForAutomation;
+        if (minEl.ValueKind != JsonValueKind.Undefined)
+        {
+            if (minEl.ValueKind == JsonValueKind.Null)
+                minAfterOpenToStore = null;
+            else if (minEl.ValueKind == JsonValueKind.Number && minEl.TryGetInt32(out var sec))
+            {
+                if (sec < 0 || sec > FavoriteMlMinSecondsAfterBarOpenMax)
+                {
+                    throw new InvalidOperationException(
+                        $"minSecondsAfterBarOpenForAutomation must be between 0 and {FavoriteMlMinSecondsAfterBarOpenMax} inclusive, or null to use the server default.");
+                }
+
+                minAfterOpenToStore = sec;
+            }
+            else
+            {
+                throw new InvalidOperationException(
+                    "minSecondsAfterBarOpenForAutomation must be a JSON number or null.");
+            }
+        }
+
         await _kiteChartSettings
-            .SaveFavoriteMlAutomationPreferencesAsync(userId, body.Enabled, intervalToStore, pollToStore, ct)
+            .SaveFavoriteMlAutomationPreferencesAsync(
+                userId,
+                body.Enabled,
+                intervalToStore,
+                pollToStore,
+                minAfterOpenToStore,
+                ct)
             .ConfigureAwait(false);
     }
 
@@ -989,23 +1020,7 @@ public sealed class BrokerService : IBrokerService
     }
 
     /// <summary>One chart bar length for the UI interval (used to extend Kite fetch for MA warmup).</summary>
-    private static TimeSpan ChartBarDuration(string code) =>
-        code switch
-        {
-            "1m" => TimeSpan.FromMinutes(1),
-            "2m" => TimeSpan.FromMinutes(2),
-            "3m" => TimeSpan.FromMinutes(3),
-            "4m" => TimeSpan.FromMinutes(4),
-            "5m" => TimeSpan.FromMinutes(5),
-            "10m" => TimeSpan.FromMinutes(10),
-            "15m" => TimeSpan.FromMinutes(15),
-            "30m" => TimeSpan.FromMinutes(30),
-            "1h" => TimeSpan.FromHours(1),
-            "4h" => TimeSpan.FromHours(4),
-            "1d" => TimeSpan.FromDays(1),
-            "1w" => TimeSpan.FromDays(7),
-            _ => TimeSpan.FromMinutes(5),
-        };
+    private static TimeSpan ChartBarDuration(string code) => ChartUiIntervals.BarDuration(code);
 
     private static TimeSpan DefaultChartLookback(string code) =>
         code switch

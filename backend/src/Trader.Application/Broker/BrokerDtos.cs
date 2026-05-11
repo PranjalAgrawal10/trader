@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Trader.Application.Broker;
 
 public sealed record BrokerStatusDto(bool Connected, DateTimeOffset? ConnectedAt, string? Provider);
@@ -127,6 +129,11 @@ public sealed record KiteInstrumentsChartSettingsDto(
     string? MlAutomationInterval = null,
     /// <summary>Minimum whole minutes after the previous new-prediction pass started; mirrors DB seconds / 60 (rounded up).</summary>
     int? MlAutomationPollIntervalMinutes = null,
+    /// <summary>
+    /// Per-user seconds after ref bar open before the first new automation row on that bar; <c>null</c> = use host{' '}
+    /// <c>FavoriteMlAutomation:MinSecondsAfterBarOpenForAutomation</c>.
+    /// </summary>
+    int? MlAutomationMinSecondsAfterBarOpen = null,
     /// <summary>Multi-interval trend checkboxes; omit on PUT to leave stored value unchanged.</summary>
     IReadOnlyList<string>? TrendAnalysisIntervals = null);
 
@@ -146,6 +153,13 @@ public sealed class FavoriteMlAutomationPutDto
     /// When absent, the stored value is left unchanged.
     /// </summary>
     public int? PollIntervalMinutes { get; set; }
+
+    /// <summary>
+    /// When the JSON property is omitted (JSON <c>undefined</c>), the stored per-user value is left unchanged.
+    /// When <c>null</c>, clears the per-user override (host <c>FavoriteMlAutomation:MinSecondsAfterBarOpenForAutomation</c> applies).
+    /// When a number, must be <c>0</c>–<c>86400</c> (seconds after bar open before new automation predictions on the current ref bar).
+    /// </summary>
+    public JsonElement MinSecondsAfterBarOpenForAutomation { get; set; }
 }
 
 /// <summary>Updates saved visible bar count for one instrument; <c>null</c> <see cref="VisibleBars"/> clears zoom for that token.</summary>

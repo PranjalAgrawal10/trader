@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -45,6 +46,31 @@ public static class ChartUiIntervals
             "1m" or "2m" or "3m" or "4m" or "5m" or "10m" or "15m" or "30m" or "1h" or "4h" or "1d" or "1w" => t,
             _ => throw new InvalidOperationException(
                 "Interval must be one of: 1m, 2m, 3m, 4m, 5m, 10m, 15m, 30m, 1h, 4h, 1d, 1w."),
+        };
+    }
+
+    /// <summary>
+    /// Wall-clock span from one bar open to the next for a normalized UI interval (matches Kite chart bucketing in{' '}
+    /// <see cref="BrokerService" />).
+    /// </summary>
+    public static TimeSpan BarDuration(string normalizedInterval)
+    {
+        var code = normalizedInterval.Trim().ToLowerInvariant();
+        return code switch
+        {
+            "1m" => TimeSpan.FromMinutes(1),
+            "2m" => TimeSpan.FromMinutes(2),
+            "3m" => TimeSpan.FromMinutes(3),
+            "4m" => TimeSpan.FromMinutes(4),
+            "5m" => TimeSpan.FromMinutes(5),
+            "10m" => TimeSpan.FromMinutes(10),
+            "15m" => TimeSpan.FromMinutes(15),
+            "30m" => TimeSpan.FromMinutes(30),
+            "1h" => TimeSpan.FromHours(1),
+            "4h" => TimeSpan.FromHours(4),
+            "1d" => TimeSpan.FromDays(1),
+            "1w" => TimeSpan.FromDays(7),
+            _ => TimeSpan.FromMinutes(5),
         };
     }
 }

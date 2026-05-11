@@ -28,6 +28,17 @@ public sealed class FavoriteMlAutomationOptions
     /// </summary>
     public string? PredictionIntervalOverride { get; set; } = "1m";
 
+    /// <summary>
+    /// When &gt; 0, a <strong>new</strong> automation prediction for the current reference bar (last candle from Kite,
+    /// usually still forming) is deferred until at least this many seconds have passed since that bar&apos;s open time
+    /// (Kite candle <c>Time</c> = bar open). This does <strong>not</strong> wait for the full bar
+    /// interval to finish — once the threshold is met, the next automation pass may persist a row (still at most one
+    /// pending row per ref bar per engine). Values larger than one bar length minus one second are clamped at runtime.
+    /// Default <c>0</c> = no intrabar delay (subject only to poll cadence and per-user throttle). Per-user{' '}
+    /// <c>Users.FavoriteMlAutomationMinSecondsAfterBarOpen</c> overrides this when set (SPA + <c>PUT …/favorite-ml-automation</c>).
+    /// </summary>
+    public int MinSecondsAfterBarOpenForAutomation { get; set; }
+
     /// <summary>IANA or Windows TZ id (e.g. <c>Asia/Kolkata</c>, <c>India Standard Time</c>).</summary>
     public string ReportTimeZoneId { get; set; } = "Asia/Kolkata";
 

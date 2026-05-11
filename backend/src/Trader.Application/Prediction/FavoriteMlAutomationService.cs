@@ -473,6 +473,16 @@ public sealed class FavoriteMlAutomationService
                     continue;
                 var last = hist.Candles[^1];
                 var token = fav.InstrumentToken.Trim();
+                var barLen = ChartUiIntervals.BarDuration(hist.Interval);
+                var minAfterOpen = user.FavoriteMlAutomationMinSecondsAfterBarOpen ?? _opts.MinSecondsAfterBarOpenForAutomation;
+                if (!FavoriteMlAutomationIntrabar.IsReadyForNewPredictionOnRefBar(
+                        DateTimeOffset.UtcNow,
+                        last.Time,
+                        barLen,
+                        minAfterOpen))
+                {
+                    continue;
+                }
 
                 foreach (var engineModelId in engineIds)
                 {

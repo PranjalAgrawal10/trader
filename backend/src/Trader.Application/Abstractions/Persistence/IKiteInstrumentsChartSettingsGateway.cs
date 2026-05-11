@@ -11,7 +11,8 @@ public sealed record KiteInstrumentsChartSettingsState(
     string? FavoriteMlAutomationInterval = null,
     int? FavoriteMlAutomationPollIntervalSeconds = null,
     /// <summary>JSON array string from DB on read; on save, non-null replaces <c>KiteInstrumentsTrendAnalysisIntervalsJson</c>.</summary>
-    string? TrendAnalysisIntervalsJson = null);
+    string? TrendAnalysisIntervalsJson = null,
+    int? FavoriteMlAutomationMinSecondsAfterBarOpen = null);
 
 public interface IKiteInstrumentsChartSettingsGateway
 {
@@ -21,12 +22,13 @@ public interface IKiteInstrumentsChartSettingsGateway
 
     Task SetFavoriteMlAutomationAsync(Guid userId, bool enabled, CancellationToken ct = default);
 
-    /// <summary>Updates favorite-ML automation toggle and optional per-user candle interval / new-pass throttle.</summary>
+    /// <summary>Updates favorite-ML automation toggle and optional per-user candle interval / new-pass throttle / intrabar delay.</summary>
     Task SaveFavoriteMlAutomationPreferencesAsync(
         Guid userId,
         bool enabled,
         string? favoriteMlAutomationInterval,
         int? favoriteMlAutomationPollIntervalSeconds,
+        int? favoriteMlAutomationMinSecondsAfterBarOpen,
         CancellationToken ct = default);
 
     /// <summary>Sets the user's last automated new-prediction pass instant (for per-user poll throttling).</summary>

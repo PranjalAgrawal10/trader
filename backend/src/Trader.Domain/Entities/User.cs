@@ -60,6 +60,12 @@ public class User
     /// <summary>UTC timestamp of the last automated new-prediction pass start (for per-user poll throttling).</summary>
     public DateTimeOffset? FavoriteMlAutomationLastNewPassUtc { get; set; }
 
+    /// <summary>
+    /// When set, defers new automation predictions on the current ref bar until at least this many seconds after bar open
+    /// (intrabar; does not wait for the candle to close). When null, <c>FavoriteMlAutomation:MinSecondsAfterBarOpenForAutomation</c> applies.
+    /// </summary>
+    public int? FavoriteMlAutomationMinSecondsAfterBarOpen { get; set; }
+
     /// <summary>Authenticator (TOTP) enabled for this account.</summary>
     public bool TwoFactorEnabled { get; set; }
 
