@@ -149,8 +149,8 @@ public sealed class FavoriteMlAutomationPutDto
     public string? Interval { get; set; }
 
     /// <summary>
-    /// When the JSON property is present: <c>0</c> clears the per-user throttle; <c>1</c>–<c>1440</c> sets minimum whole minutes after the previous new pass started.
-    /// When absent, the stored value is left unchanged.
+    /// <strong>N</strong> (run cadence): when the JSON property is present, <c>0</c> clears it; <c>1</c>–<c>1440</c> sets minimum whole minutes between <strong>new</strong> pass starts.
+    /// When set, passes are driven by this wall-clock spacing (no intrabar wait for the <strong>m</strong>-bar to close). When absent, the stored value is left unchanged.
     /// </summary>
     public int? PollIntervalMinutes { get; set; }
 

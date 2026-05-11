@@ -36,6 +36,7 @@ public sealed class FavoriteMlAutomationOptions
     /// pending row per ref bar per engine). Values larger than one bar length minus one second are clamped at runtime.
     /// Default <c>0</c> = no intrabar delay (subject only to poll cadence and per-user throttle). Per-user{' '}
     /// <c>Users.FavoriteMlAutomationMinSecondsAfterBarOpen</c> overrides this when set (SPA + <c>PUT …/favorite-ml-automation</c>).
+    /// When the user sets an <strong>N</strong>-minute cadence (<c>FavoriteMlAutomationPollIntervalSeconds</c> &gt; 0), the worker skips this gate entirely.
     /// </summary>
     public int MinSecondsAfterBarOpenForAutomation { get; set; }
 

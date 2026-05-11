@@ -12,6 +12,7 @@ import {
 } from 'react'
 import {
   Alert,
+  Badge,
   Button,
   ButtonGroup,
   Card,
@@ -158,9 +159,9 @@ interface KiteInstrumentsChartSettingsDto {
   zoomByInstrumentToken?: Record<string, number> | null
   intervalByInstrumentToken?: Record<string, string> | null
   mlAutomationEnabled?: boolean
-  /** Per-user automation candle interval; omit/null = inherit server override or chart. */
+  /** Per-user automation candle interval (m); omit/null = inherit server override or chart. */
   mlAutomationInterval?: string | null
-  /** Per-user min whole minutes after the previous new pass started; omit/null = no extra throttle. */
+  /** Per-user N: min whole minutes between new pass starts; omit/null = no extra cadence (intrabar delay may apply). */
   mlAutomationPollIntervalMinutes?: number | null
   /** Per-user seconds after ref bar open before new automation rows; null = use server FavoriteMlAutomation default. */
   mlAutomationMinSecondsAfterBarOpen?: number | null
@@ -2997,10 +2998,13 @@ function FavoriteTileAutomationMlPanel({
   }, [automationPriceModels])
 
   return (
-    <div className="mt-2 pt-2 border-top border-secondary-subtle">
-      <div className="small text-secondary text-uppercase mb-1" style={{ fontSize: '0.65rem' }}>
-        Auto ML predictions
+    <div className="mt-2 rounded-3 border border-secondary-subtle overflow-hidden shadow-sm">
+      <div className="px-2 py-1 border-bottom border-secondary-subtle bg-body-secondary">
+        <div className="small text-secondary text-uppercase mb-0" style={{ fontSize: '0.65rem' }}>
+          Auto ML predictions
+        </div>
       </div>
+      <div className="p-2 bg-body-tertiary bg-opacity-25">
       <p className="text-muted mb-2" style={{ fontSize: '0.62rem' }}>
         Same time range as the <strong>Auto predictions</strong> tab (adjust there to change this list).
       </p>
@@ -3058,6 +3062,7 @@ function FavoriteTileAutomationMlPanel({
           </Table>
         </div>
       )}
+      </div>
     </div>
   )
 }
@@ -4204,7 +4209,7 @@ export function KiteInstrumentsPage() {
           const n = parseInt(raw, 10)
           if (!Number.isFinite(n) || n < 1 || n > 1440) {
             setMlAutomationError(
-              'Min minutes after previous pass started: leave blank (inherit) or enter a whole number 1–1440.',
+              'Every N min: leave blank (inherit) or enter a whole number 1–1440.',
             )
             return
           }
@@ -4422,339 +4427,457 @@ export function KiteInstrumentsPage() {
             </Nav>
 
             {mainTab === 'automation' ? (
-            <div className="mt-3 p-3 rounded border border-secondary">
-              <div className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
-                <Form.Check
-                  type="switch"
-                  id="favorite-ml-automation-switch"
-                  className="small"
-                  label={<span className="fw-semibold">Auto ML for favorites (server)</span>}
-                  checked={favoriteMlAutomationEnabled}
-                  disabled={!chartPrefsHydrated || mlAutomationSaving}
-                  onChange={(e) => {
-                    const v = e.target.checked
-                    setFavoriteMlAutomationEnabled(v)
-                    setMlAutomationSaving(true)
-                    setMlAutomationError(null)
-                    void api
-                      .put('/broker/kite/instruments/favorite-ml-automation', { enabled: v })
-                      .then(() => {
-                        void loadChartSettings()
-                        void loadAutomationRecent()
-                      })
-                      .catch((err) => setMlAutomationError(problemDetail(err)))
-                      .finally(() => setMlAutomationSaving(false))
-                  }}
-                />
-                <div className="d-flex flex-wrap align-items-end gap-2 small">
-                  <Form.Group className="mb-0">
-                    <Form.Label column={false} className="small text-secondary mb-0">
-                      Auto ML bar interval
-                    </Form.Label>
-                    <Form.Select
-                      size="sm"
-                      className="font-monospace"
-                      style={{ width: 'auto', minWidth: '6.5rem' }}
-                      value={favoriteMlAutomationBarInterval}
-                      onChange={(e) => setFavoriteMlAutomationBarInterval(e.target.value)}
-                      disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
-                      aria-label="Candle interval for server auto ML on favorites"
-                    >
-                      <option value="">Inherit (server / chart)</option>
-                      {CHART_INTERVALS.map((iv) => (
-                        <option key={iv} value={iv}>
-                          {iv}
-                        </option>
-                      ))}
-                    </Form.Select>
-                  </Form.Group>
-                  <Form.Group className="mb-0">
-                    <Form.Label column={false} className="small text-secondary mb-0">
-                      Min minutes after previous pass started
-                    </Form.Label>
-                    <Form.Control
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      max={1440}
-                      step={1}
-                      size="sm"
-                      style={{ width: '5.5rem' }}
-                      placeholder="—"
-                      value={favoriteMlAutomationPollInput}
-                      onChange={(e) => {
-                        mlAutomationPollTouchedRef.current = true
-                        setFavoriteMlAutomationPollInput(e.target.value)
-                      }}
-                      disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
-                      aria-label="Minimum whole minutes after the previous automated new prediction pass started"
-                    />
-                  </Form.Group>
-                  <Form.Group className="mb-0">
-                    <Form.Label column={false} className="small text-secondary mb-0">
-                      Min sec after bar open
-                    </Form.Label>
-                    <Form.Control
-                      type="number"
-                      inputMode="numeric"
-                      min={0}
-                      max={86400}
-                      step={1}
-                      size="sm"
-                      style={{ width: '5.5rem' }}
-                      placeholder="—"
-                      value={favoriteMlAutomationMinSecAfterOpenInput}
-                      onChange={(e) => {
-                        mlAutomationMinSecAfterOpenTouchedRef.current = true
-                        setFavoriteMlAutomationMinSecAfterOpenInput(e.target.value)
-                      }}
-                      disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
-                      aria-label="Minimum seconds after the current candle open before new auto ML rows (intrabar; blank = server default)"
-                    />
-                  </Form.Group>
-                  <Button
-                    type="button"
-                    variant="outline-secondary"
-                    size="sm"
-                    className="align-self-end"
-                    disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
-                    title="Saves bar interval, throttle, and intrabar delay to your account (independent of the chart toolbar)."
-                    onClick={() => void saveFavoriteMlAutomationSchedule()}
-                  >
-                    {mlAutomationSaving ? 'Saving…' : 'Apply interval & timing'}
-                  </Button>
-                </div>
-                <div className="d-flex flex-wrap align-items-end gap-2 small">
-                  <Form.Group className="mb-0">
-                    <Form.Label column={false} className="small text-secondary mb-0">
-                      Report from (browser local)
-                    </Form.Label>
-                    <Form.Control
-                      type="datetime-local"
-                      step={60}
-                      size="sm"
-                      value={automationEmailReportRange.from}
-                      onChange={(e) =>
-                        setAutomationEmailReportRange((p) => ({ ...p, from: e.target.value }))
-                      }
-                      disabled={automationReportEmailSending || !isZerodha}
-                    />
-                  </Form.Group>
-                  <Form.Group className="mb-0">
-                    <Form.Label column={false} className="small text-secondary mb-0">
-                      Report to (exclusive end; browser local)
-                    </Form.Label>
-                    <Form.Control
-                      type="datetime-local"
-                      step={60}
-                      size="sm"
-                      value={automationEmailReportRange.to}
-                      onChange={(e) =>
-                        setAutomationEmailReportRange((p) => ({ ...p, to: e.target.value }))
-                      }
-                      disabled={automationReportEmailSending || !isZerodha}
-                    />
-                  </Form.Group>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="text-secondary py-0 align-self-center"
-                    disabled={automationReportEmailSending || !isZerodha}
-                    title="Restores defaults: local midnight today through the current minute."
-                    onClick={() => setAutomationEmailReportRange(initialAutomationEmailReportDatetimeLocal())}
-                  >
-                    Reset to today → now
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline-secondary"
-                    size="sm"
-                    className="align-self-end"
-                    disabled={automationRecentLoading || !isZerodha}
-                    onClick={() => {
-                      void loadAutomationRecent()
-                      void loadAutomationPriceModels()
-                    }}
-                  >
-                    {automationRecentLoading ? 'Loading…' : 'Refresh list'}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline-primary"
-                    size="sm"
-                    className="align-self-end"
-                    disabled={automationReportEmailSending || !isZerodha}
-                    title="Emails automation rows whose PredictedAt falls in [fromUtc, toUtcExclusive) for the date range to the left (sent as UTC). HTML body includes inline PNG outcome charts (cid-linked, combined + each engine); CSV attached. Requires SMTP and a saved profile email."
-                    onClick={() => {
-                      setAutomationReportEmailError(null)
-                      setAutomationReportEmailSuccess(null)
-                      const fromTrim = automationEmailReportRange.from.trim()
-                      const toTrim = automationEmailReportRange.to.trim()
-                      if (!fromTrim || !toTrim) {
-                        setAutomationReportEmailError('Pick both report start and end (browser-local date/time).')
-                        return
-                      }
-                      const fromMs = Date.parse(fromTrim)
-                      const toMs = Date.parse(toTrim)
-                      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
-                        setAutomationReportEmailError('Invalid date/time.')
-                        return
-                      }
-                      if (fromMs >= toMs) {
-                        setAutomationReportEmailError(
-                          'Start must be strictly before end. The API uses PredictedAt in [start, end exclusive).',
-                        )
-                        return
-                      }
-                      const maxSpanMs = 93 * 24 * 60 * 60 * 1000
-                      if (toMs - fromMs > maxSpanMs) {
-                        setAutomationReportEmailError('Range cannot exceed 93 days.')
-                        return
-                      }
-                      setAutomationReportEmailSending(true)
-                      void api
-                        .post<ManualAutomationEmailReportResponse>('/predictions/price-direction/automation-report-email', {
-                          fromUtc: new Date(fromMs).toISOString(),
-                          toUtcExclusive: new Date(toMs).toISOString(),
-                        })
-                        .then(({ data }) => {
-                          setAutomationReportEmailSuccess(
-                            `Email sent: ${data.rowCount} automation row${data.rowCount === 1 ? '' : 's'} (${data.reportRangeSummary}; ${data.pieChartsAttached} HTML chart section${data.pieChartsAttached === 1 ? '' : 's'} + CSV attachment).`,
-                          )
-                        })
-                        .catch((err) => setAutomationReportEmailError(problemDetail(err)))
-                        .finally(() => setAutomationReportEmailSending(false))
-                    }}
-                  >
-                    {automationReportEmailSending ? 'Sending…' : 'Email automation report'}
-                  </Button>
-                </div>
-              </div>
-              <p className="text-secondary small mb-2">
-                When enabled, the API runs scheduled next-bar predictions for each favorite using <strong>every</strong>{' '}
-                registered ML engine (comma-separated subset via server{' '}
-                <span className="font-monospace">FavoriteMlAutomation:PredictionModelId</span>); LightGBM rows are stored
-                separately. Requires Kite session; <strong className="text-body-secondary">FavoriteMlAutomation</strong>{' '}
-                must be on in server config.
-                Use <strong>Auto ML bar interval</strong> above, optional <strong>min minutes after previous new pass started</strong>,
-                and optional <strong>min sec after bar open</strong> (wait at least that many seconds into the current candle before the
-                first new row on that bar — intrabar; leave blank to use the server default). The list below requests up to{' '}
-                <strong>{ML_AUTOMATION_RECENT_FETCH_TAKE.toLocaleString()}</strong> merged rows (classic + LightGBM).
-                <span className="d-block mt-1 text-muted" style={{ fontSize: '0.72rem' }}>
-                  Server schedule (report timezone, default <strong>Asia/Kolkata</strong>): no <strong>new</strong> auto
-                  predictions from <strong>11:25 PM</strong> through <strong>8:00 AM</strong> daily, and all day on{' '}
-                  <strong>Saturday</strong> / <strong>Sunday</strong> (pending rows still resolve). Operators can change{' '}
-                  <span className="font-monospace">FavoriteMlAutomation:QuietHours*</span> and{' '}
-                  <span className="font-monospace">PauseAutomationOnWeekends</span>.
-                </span>
-              </p>
-              {mlAutomationError ? (
-                <Alert variant="warning" className="py-2 small mb-2">
-                  {mlAutomationError}
+            <div className="mt-3 d-flex flex-column gap-3">
+              {!isZerodha ? (
+                <Alert variant="secondary" className="py-2 small mb-0 border border-secondary-subtle shadow-sm">
+                  <span className="fw-semibold text-body">Kite session required.</span> Connect{' '}
+                  <strong>Zerodha</strong> to change automation, refresh the merged log, and send report emails.
                 </Alert>
               ) : null}
-              {automationReportEmailSuccess ? (
-                <Alert
-                  variant="success"
-                  className="py-2 small mb-2"
-                  dismissible
-                  onClose={() => setAutomationReportEmailSuccess(null)}
-                >
-                  {automationReportEmailSuccess}
-                </Alert>
-              ) : null}
-              {automationReportEmailError ? (
-                <Alert
-                  variant="warning"
-                  className="py-2 small mb-2"
-                  dismissible
-                  onClose={() => setAutomationReportEmailError(null)}
-                >
-                  {automationReportEmailError}
-                </Alert>
-              ) : null}
-              <div className="d-flex flex-wrap align-items-center gap-3 mb-2">
-                <div className="d-flex flex-wrap align-items-center gap-2">
-                  <span className="small text-secondary text-uppercase mb-0">Direction</span>
-                  <ButtonGroup size="sm" aria-label="Filter automation rows by predicted direction">
-                    <ToggleButton
-                      id={`${automationDirToggleIdPrefix}-up`}
-                      type="checkbox"
-                      variant={automationDirUp ? 'secondary' : 'outline-secondary'}
-                      value="up"
-                      checked={automationDirUp}
-                      onChange={(e) => setAutomationDirUp(e.currentTarget.checked)}
-                    >
-                      Up
-                    </ToggleButton>
-                    <ToggleButton
-                      id={`${automationDirToggleIdPrefix}-down`}
-                      type="checkbox"
-                      variant={automationDirDown ? 'secondary' : 'outline-secondary'}
-                      value="down"
-                      checked={automationDirDown}
-                      onChange={(e) => setAutomationDirDown(e.currentTarget.checked)}
-                    >
-                      Down
-                    </ToggleButton>
-                    <ToggleButton
-                      id={`${automationDirToggleIdPrefix}-neutral`}
-                      type="checkbox"
-                      variant={automationDirNeutral ? 'secondary' : 'outline-secondary'}
-                      value="neutral"
-                      checked={automationDirNeutral}
-                      onChange={(e) => setAutomationDirNeutral(e.currentTarget.checked)}
-                    >
-                      Neutral
-                    </ToggleButton>
-                  </ButtonGroup>
-                </div>
-                <div className="d-flex flex-wrap align-items-center gap-2">
-                  <span className="small text-secondary text-uppercase mb-0">Outcome</span>
-                  <ButtonGroup size="sm" aria-label="Filter automation rows by outcome">
-                    <ToggleButton
-                      id={`${automationOutcomeToggleIdPrefix}-correct`}
-                      type="checkbox"
-                      variant={automationOutcomeCorrect ? 'success' : 'outline-success'}
-                      value="correct"
-                      checked={automationOutcomeCorrect}
-                      onChange={(e) => setAutomationOutcomeCorrect(e.currentTarget.checked)}
-                    >
-                      Correct
-                    </ToggleButton>
-                    <ToggleButton
-                      id={`${automationOutcomeToggleIdPrefix}-wrong`}
-                      type="checkbox"
-                      variant={automationOutcomeWrong ? 'danger' : 'outline-danger'}
-                      value="wrong"
-                      checked={automationOutcomeWrong}
-                      onChange={(e) => setAutomationOutcomeWrong(e.currentTarget.checked)}
-                    >
-                      Wrong
-                    </ToggleButton>
-                    <ToggleButton
-                      id={`${automationOutcomeToggleIdPrefix}-pending`}
-                      type="checkbox"
-                      variant={automationOutcomePending ? 'secondary' : 'outline-secondary'}
-                      value="pending"
-                      checked={automationOutcomePending}
-                      onChange={(e) => setAutomationOutcomePending(e.currentTarget.checked)}
-                    >
-                      Pending
-                    </ToggleButton>
-                  </ButtonGroup>
-                </div>
-                {automationModelsLoading ? (
-                  <span className="small text-muted">
-                    <Spinner animation="border" size="sm" className="me-1 align-middle" role="status" />
-                    Model registry…
+
+              <div className="rounded-3 border border-secondary-subtle shadow-sm overflow-hidden">
+                <div className="px-3 py-2 border-bottom border-secondary-subtle bg-body-secondary d-flex flex-wrap align-items-center justify-content-between gap-2">
+                  <span className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-0">
+                    Server schedule
                   </span>
-                ) : null}
+                  <div className="d-flex flex-wrap align-items-center gap-2 small">
+                    <Badge bg="dark" className="font-monospace px-2">
+                      m
+                    </Badge>
+                    <span className="text-muted">model candles</span>
+                    <span className="text-secondary">·</span>
+                    <Badge bg="secondary" className="font-monospace px-2">
+                      N
+                    </Badge>
+                    <span className="text-muted">pass cadence</span>
+                  </div>
+                </div>
+                <div className="p-3 p-md-4 bg-body-tertiary bg-opacity-25">
+                  {mlAutomationError ? (
+                    <Alert variant="warning" className="py-2 small mb-3">
+                      {mlAutomationError}
+                    </Alert>
+                  ) : null}
+
+                  <Row className="g-4 align-items-stretch">
+                    <Col xs={12} xl={4}>
+                      <div className="h-100 p-3 rounded-3 border border-secondary-subtle bg-body d-flex flex-column">
+                        <Form.Check
+                          type="switch"
+                          id="favorite-ml-automation-switch"
+                          className="mb-2"
+                          label={
+                            <span className="fw-semibold">
+                              Auto ML for favorites
+                              <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
+                                Runs on the server for starred instruments when host automation is enabled.
+                              </span>
+                            </span>
+                          }
+                          checked={favoriteMlAutomationEnabled}
+                          disabled={!chartPrefsHydrated || mlAutomationSaving}
+                          onChange={(e) => {
+                            const v = e.target.checked
+                            setFavoriteMlAutomationEnabled(v)
+                            setMlAutomationSaving(true)
+                            setMlAutomationError(null)
+                            void api
+                              .put('/broker/kite/instruments/favorite-ml-automation', { enabled: v })
+                              .then(() => {
+                                void loadChartSettings()
+                                void loadAutomationRecent()
+                              })
+                              .catch((err) => setMlAutomationError(problemDetail(err)))
+                              .finally(() => setMlAutomationSaving(false))
+                          }}
+                        />
+                        <div className="mt-auto pt-2">
+                          {favoriteMlAutomationEnabled ? (
+                            <Badge bg="success" pill>
+                              On
+                            </Badge>
+                          ) : (
+                            <Badge bg="secondary" pill>
+                              Off
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </Col>
+                    <Col xs={12} xl={8}>
+                      <div className="p-3 rounded-3 border border-secondary-subtle bg-body h-100">
+                        <Row className="g-3 align-items-start">
+                          <Col xs={12} sm={6} lg={4}>
+                            <Form.Group className="mb-0">
+                              <Form.Label className="small text-secondary mb-1 d-flex align-items-center gap-2 flex-wrap">
+                                Model interval
+                                <Badge bg="dark" className="font-monospace" style={{ fontSize: '0.65rem' }}>
+                                  m
+                                </Badge>
+                              </Form.Label>
+                              <Form.Select
+                                size="sm"
+                                className="font-monospace"
+                                value={favoriteMlAutomationBarInterval}
+                                onChange={(e) => setFavoriteMlAutomationBarInterval(e.target.value)}
+                                disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
+                                aria-label="Candle interval for server auto ML on favorites"
+                              >
+                                <option value="">Inherit (server / chart)</option>
+                                {CHART_INTERVALS.map((iv) => (
+                                  <option key={iv} value={iv}>
+                                    {iv}
+                                  </option>
+                                ))}
+                              </Form.Select>
+                            </Form.Group>
+                          </Col>
+                          <Col xs={12} sm={6} lg={4}>
+                            <Form.Group className="mb-0">
+                              <Form.Label className="small text-secondary mb-1 d-flex align-items-center gap-2 flex-wrap">
+                                Pass every (min)
+                                <Badge bg="secondary" className="font-monospace" style={{ fontSize: '0.65rem' }}>
+                                  N
+                                </Badge>
+                              </Form.Label>
+                              <Form.Control
+                                type="number"
+                                inputMode="numeric"
+                                min={1}
+                                max={1440}
+                                step={1}
+                                size="sm"
+                                placeholder="—"
+                                value={favoriteMlAutomationPollInput}
+                                onChange={(e) => {
+                                  mlAutomationPollTouchedRef.current = true
+                                  setFavoriteMlAutomationPollInput(e.target.value)
+                                }}
+                                disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
+                                aria-label="Minimum whole minutes between automated new prediction pass starts (N); when set, server does not wait for the m-bar to close"
+                              />
+                              <Form.Text className="text-muted" style={{ fontSize: '0.68rem' }}>
+                                Blank = inherit. When set, spacing only—no wait for{' '}
+                                <span className="font-monospace">m</span> bar close.
+                              </Form.Text>
+                            </Form.Group>
+                          </Col>
+                          <Col xs={12} sm={6} lg={4}>
+                            <Form.Group className="mb-0">
+                              <Form.Label className="small text-secondary mb-1">Intrabar delay (sec)</Form.Label>
+                              <Form.Control
+                                type="number"
+                                inputMode="numeric"
+                                min={0}
+                                max={86400}
+                                step={1}
+                                size="sm"
+                                placeholder="—"
+                                value={favoriteMlAutomationMinSecAfterOpenInput}
+                                onChange={(e) => {
+                                  mlAutomationMinSecAfterOpenTouchedRef.current = true
+                                  setFavoriteMlAutomationMinSecAfterOpenInput(e.target.value)
+                                }}
+                                disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
+                                aria-label="Minimum seconds after the current candle open before new auto ML rows (intrabar; blank = server default)"
+                              />
+                              <Form.Text className="text-muted" style={{ fontSize: '0.68rem' }}>
+                                Only when <span className="font-monospace">N</span> is blank. Blank = server default.
+                              </Form.Text>
+                            </Form.Group>
+                          </Col>
+                        </Row>
+                        <div className="mt-3 pt-2 border-top border-secondary-subtle d-flex flex-wrap justify-content-end gap-2">
+                          <Button
+                            type="button"
+                            variant="primary"
+                            size="sm"
+                            disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
+                            title="Saves m / N / intrabar settings to your account (independent of the chart toolbar)."
+                            onClick={() => void saveFavoriteMlAutomationSchedule()}
+                          >
+                            {mlAutomationSaving ? 'Saving…' : 'Save schedule'}
+                          </Button>
+                        </div>
+                      </div>
+                    </Col>
+                  </Row>
+                </div>
               </div>
+
+              <div className="rounded-3 border border-secondary-subtle shadow-sm overflow-hidden">
+                <div className="px-3 py-2 border-bottom border-secondary-subtle bg-body-secondary">
+                  <span className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-0">
+                    Merged log range &amp; email
+                  </span>
+                </div>
+                <div className="p-3 p-md-4 bg-body-tertiary bg-opacity-25">
+                  <Row className="g-3 align-items-end">
+                    <Col xs={12} md={6} lg={5} xl={4}>
+                      <Form.Group className="mb-0">
+                        <Form.Label column={false} className="small text-secondary mb-1">
+                          From (local)
+                        </Form.Label>
+                        <Form.Control
+                          type="datetime-local"
+                          step={60}
+                          size="sm"
+                          className="font-monospace w-100"
+                          style={{ minWidth: 0 }}
+                          value={automationEmailReportRange.from}
+                          onChange={(e) =>
+                            setAutomationEmailReportRange((p) => ({ ...p, from: e.target.value }))
+                          }
+                          disabled={automationReportEmailSending || !isZerodha}
+                        />
+                      </Form.Group>
+                    </Col>
+                    <Col xs={12} md={6} lg={5} xl={4}>
+                      <Form.Group className="mb-0">
+                        <Form.Label column={false} className="small text-secondary mb-1">
+                          To (exclusive)
+                        </Form.Label>
+                        <Form.Control
+                          type="datetime-local"
+                          step={60}
+                          size="sm"
+                          className="font-monospace w-100"
+                          style={{ minWidth: 0 }}
+                          value={automationEmailReportRange.to}
+                          onChange={(e) =>
+                            setAutomationEmailReportRange((p) => ({ ...p, to: e.target.value }))
+                          }
+                          disabled={automationReportEmailSending || !isZerodha}
+                        />
+                      </Form.Group>
+                    </Col>
+                  </Row>
+                  <Row className="g-2 mt-3 align-items-center">
+                    <Col xs={12} className="d-flex flex-wrap gap-2 align-items-center">
+                      <Button
+                        type="button"
+                        variant="outline-secondary"
+                        size="sm"
+                        disabled={automationReportEmailSending || !isZerodha}
+                        title="Restores defaults: local midnight today through the current minute."
+                        onClick={() => setAutomationEmailReportRange(initialAutomationEmailReportDatetimeLocal())}
+                      >
+                        Today → now
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline-secondary"
+                        size="sm"
+                        disabled={automationRecentLoading || !isZerodha}
+                        onClick={() => {
+                          void loadAutomationRecent()
+                          void loadAutomationPriceModels()
+                        }}
+                      >
+                        {automationRecentLoading ? 'Loading…' : 'Refresh list'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline-primary"
+                        size="sm"
+                        className="ms-sm-auto"
+                        disabled={automationReportEmailSending || !isZerodha}
+                        title="Emails automation rows whose PredictedAt falls in [fromUtc, toUtcExclusive) for the date range to the left (sent as UTC). HTML body includes inline PNG outcome charts (cid-linked, combined + each engine); CSV attached. Requires SMTP and a saved profile email."
+                        onClick={() => {
+                          setAutomationReportEmailError(null)
+                          setAutomationReportEmailSuccess(null)
+                          const fromTrim = automationEmailReportRange.from.trim()
+                          const toTrim = automationEmailReportRange.to.trim()
+                          if (!fromTrim || !toTrim) {
+                            setAutomationReportEmailError('Pick both report start and end (browser-local date/time).')
+                            return
+                          }
+                          const fromMs = Date.parse(fromTrim)
+                          const toMs = Date.parse(toTrim)
+                          if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) {
+                            setAutomationReportEmailError('Invalid date/time.')
+                            return
+                          }
+                          if (fromMs >= toMs) {
+                            setAutomationReportEmailError(
+                              'Start must be strictly before end. The API uses PredictedAt in [start, end exclusive).',
+                            )
+                            return
+                          }
+                          const maxSpanMs = 93 * 24 * 60 * 60 * 1000
+                          if (toMs - fromMs > maxSpanMs) {
+                            setAutomationReportEmailError('Range cannot exceed 93 days.')
+                            return
+                          }
+                          setAutomationReportEmailSending(true)
+                          void api
+                            .post<ManualAutomationEmailReportResponse>(
+                              '/predictions/price-direction/automation-report-email',
+                              {
+                                fromUtc: new Date(fromMs).toISOString(),
+                                toUtcExclusive: new Date(toMs).toISOString(),
+                              },
+                            )
+                            .then(({ data }) => {
+                              setAutomationReportEmailSuccess(
+                                `Email sent: ${data.rowCount} automation row${data.rowCount === 1 ? '' : 's'} (${data.reportRangeSummary}; ${data.pieChartsAttached} HTML chart section${data.pieChartsAttached === 1 ? '' : 's'} + CSV attachment).`,
+                              )
+                            })
+                            .catch((err) => setAutomationReportEmailError(problemDetail(err)))
+                            .finally(() => setAutomationReportEmailSending(false))
+                        }}
+                      >
+                        {automationReportEmailSending ? 'Sending…' : 'Email report'}
+                      </Button>
+                    </Col>
+                  </Row>
+                  {automationReportEmailSuccess ? (
+                    <Alert
+                      variant="success"
+                      className="py-2 small mt-3 mb-0"
+                      dismissible
+                      onClose={() => setAutomationReportEmailSuccess(null)}
+                    >
+                      {automationReportEmailSuccess}
+                    </Alert>
+                  ) : null}
+                  {automationReportEmailError ? (
+                    <Alert
+                      variant="warning"
+                      className="py-2 small mt-3 mb-0"
+                      dismissible
+                      onClose={() => setAutomationReportEmailError(null)}
+                    >
+                      {automationReportEmailError}
+                    </Alert>
+                  ) : null}
+                </div>
+              </div>
+
+              <details className="small border border-secondary-subtle rounded-3 px-3 py-2 bg-body user-select-none">
+                <summary
+                  className="fw-semibold text-body py-1"
+                  style={{ cursor: 'pointer' }}
+                  aria-label="Expand help for automation m, N, and server quiet hours"
+                >
+                  How <span className="font-monospace">m</span>, <span className="font-monospace">N</span>, filters, and
+                  quiet hours work
+                </summary>
+                <div className="text-secondary pt-2 pb-1">
+                  <p className="mb-2">
+                    When enabled, the API runs next-bar predictions for each favorite using <strong>every</strong> registered
+                    ML engine (subset via server{' '}
+                    <span className="font-monospace">FavoriteMlAutomation:PredictionModelId</span>); LightGBM rows use a
+                    separate table. Requires a live Kite session and host <strong>FavoriteMlAutomation</strong>.
+                  </p>
+                  <p className="mb-2">
+                    <strong>m</strong> is the model candle size (dropdown). <strong>N</strong> is optional minutes between{' '}
+                    <strong>new</strong> pass starts; when <strong>N</strong> is set, the server does not wait for the
+                    prior <strong>m</strong>-bar to close (still dedupes one pending row per ref bar per engine and validates{' '}
+                    <strong>m</strong>-candles). <strong>Intrabar delay</strong> applies only when <strong>N</strong> is blank.
+                    The table below loads up to{' '}
+                    <strong>{ML_AUTOMATION_RECENT_FETCH_TAKE.toLocaleString()}</strong> merged rows.
+                  </p>
+                  <p className="mb-0 text-muted" style={{ fontSize: '0.72rem' }}>
+                    Server quiet hours (default <strong>Asia/Kolkata</strong>): no <strong>new</strong> auto predictions from{' '}
+                    <strong>11:25 PM</strong> through <strong>8:00 AM</strong> daily, and all day <strong>Sat</strong> /{' '}
+                    <strong>Sun</strong> (pending rows still resolve). See{' '}
+                    <span className="font-monospace">FavoriteMlAutomation:QuietHours*</span> and{' '}
+                    <span className="font-monospace">PauseAutomationOnWeekends</span>.
+                  </p>
+                </div>
+              </details>
+              <div className="rounded-3 border border-secondary-subtle shadow-sm p-3 mb-3">
+                <div className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-3">
+                  Table filters
+                </div>
+                <Row className="g-3 align-items-center mb-3">
+                  <Col xs={12} xl="auto">
+                    <div className="d-flex flex-wrap align-items-center gap-2">
+                      <span className="small text-secondary text-uppercase mb-0 text-nowrap">Direction</span>
+                      <ButtonGroup size="sm" aria-label="Filter automation rows by predicted direction">
+                        <ToggleButton
+                          id={`${automationDirToggleIdPrefix}-up`}
+                          type="checkbox"
+                          variant={automationDirUp ? 'secondary' : 'outline-secondary'}
+                          value="up"
+                          checked={automationDirUp}
+                          onChange={(e) => setAutomationDirUp(e.currentTarget.checked)}
+                        >
+                          Up
+                        </ToggleButton>
+                        <ToggleButton
+                          id={`${automationDirToggleIdPrefix}-down`}
+                          type="checkbox"
+                          variant={automationDirDown ? 'secondary' : 'outline-secondary'}
+                          value="down"
+                          checked={automationDirDown}
+                          onChange={(e) => setAutomationDirDown(e.currentTarget.checked)}
+                        >
+                          Down
+                        </ToggleButton>
+                        <ToggleButton
+                          id={`${automationDirToggleIdPrefix}-neutral`}
+                          type="checkbox"
+                          variant={automationDirNeutral ? 'secondary' : 'outline-secondary'}
+                          value="neutral"
+                          checked={automationDirNeutral}
+                          onChange={(e) => setAutomationDirNeutral(e.currentTarget.checked)}
+                        >
+                          Neutral
+                        </ToggleButton>
+                      </ButtonGroup>
+                    </div>
+                  </Col>
+                  <Col xs={12} xl="auto">
+                    <div className="d-flex flex-wrap align-items-center gap-2">
+                      <span className="small text-secondary text-uppercase mb-0 text-nowrap">Outcome</span>
+                      <ButtonGroup size="sm" aria-label="Filter automation rows by outcome">
+                        <ToggleButton
+                          id={`${automationOutcomeToggleIdPrefix}-correct`}
+                          type="checkbox"
+                          variant={automationOutcomeCorrect ? 'success' : 'outline-success'}
+                          value="correct"
+                          checked={automationOutcomeCorrect}
+                          onChange={(e) => setAutomationOutcomeCorrect(e.currentTarget.checked)}
+                        >
+                          Correct
+                        </ToggleButton>
+                        <ToggleButton
+                          id={`${automationOutcomeToggleIdPrefix}-wrong`}
+                          type="checkbox"
+                          variant={automationOutcomeWrong ? 'danger' : 'outline-danger'}
+                          value="wrong"
+                          checked={automationOutcomeWrong}
+                          onChange={(e) => setAutomationOutcomeWrong(e.currentTarget.checked)}
+                        >
+                          Wrong
+                        </ToggleButton>
+                        <ToggleButton
+                          id={`${automationOutcomeToggleIdPrefix}-pending`}
+                          type="checkbox"
+                          variant={automationOutcomePending ? 'secondary' : 'outline-secondary'}
+                          value="pending"
+                          checked={automationOutcomePending}
+                          onChange={(e) => setAutomationOutcomePending(e.currentTarget.checked)}
+                        >
+                          Pending
+                        </ToggleButton>
+                      </ButtonGroup>
+                    </div>
+                  </Col>
+                  {automationModelsLoading ? (
+                    <Col xs={12} xl className="d-flex align-items-center justify-content-xl-end">
+                      <span className="small text-muted">
+                        <Spinner animation="border" size="sm" className="me-1 align-middle" role="status" />
+                        Model registry…
+                      </span>
+                    </Col>
+                  ) : null}
+                </Row>
               {automationIntervalsAvailable.length > 0 ? (
                 <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-                  <span className="small text-secondary text-uppercase mb-0">Interval</span>
+                  <span className="small text-secondary text-uppercase mb-0 text-nowrap pt-1">Interval</span>
                   <div className="d-flex flex-wrap gap-1 align-items-center" role="group" aria-label="Filter by candle interval">
                     {automationIntervalsAvailable.map((iv, ix) => (
                       <ToggleButton
@@ -4776,8 +4899,8 @@ export function KiteInstrumentsPage() {
                 </div>
               ) : null}
               {automationEngineIdsAvailable.length > 0 ? (
-                <div className="d-flex flex-wrap align-items-start gap-2 mb-3">
-                  <span className="small text-secondary text-uppercase mb-0 pt-1">Engine</span>
+                <div className="d-flex flex-wrap align-items-start gap-2 mb-0">
+                  <span className="small text-secondary text-uppercase mb-0 pt-1 text-nowrap">Engine</span>
                   <div className="d-flex flex-wrap gap-1 align-items-center" role="group" aria-label="Filter by registered ML engine">
                     {automationEngineIdsAvailable.map((eng, idx) => {
                       const desc = automationPriceModels?.models?.find((m) => m.id === eng)?.description
@@ -4807,18 +4930,25 @@ export function KiteInstrumentsPage() {
                   </div>
                 </div>
               ) : null}
+              </div>
               <MlAutomationDirectionVotePie rows={automationRecentDisplay} totalLoaded={automationRecent.length} />
               <MlAutomationOutcomesPieGrid rows={automationRecentDisplay} priceModels={automationPriceModels} />
-              <div className="small text-secondary text-uppercase mb-1">Recent auto predictions</div>
-              <Form.Control
-                size="sm"
-                type="search"
-                className="mb-2"
-                placeholder="Filter rows (symbol, category, engine, interval, outcome, …)"
-                value={automationTableFilter}
-                onChange={(e) => setAutomationTableFilter(e.target.value)}
-                aria-label="Filter automation prediction rows"
-              />
+              <Row className="align-items-end g-2 mb-2">
+                <Col xs={12} md="auto">
+                  <div className="small text-secondary text-uppercase mb-0 text-nowrap">Recent auto predictions</div>
+                </Col>
+                <Col xs={12} md>
+                  <Form.Control
+                    size="sm"
+                    type="search"
+                    className="w-100"
+                    placeholder="Filter rows (symbol, category, engine, interval, outcome, …)"
+                    value={automationTableFilter}
+                    onChange={(e) => setAutomationTableFilter(e.target.value)}
+                    aria-label="Filter automation prediction rows"
+                  />
+                </Col>
+              </Row>
               {automationRecent.length > 0 && automationRecentDisplay.length !== automationRecent.length ? (
                 <div className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
                   Showing {automationRecentDisplay.length} of {automationRecent.length} row

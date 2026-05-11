@@ -15,8 +15,11 @@ using Trader.Domain.Entities;
 namespace Trader.Application.Prediction;
 
 /// <summary>
-/// Per background tick: resolve pending favorite ML rows, add at most one pending prediction per favorite bar
-/// per registered prediction engine, and optionally email an EOD CSV + multipart HTML with inline PNG (<c>cid:</c>) outcome charts when SMTP is enabled.
+/// Per background tick: resolve pending favorite ML rows, then optionally start a <strong>new</strong> prediction pass.
+/// Each pass uses <strong>m</strong>-minute (or other UI) candles from Kite for model input; when the user sets an <strong>N</strong>-minute
+/// cadence (<see cref="Domain.Entities.User.FavoriteMlAutomationPollIntervalSeconds"/>), passes are spaced by at least <strong>N</strong> minutes from the
+/// previous pass start and <strong>do not</strong> wait for the prior <strong>m</strong>-bar to close (intrabar delay is skipped in that mode). Candle series are
+/// validated before engines run. At most one pending row per ref bar per engine; optional EOD email when SMTP is enabled.
 /// </summary>
 public sealed class FavoriteMlAutomationService
 {
@@ -386,57 +389,7 @@ public sealed class FavoriteMlAutomationService
         if (favorites.Count == 0)
             return;
 
-        var pending = await _predictions
-            .ListPendingAsync(userId, _opts.MaxPendingResolutionBatch, ct)
-            .ConfigureAwait(false);
-        foreach (var row in pending)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                await TryResolvePendingRowAsync(
-                    userId,
-                    row.InstrumentToken,
-                    row.Interval,
-                    row.Id,
-                    ct)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(
-                    ex,
-                    "Could not resolve prediction {Id} for user {UserId}",
-                    row.Id,
-                    userId);
-            }
-        }
-
-        var pendingGbm = await _lightGbmPredictions
-            .ListPendingAsync(userId, _opts.MaxPendingResolutionBatch, ct)
-            .ConfigureAwait(false);
-        foreach (var row in pendingGbm)
-        {
-            ct.ThrowIfCancellationRequested();
-            try
-            {
-                await TryResolvePendingRowAsync(
-                    userId,
-                    row.InstrumentToken,
-                    row.Interval,
-                    row.Id,
-                    ct)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(
-                    ex,
-                    "Could not resolve prediction {Id} for user {UserId}",
-                    row.Id,
-                    userId);
-            }
-        }
+        await ResolvePendingFavoriteMlRowsAsync(userId, ct).ConfigureAwait(false);
 
         var suppressNewPredictions = suppressNewAutomationPredictions;
         if (!suppressNewPredictions && user.FavoriteMlAutomationPollIntervalSeconds is int pollS && pollS > 0)
@@ -471,17 +424,32 @@ public sealed class FavoriteMlAutomationService
                     .ConfigureAwait(false);
                 if (hist.Candles.Count == 0)
                     continue;
+                if (!FavoriteMlAutomationCandleValidator.IsValidForPrediction(hist.Candles, out var candleReject))
+                {
+                    _logger.LogDebug(
+                        "Favorite ML automation skipped {Token} {Interval}: invalid candle series ({Reason})",
+                        fav.InstrumentToken.Trim(),
+                        hist.Interval,
+                        candleReject);
+                    continue;
+                }
+
                 var last = hist.Candles[^1];
                 var token = fav.InstrumentToken.Trim();
-                var barLen = ChartUiIntervals.BarDuration(hist.Interval);
-                var minAfterOpen = user.FavoriteMlAutomationMinSecondsAfterBarOpen ?? _opts.MinSecondsAfterBarOpenForAutomation;
-                if (!FavoriteMlAutomationIntrabar.IsReadyForNewPredictionOnRefBar(
-                        DateTimeOffset.UtcNow,
-                        last.Time,
-                        barLen,
-                        minAfterOpen))
+                // N-minute cadence: user poll interval > 0 → space passes by N only; do not gate on m-bar phase (intrabar delay).
+                var hasRunEveryNCadence = user.FavoriteMlAutomationPollIntervalSeconds is int pollCadence && pollCadence > 0;
+                if (!hasRunEveryNCadence)
                 {
-                    continue;
+                    var barLen = ChartUiIntervals.BarDuration(hist.Interval);
+                    var minAfterOpen = user.FavoriteMlAutomationMinSecondsAfterBarOpen ?? _opts.MinSecondsAfterBarOpenForAutomation;
+                    if (!FavoriteMlAutomationIntrabar.IsReadyForNewPredictionOnRefBar(
+                            DateTimeOffset.UtcNow,
+                            last.Time,
+                            barLen,
+                            minAfterOpen))
+                    {
+                        continue;
+                    }
                 }
 
                 foreach (var engineModelId in engineIds)
@@ -512,6 +480,49 @@ public sealed class FavoriteMlAutomationService
                     "Favorite ML predict skipped for user {UserId} token {Token}",
                     userId,
                     fav.InstrumentToken);
+            }
+        }
+    }
+
+    private async Task ResolvePendingFavoriteMlRowsAsync(Guid userId, CancellationToken ct)
+    {
+        var pending = await _predictions
+            .ListPendingAsync(userId, _opts.MaxPendingResolutionBatch, ct)
+            .ConfigureAwait(false);
+        foreach (var row in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await TryResolvePendingRowAsync(userId, row.InstrumentToken, row.Interval, row.Id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Could not resolve prediction {Id} for user {UserId}",
+                    row.Id,
+                    userId);
+            }
+        }
+
+        var pendingGbm = await _lightGbmPredictions
+            .ListPendingAsync(userId, _opts.MaxPendingResolutionBatch, ct)
+            .ConfigureAwait(false);
+        foreach (var row in pendingGbm)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await TryResolvePendingRowAsync(userId, row.InstrumentToken, row.Interval, row.Id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Could not resolve prediction {Id} for user {UserId}",
+                    row.Id,
+                    userId);
             }
         }
     }

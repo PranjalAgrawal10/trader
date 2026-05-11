@@ -45,15 +45,16 @@ public class User
     public bool FavoriteMlAutomationEnabled { get; set; }
 
     /// <summary>
-    /// When set (e.g. <c>1m</c>, <c>5m</c>), favorite automation uses this candle interval for every favorite (normalized).
+    /// <strong>m</strong>: when set (e.g. <c>1m</c>, <c>5m</c>), favorite automation uses this candle interval for every favorite (normalized) as model input.
     /// When null, falls back to <c>FavoriteMlAutomation:PredictionIntervalOverride</c> when non-empty, else saved chart interval / per-token overrides.
     /// </summary>
     public string? FavoriteMlAutomationInterval { get; set; }
 
     /// <summary>
-    /// When set, enforces at least this many <strong>seconds</strong> (always a multiple of 60 from the API) after the previous
-    /// automated <strong>new</strong> prediction pass <strong>started</strong> before starting the next pass for this user
-    /// (pending resolution still runs every global cycle). When null, only the host <c>FavoriteMlAutomation:PollInterval*</c> applies.
+    /// <strong>N</strong>-minute run cadence: when set (always a multiple of 60 from the API = whole minutes), at least that many
+    /// seconds must elapse after the previous automated <strong>new</strong> pass <strong>started</strong> before the next pass (pending resolution still runs every global cycle).
+    /// When set, automation does <strong>not</strong> wait on the <strong>m</strong>-minute model bar phase (intrabar delay is skipped); passes still validate merged <strong>m</strong>-candles.
+    /// When null, only the host <c>FavoriteMlAutomation:PollInterval*</c> applies and optional intrabar delay may gate passes.
     /// </summary>
     public int? FavoriteMlAutomationPollIntervalSeconds { get; set; }
 
@@ -62,7 +63,7 @@ public class User
 
     /// <summary>
     /// When set, defers new automation predictions on the current ref bar until at least this many seconds after bar open
-    /// (intrabar; does not wait for the candle to close). When null, <c>FavoriteMlAutomation:MinSecondsAfterBarOpenForAutomation</c> applies.
+    /// (intrabar). When null, <c>FavoriteMlAutomation:MinSecondsAfterBarOpenForAutomation</c> applies. Ignored when <c>FavoriteMlAutomationPollIntervalSeconds</c> (N cadence) is set.
     /// </summary>
     public int? FavoriteMlAutomationMinSecondsAfterBarOpen { get; set; }
 
