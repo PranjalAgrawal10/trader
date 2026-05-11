@@ -123,10 +123,29 @@ public sealed record KiteInstrumentsChartSettingsDto(
     string? GraphType,
     Dictionary<string, int>? ZoomByInstrumentToken = null,
     Dictionary<string, string>? IntervalByInstrumentToken = null,
-    bool? MlAutomationEnabled = null);
+    bool? MlAutomationEnabled = null,
+    string? MlAutomationInterval = null,
+    int? MlAutomationPollIntervalSeconds = null,
+    /// <summary>Multi-interval trend checkboxes; omit on PUT to leave stored value unchanged.</summary>
+    IReadOnlyList<string>? TrendAnalysisIntervals = null);
 
-/// <summary>Toggle background ML runs for favorite instruments (per user).</summary>
-public sealed record FavoriteMlAutomationPutDto(bool Enabled);
+/// <summary>Background favorite-ML automation toggle and optional per-user candle interval / new-pass throttle.</summary>
+public sealed class FavoriteMlAutomationPutDto
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// When the JSON property is present: empty or whitespace clears the per-user automation interval (server/chart fallback).
+    /// When absent or null, the stored interval is left unchanged.
+    /// </summary>
+    public string? Interval { get; set; }
+
+    /// <summary>
+    /// When the JSON property is present: <c>0</c> clears the per-user throttle; <c>15</c>–<c>3600</c> sets minimum seconds between new prediction passes.
+    /// When absent, the stored value is left unchanged.
+    /// </summary>
+    public int? PollIntervalSeconds { get; set; }
+}
 
 /// <summary>Updates saved visible bar count for one instrument; <c>null</c> <see cref="VisibleBars"/> clears zoom for that token.</summary>
 public sealed record KiteInstrumentsChartZoomPutDto(string InstrumentToken, int? VisibleBars);

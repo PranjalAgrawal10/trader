@@ -33,9 +33,12 @@ public interface IMlLightGbmTripleBarrierPredictionRepository
         DateTimeOffset endUtcExclusive,
         CancellationToken ct = default);
 
+    /// <param name="predictedAtFromUtcInclusive">When set with <paramref name="predictedAtToUtcExclusive"/>, restricts rows to <c>PredictedAtUtc</c> in <c>[from, to)</c>.</param>
     Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
         Guid userId,
         int take,
+        DateTimeOffset? predictedAtFromUtcInclusive = null,
+        DateTimeOffset? predictedAtToUtcExclusive = null,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<MlLightGbmTripleBarrierPrediction>> ListForInstrumentAsync(

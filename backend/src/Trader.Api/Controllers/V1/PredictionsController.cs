@@ -182,16 +182,28 @@ public sealed class PredictionsController : ControllerBase
         }
     }
 
-    /// <summary>Recent automation-sourced ML predictions (newest first), joined with favorite symbol when available.</summary>
+    /// <summary>
+    /// Recent automation-sourced ML predictions (newest first), joined with favorite symbol when available.
+    /// Optional <paramref name="fromUtc"/> and <paramref name="toUtcExclusive"/> filter on <c>PredictedAtUtc</c> in <c>[fromUtc, toUtcExclusive)</c> (same semantics as the manual automation email); omit both for legacy unbounded merge headroom.
+    /// </summary>
     [HttpGet("price-direction/automation-recent")]
     public async Task<ActionResult<IReadOnlyList<MlAutomationPredictionListItemDto>>> AutomationRecent(
         [FromQuery] int? take,
-        CancellationToken ct)
+        [FromQuery] DateTimeOffset? fromUtc = null,
+        [FromQuery] DateTimeOffset? toUtcExclusive = null,
+        CancellationToken ct = default)
     {
+        if (fromUtc.HasValue != toUtcExclusive.HasValue)
+        {
+            return Problem(
+                detail: "Provide both fromUtc and toUtcExclusive as ISO-8601 instants, or omit both.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         try
         {
             var list = await _predictions
-                .ListAutomationRecentAsync(User.GetUserId(), take ?? 100, ct)
+                .ListAutomationRecentAsync(User.GetUserId(), take ?? 100, fromUtc, toUtcExclusive, ct)
                 .ConfigureAwait(false);
             return Ok(list);
         }

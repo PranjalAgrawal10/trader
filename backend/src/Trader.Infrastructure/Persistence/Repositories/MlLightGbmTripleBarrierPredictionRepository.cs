@@ -84,12 +84,22 @@ public sealed class MlLightGbmTripleBarrierPredictionRepository : IMlLightGbmTri
     public async Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
         Guid userId,
         int take,
+        DateTimeOffset? predictedAtFromUtcInclusive = null,
+        DateTimeOffset? predictedAtToUtcExclusive = null,
         CancellationToken ct = default)
     {
         take = Math.Clamp(take, 1, PriceDirectionPredictionService.MaxAutomationHistoryTake);
+        var preds = _db.MlLightGbmTripleBarrierPredictions.AsNoTracking()
+            .Where(p => p.UserId == userId && p.Source == AutomationSource);
+        if (predictedAtFromUtcInclusive.HasValue)
+        {
+            var from = predictedAtFromUtcInclusive.Value;
+            var to = predictedAtToUtcExclusive!.Value;
+            preds = preds.Where(p => p.PredictedAtUtc >= from && p.PredictedAtUtc < to);
+        }
+
         var q =
-            from p in _db.MlLightGbmTripleBarrierPredictions.AsNoTracking()
-            where p.UserId == userId && p.Source == AutomationSource
+            from p in preds
             join f in _db.KiteFavoriteInstruments.AsNoTracking()
                 on new { p.UserId, Token = p.InstrumentToken } equals new { f.UserId, Token = f.InstrumentToken } into fav
             from f in fav.DefaultIfEmpty()

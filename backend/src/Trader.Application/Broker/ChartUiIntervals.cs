@@ -1,8 +1,42 @@
+using System.Collections.Generic;
+using System.Linq;
+
 namespace Trader.Application.Broker;
 
 /// <summary>Normalizes Kite instruments page candle interval UI codes (<c>1m</c> … <c>1w</c>).</summary>
 public static class ChartUiIntervals
 {
+    /// <summary>Display / persistence order for trend-analysis multi-select (matches SPA toolbar).</summary>
+    public static readonly IReadOnlyList<string> OrderedUiCodes = new[]
+    {
+        "1m", "2m", "3m", "4m", "5m", "10m", "15m", "30m", "1h", "4h", "1d", "1w",
+    };
+
+    /// <summary>
+    /// Returns unique normalized codes in <see cref="OrderedUiCodes"/> order.
+    /// When nothing valid remains, returns a full copy of <see cref="OrderedUiCodes"/> (same as SPA default-all).
+    /// </summary>
+    public static IReadOnlyList<string> NormalizeTrendAnalysisSelection(IEnumerable<string> raw)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var x in raw)
+        {
+            if (string.IsNullOrWhiteSpace(x))
+                continue;
+            try
+            {
+                set.Add(Normalize(x.Trim()));
+            }
+            catch (InvalidOperationException)
+            {
+                // skip unknown tokens
+            }
+        }
+
+        var ordered = OrderedUiCodes.Where(set.Contains).ToList();
+        return ordered.Count > 0 ? ordered : OrderedUiCodes.ToList();
+    }
+
     public static string Normalize(string interval)
     {
         var t = interval.Trim().ToLowerInvariant();

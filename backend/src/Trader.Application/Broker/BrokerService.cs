@@ -692,7 +692,10 @@ public sealed class BrokerService : IBrokerService
             row.GraphType,
             ParseChartZoomMap(row.ChartZoomByInstrumentTokenJson),
             ParseChartIntervalOverrideMap(row.ChartIntervalByInstrumentTokenJson),
-            row.FavoriteMlAutomationEnabled ?? false);
+            row.FavoriteMlAutomationEnabled ?? false,
+            row.FavoriteMlAutomationInterval,
+            row.FavoriteMlAutomationPollIntervalSeconds,
+            ParseTrendAnalysisIntervalsFromJson(row.TrendAnalysisIntervalsJson));
     }
 
     public async Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default)
@@ -752,6 +755,25 @@ public sealed class BrokerService : IBrokerService
 
         var json = dict.Count == 0 ? null : JsonSerializer.Serialize(dict, ChartZoomJsonOptions);
         await _kiteChartSettings.SaveChartIntervalByInstrumentTokenJsonAsync(userId, json, ct).ConfigureAwait(false);
+    }
+
+    private static IReadOnlyList<string>? ParseTrendAnalysisIntervalsFromJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            var arr = JsonSerializer.Deserialize<List<string>>(json, ChartZoomJsonOptions);
+            if (arr is null || arr.Count == 0)
+                return null;
+
+            return ChartUiIntervals.NormalizeTrendAnalysisSelection(arr);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static Dictionary<string, string>? ParseChartIntervalOverrideMap(string? json)
@@ -817,16 +839,62 @@ public sealed class BrokerService : IBrokerService
         var range = NormalizeChartRangePreset(settings.RangePreset);
         var graph = NormalizeChartGraphType(settings.GraphType);
 
+        string? trendJson = null;
+        if (settings.TrendAnalysisIntervals is not null)
+        {
+            var normalized = ChartUiIntervals.NormalizeTrendAnalysisSelection(settings.TrendAnalysisIntervals);
+            trendJson = JsonSerializer.Serialize(normalized, ChartZoomJsonOptions);
+        }
+
         await _kiteChartSettings
                 .SaveAsync(
                     userId,
-                    new KiteInstrumentsChartSettingsState(interval, range, graph, null, null, settings.MlAutomationEnabled),
+                    new KiteInstrumentsChartSettingsState(
+                        interval,
+                        range,
+                        graph,
+                        null,
+                        null,
+                        settings.MlAutomationEnabled,
+                        TrendAnalysisIntervalsJson: trendJson),
                     ct)
-            .ConfigureAwait(false);
+                .ConfigureAwait(false);
     }
 
-    public Task SetFavoriteMlAutomationEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default) =>
-        _kiteChartSettings.SetFavoriteMlAutomationAsync(userId, enabled, ct);
+    public async Task SetFavoriteMlAutomationAsync(Guid userId, FavoriteMlAutomationPutDto body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        var row = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("User not found.");
+
+        string? intervalToStore = row.FavoriteMlAutomationInterval;
+        if (body.Interval is not null)
+        {
+            if (string.IsNullOrWhiteSpace(body.Interval))
+                intervalToStore = null;
+            else
+                intervalToStore = ChartUiIntervals.Normalize(body.Interval.Trim());
+        }
+
+        int? pollToStore = row.FavoriteMlAutomationPollIntervalSeconds;
+        if (body.PollIntervalSeconds.HasValue)
+        {
+            var p = body.PollIntervalSeconds.Value;
+            if (p == 0)
+                pollToStore = null;
+            else if (p < 15 || p > 3600)
+            {
+                throw new InvalidOperationException(
+                    "pollIntervalSeconds must be between 15 and 3600 inclusive, or 0 to clear the per-user throttle.");
+            }
+            else
+                pollToStore = p;
+        }
+
+        await _kiteChartSettings
+            .SaveFavoriteMlAutomationPreferencesAsync(userId, body.Enabled, intervalToStore, pollToStore, ct)
+            .ConfigureAwait(false);
+    }
 
     private async Task RequireUserExistsAsync(Guid userId, CancellationToken ct)
     {

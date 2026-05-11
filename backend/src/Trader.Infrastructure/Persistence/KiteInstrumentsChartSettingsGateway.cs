@@ -21,7 +21,10 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
                 u.KiteInstrumentsChartGraphType,
                 u.KiteInstrumentsChartZoomJson,
                 u.KiteInstrumentsChartIntervalByInstrumentTokenJson,
-                u.FavoriteMlAutomationEnabled))
+                u.FavoriteMlAutomationEnabled,
+                u.FavoriteMlAutomationInterval,
+                u.FavoriteMlAutomationPollIntervalSeconds,
+                u.KiteInstrumentsTrendAnalysisIntervalsJson))
             .FirstOrDefaultAsync(ct);
 
     public async Task SaveAsync(Guid userId, KiteInstrumentsChartSettingsState settings, CancellationToken ct = default)
@@ -34,6 +37,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         user.KiteInstrumentsChartGraphType = settings.GraphType;
         if (settings.FavoriteMlAutomationEnabled is bool ml)
             user.FavoriteMlAutomationEnabled = ml;
+        if (settings.TrendAnalysisIntervalsJson is not null)
+            user.KiteInstrumentsTrendAnalysisIntervalsJson = settings.TrendAnalysisIntervalsJson;
         await _db.SaveChangesAsync(ct);
     }
 
@@ -42,6 +47,29 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
                    ?? throw new InvalidOperationException("User not found.");
         user.FavoriteMlAutomationEnabled = enabled;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveFavoriteMlAutomationPreferencesAsync(
+        Guid userId,
+        bool enabled,
+        string? favoriteMlAutomationInterval,
+        int? favoriteMlAutomationPollIntervalSeconds,
+        CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+                   ?? throw new InvalidOperationException("User not found.");
+        user.FavoriteMlAutomationEnabled = enabled;
+        user.FavoriteMlAutomationInterval = favoriteMlAutomationInterval;
+        user.FavoriteMlAutomationPollIntervalSeconds = favoriteMlAutomationPollIntervalSeconds;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task SetFavoriteMlAutomationLastNewPassUtcAsync(Guid userId, DateTimeOffset utc, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+                   ?? throw new InvalidOperationException("User not found.");
+        user.FavoriteMlAutomationLastNewPassUtc = utc;
         await _db.SaveChangesAsync(ct);
     }
 
