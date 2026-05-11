@@ -699,8 +699,13 @@ public sealed class BrokerService : IBrokerService
             row.FavoriteMlAutomationInterval,
             ThrottleSecondsToApiMinutes(row.FavoriteMlAutomationPollIntervalSeconds),
             row.FavoriteMlAutomationMinSecondsAfterBarOpen,
-            ParseTrendAnalysisIntervalsFromJson(row.TrendAnalysisIntervalsJson));
+            ParseTrendAnalysisIntervalsFromJson(row.TrendAnalysisIntervalsJson),
+            row.DemoAutoTradeEnabled ?? false,
+            DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr);
     }
+
+    public Task SetDemoAutoTradeEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default) =>
+        _kiteChartSettings.SetDemoAutoTradeEnabledAsync(userId, enabled, ct);
 
     public async Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default)
     {

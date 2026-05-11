@@ -25,7 +25,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
                 u.FavoriteMlAutomationInterval,
                 u.FavoriteMlAutomationPollIntervalSeconds,
                 u.KiteInstrumentsTrendAnalysisIntervalsJson,
-                u.FavoriteMlAutomationMinSecondsAfterBarOpen))
+                u.FavoriteMlAutomationMinSecondsAfterBarOpen,
+                u.DemoAutoTradeEnabled))
             .FirstOrDefaultAsync(ct);
 
     public async Task SaveAsync(Guid userId, KiteInstrumentsChartSettingsState settings, CancellationToken ct = default)
@@ -40,6 +41,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
             user.FavoriteMlAutomationEnabled = ml;
         if (settings.TrendAnalysisIntervalsJson is not null)
             user.KiteInstrumentsTrendAnalysisIntervalsJson = settings.TrendAnalysisIntervalsJson;
+        if (settings.DemoAutoTradeEnabled is bool demo)
+            user.DemoAutoTradeEnabled = demo;
         await _db.SaveChangesAsync(ct);
     }
 
@@ -92,6 +95,14 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
                    ?? throw new InvalidOperationException("User not found.");
         user.KiteInstrumentsChartIntervalByInstrumentTokenJson = chartIntervalByInstrumentTokenJson;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task SetDemoAutoTradeEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+                   ?? throw new InvalidOperationException("User not found.");
+        user.DemoAutoTradeEnabled = enabled;
         await _db.SaveChangesAsync(ct);
     }
 }

@@ -8,6 +8,7 @@ using System.Globalization;
 using Trader.Api.Extensions;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
+using Trader.Application.Prediction;
 
 namespace Trader.Api.Controllers.V1;
 
@@ -20,15 +21,18 @@ public sealed class BrokerController : ControllerBase
     private const string KiteOAuthStateCookie = "Trader.KiteOAuth.State";
 
     private readonly IBrokerService _broker;
+    private readonly IPriceDirectionPredictionService _priceDirectionPredictions;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
     private readonly ILogger<BrokerController> _logger;
 
     public BrokerController(
         IBrokerService broker,
+        IPriceDirectionPredictionService priceDirectionPredictions,
         IOptions<ZerodhaKiteOptions> kiteOptions,
         ILogger<BrokerController> logger)
     {
         _broker = broker;
+        _priceDirectionPredictions = priceDirectionPredictions;
         _kiteOptions = kiteOptions;
         _logger = logger;
     }
@@ -446,6 +450,64 @@ public sealed class BrokerController : ControllerBase
         {
             await _broker.SaveKiteInstrumentsChartSettingsAsync(User.GetUserId(), body, ct);
             return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>Demo auto-trade intent (no broker orders). EOD outcome is hypothetical from same-day automation rows.</summary>
+    [Authorize]
+    [HttpPut("kite/instruments/demo-auto-trade")]
+    public async Task<IActionResult> PutDemoAutoTrade([FromBody] DemoAutoTradePutDto? body, CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON { \"enabled\": bool }.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.SetDemoAutoTradeEnabledAsync(User.GetUserId(), body.Enabled, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>
+    /// Hypothetical demo P&amp;L for a calendar day in <c>FavoriteMlAutomation:ReportTimeZoneId</c> (default IST) from merged automation predictions.
+    /// </summary>
+    [Authorize]
+    [HttpGet("kite/instruments/demo-auto-trade/eod-summary")]
+    public async Task<ActionResult<DemoAutoTradeEodSummaryDto>> GetDemoAutoTradeEodSummary(
+        [FromQuery] string? date,
+        CancellationToken ct)
+    {
+        DateOnly? reportDate = null;
+        if (!string.IsNullOrWhiteSpace(date))
+        {
+            if (!DateOnly.TryParse(date.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            {
+                return Problem(
+                    title: "Invalid date",
+                    detail: "Use optional query date=yyyy-MM-dd (calendar day in report timezone).",
+                    statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            reportDate = parsed;
+        }
+
+        try
+        {
+            var dto = await _priceDirectionPredictions.GetDemoAutoTradeEodSummaryAsync(User.GetUserId(), reportDate, ct);
+            return Ok(dto);
         }
         catch (InvalidOperationException ex)
         {

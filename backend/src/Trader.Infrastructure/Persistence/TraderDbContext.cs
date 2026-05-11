@@ -46,6 +46,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.KiteInstrumentsChartZoomJson);
             e.Property(x => x.KiteInstrumentsChartIntervalByInstrumentTokenJson);
             e.Property(x => x.KiteInstrumentsTrendAnalysisIntervalsJson);
+            e.Property(x => x.DemoAutoTradeEnabled).HasDefaultValue(false);
             e.Property(x => x.FavoriteMlAutomationEnabled).HasDefaultValue(false);
             e.Property(x => x.FavoriteMlAutomationInterval).HasMaxLength(16);
             e.Property(x => x.FavoriteMlAutomationLastNewPassUtc).HasColumnType("datetime(6)");

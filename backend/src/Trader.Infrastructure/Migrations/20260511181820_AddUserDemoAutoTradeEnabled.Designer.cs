@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Trader.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Trader.Infrastructure.Persistence;
 namespace Trader.Infrastructure.Migrations
 {
     [DbContext(typeof(TraderDbContext))]
-    partial class TraderDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260511181820_AddUserDemoAutoTradeEnabled")]
+    partial class AddUserDemoAutoTradeEnabled
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

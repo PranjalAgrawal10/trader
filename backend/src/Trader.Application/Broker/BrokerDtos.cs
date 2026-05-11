@@ -135,7 +135,33 @@ public sealed record KiteInstrumentsChartSettingsDto(
     /// </summary>
     int? MlAutomationMinSecondsAfterBarOpen = null,
     /// <summary>Multi-interval trend checkboxes; omit on PUT to leave stored value unchanged.</summary>
-    IReadOnlyList<string>? TrendAnalysisIntervals = null);
+    IReadOnlyList<string>? TrendAnalysisIntervals = null,
+    /// <summary>Demo auto-trade intent (no live orders).</summary>
+    bool DemoAutoTradeEnabled = false,
+    /// <summary>Fixed demo portfolio notional in INR for UI and EOD math.</summary>
+    decimal DemoAutoTradeNotionalInr = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr);
+
+/// <summary>Toggle persisted demo auto-trade (no broker orders).</summary>
+public sealed class DemoAutoTradePutDto
+{
+    public bool Enabled { get; set; }
+}
+
+/// <summary>Hypothetical same-calendar-day (report TZ) outcome from merged automation rows.</summary>
+public sealed record DemoAutoTradeEodSummaryDto(
+    DateOnly ReportDateIst,
+    string ReportTimeZoneId,
+    bool DemoAutoTradeEnabled,
+    decimal DemoNotionalInr,
+    int TotalSignals,
+    int PendingSignals,
+    int CorrectOutcomes,
+    int WrongOutcomes,
+    int SkippedNoNextClose,
+    int ResolvedSignalsUsedForPnl,
+    decimal HypotheticalTotalPnlInr,
+    string PnlAllocationNote,
+    bool MayBeTruncated);
 
 /// <summary>Background favorite-ML automation toggle and optional per-user candle interval / new-pass throttle.</summary>
 public sealed class FavoriteMlAutomationPutDto

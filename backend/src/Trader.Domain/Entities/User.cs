@@ -41,6 +41,9 @@ public class User
     /// <summary>JSON array of chart interval codes (<c>1m</c>…<c>1w</c>) selected for multi-interval trend analysis on favorites / locked grids.</summary>
     public string? KiteInstrumentsTrendAnalysisIntervalsJson { get; set; }
 
+    /// <summary>UI-only demo flag: no live orders; EOD summary uses hypothetical allocation from automation rows.</summary>
+    public bool DemoAutoTradeEnabled { get; set; }
+
     /// <summary>When true, server background job may run ML predictions for <see cref="KiteFavoriteInstruments"/> (requires global automation + Kite session).</summary>
     public bool FavoriteMlAutomationEnabled { get; set; }
 

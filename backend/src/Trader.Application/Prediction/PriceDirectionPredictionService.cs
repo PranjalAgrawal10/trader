@@ -24,20 +24,26 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     private readonly IPriceDirectionPredictionEngineRegistry _engines;
     private readonly IMlPriceDirectionPredictionRepository _predictions;
     private readonly IMlLightGbmTripleBarrierPredictionRepository _lightGbmPredictions;
+    private readonly IKiteInstrumentsChartSettingsGateway _kiteChartSettings;
     private readonly IOptionsSnapshot<PriceDirectionPredictionOptions> _opts;
+    private readonly IOptionsSnapshot<FavoriteMlAutomationOptions> _favoriteMlAutomationOpts;
 
     public PriceDirectionPredictionService(
         IBrokerService broker,
         IPriceDirectionPredictionEngineRegistry engines,
         IMlPriceDirectionPredictionRepository predictions,
         IMlLightGbmTripleBarrierPredictionRepository lightGbmPredictions,
-        IOptionsSnapshot<PriceDirectionPredictionOptions> opts)
+        IKiteInstrumentsChartSettingsGateway kiteChartSettings,
+        IOptionsSnapshot<PriceDirectionPredictionOptions> opts,
+        IOptionsSnapshot<FavoriteMlAutomationOptions> favoriteMlAutomationOpts)
     {
         _broker = broker;
         _engines = engines;
         _predictions = predictions;
         _lightGbmPredictions = lightGbmPredictions;
+        _kiteChartSettings = kiteChartSettings;
         _opts = opts;
+        _favoriteMlAutomationOpts = favoriteMlAutomationOpts;
     }
 
     public async Task<PriceDirectionPredictionEnvelope> PredictForInstrumentAsync(
@@ -589,5 +595,49 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             _ => throw new InvalidOperationException(
                 "Interval must be one of: 1m, 2m, 3m, 4m, 5m, 10m, 15m, 30m, 1h, 4h, 1d, 1w."),
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<DemoAutoTradeEodSummaryDto> GetDemoAutoTradeEodSummaryAsync(
+        Guid userId,
+        DateOnly? reportDateIst,
+        CancellationToken ct = default)
+    {
+        var chartRow = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("User not found.");
+
+        var tzId = string.IsNullOrWhiteSpace(_favoriteMlAutomationOpts.Value.ReportTimeZoneId)
+            ? "Asia/Kolkata"
+            : _favoriteMlAutomationOpts.Value.ReportTimeZoneId.Trim();
+
+        var date = reportDateIst ?? DemoAutoTradeEodSummaryCalculator.GetTodayInTimeZone(tzId);
+        var (fromUtc, toUtc) = DemoAutoTradeEodSummaryCalculator.GetLocalDayBoundsUtc(date, tzId);
+
+        var rows = await ListAutomationRecentAsync(
+                userId,
+                MaxAutomationHistoryTake,
+                fromUtc,
+                toUtc,
+                ct)
+            .ConfigureAwait(false);
+
+        var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtc).ToList();
+        var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(inWindow, notional);
+
+        return new DemoAutoTradeEodSummaryDto(
+            date,
+            tzId,
+            chartRow.DemoAutoTradeEnabled ?? false,
+            notional,
+            totals.TotalSignals,
+            totals.PendingSignals,
+            totals.CorrectOutcomes,
+            totals.WrongOutcomes,
+            totals.SkippedNoNextClose,
+            totals.ResolvedSignalsUsedForPnl,
+            totals.HypotheticalTotalPnlInr,
+            DemoAutoTradeEodSummaryCalculator.AllocationNote,
+            rows.Count >= MaxAutomationHistoryTake);
     }
 }

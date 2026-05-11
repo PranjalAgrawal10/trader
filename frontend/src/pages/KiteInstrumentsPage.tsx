@@ -167,6 +167,34 @@ interface KiteInstrumentsChartSettingsDto {
   mlAutomationMinSecondsAfterBarOpen?: number | null
   /** Saved multi-interval trend checkboxes (chart order); omit on PUT to leave unchanged. */
   trendAnalysisIntervals?: string[] | null
+  demoAutoTradeEnabled?: boolean
+  /** Fixed demo portfolio size in INR (server-defined). */
+  demoAutoTradeNotionalInr?: number
+}
+
+/** GET …/demo-auto-trade/eod-summary — hypothetical same-day outcome from automation rows. */
+interface DemoAutoTradeEodSummaryDto {
+  reportDateIst: string
+  reportTimeZoneId: string
+  demoAutoTradeEnabled: boolean
+  demoNotionalInr: number
+  totalSignals: number
+  pendingSignals: number
+  correctOutcomes: number
+  wrongOutcomes: number
+  skippedNoNextClose: number
+  resolvedSignalsUsedForPnl: number
+  hypotheticalTotalPnlInr: number
+  pnlAllocationNote: string
+  mayBeTruncated: boolean
+}
+
+function formatInrRupee(amount: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(amount)
 }
 
 /** Nested shape from broker list / movers API (camelCase JSON). */
@@ -3814,6 +3842,12 @@ export function KiteInstrumentsPage() {
   const mlAutomationMinSecAfterOpenTouchedRef = useRef(false)
   const [mlAutomationSaving, setMlAutomationSaving] = useState(false)
   const [mlAutomationError, setMlAutomationError] = useState<string | null>(null)
+  const [demoAutoTradeEnabled, setDemoAutoTradeEnabled] = useState(false)
+  const [demoAutoTradeNotionalInr, setDemoAutoTradeNotionalInr] = useState(100_000)
+  const [demoAutoTradeSaving, setDemoAutoTradeSaving] = useState(false)
+  const [demoEodSummary, setDemoEodSummary] = useState<DemoAutoTradeEodSummaryDto | null>(null)
+  const [demoEodLoading, setDemoEodLoading] = useState(false)
+  const [demoEodError, setDemoEodError] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
@@ -4080,6 +4114,12 @@ export function KiteInstrumentsPage() {
       mlAutomationPollTouchedRef.current = false
       mlAutomationMinSecAfterOpenTouchedRef.current = false
       setMlAutomationError(null)
+      setDemoAutoTradeEnabled(Boolean(data.demoAutoTradeEnabled))
+      if (typeof data.demoAutoTradeNotionalInr === 'number' && Number.isFinite(data.demoAutoTradeNotionalInr)) {
+        setDemoAutoTradeNotionalInr(data.demoAutoTradeNotionalInr)
+      } else {
+        setDemoAutoTradeNotionalInr(100_000)
+      }
     } catch {
       // keep defaults
     } finally {
@@ -4090,6 +4130,28 @@ export function KiteInstrumentsPage() {
   useEffect(() => {
     void loadChartSettings()
   }, [loadChartSettings])
+
+  const loadDemoEodSummary = useCallback(async () => {
+    try {
+      setDemoEodLoading(true)
+      setDemoEodError(null)
+      const { data } = await api.get<DemoAutoTradeEodSummaryDto>(
+        '/broker/kite/instruments/demo-auto-trade/eod-summary',
+      )
+      setDemoEodSummary(data)
+      setDemoAutoTradeEnabled(Boolean(data.demoAutoTradeEnabled))
+    } catch (err) {
+      setDemoEodError(problemDetail(err))
+      setDemoEodSummary(null)
+    } finally {
+      setDemoEodLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (mainTab !== 'automation' || !chartPrefsHydrated) return
+    void loadDemoEodSummary()
+  }, [mainTab, chartPrefsHydrated, loadDemoEodSummary])
 
   useEffect(() => {
     if (!chartPrefsHydrated) return
@@ -4434,6 +4496,134 @@ export function KiteInstrumentsPage() {
                   <strong>Zerodha</strong> to change automation, refresh the merged log, and send report emails.
                 </Alert>
               ) : null}
+
+              <div className="rounded-3 border border-info border-opacity-25 shadow-sm overflow-hidden">
+                <div className="px-3 py-2 border-bottom border-info border-opacity-25 bg-body-secondary d-flex flex-wrap align-items-center justify-content-between gap-2">
+                  <span className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-0">
+                    Demo auto-trade
+                  </span>
+                  <Badge bg="info" pill className="small">
+                    No live orders
+                  </Badge>
+                </div>
+                <div className="p-3 p-md-4 bg-body-tertiary bg-opacity-25">
+                  <Row className="g-3 align-items-start">
+                    <Col xs={12} md>
+                      <Form.Check
+                        type="switch"
+                        id="demo-auto-trade-switch"
+                        className="mb-2"
+                        label={
+                          <span className="fw-semibold">
+                            Enable demo auto-trade
+                            <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
+                              Marks intent only. Portfolio size is fixed at{' '}
+                              <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> for hypothetical EOD results
+                              (equal split across resolved same-day automation signals).
+                            </span>
+                          </span>
+                        }
+                        checked={demoAutoTradeEnabled}
+                        disabled={demoAutoTradeSaving}
+                        onChange={(e) => {
+                          const v = e.target.checked
+                          setDemoAutoTradeSaving(true)
+                          setDemoEodError(null)
+                          void api
+                            .put('/broker/kite/instruments/demo-auto-trade', { enabled: v })
+                            .then(() => {
+                              setDemoAutoTradeEnabled(v)
+                              void loadDemoEodSummary()
+                              void loadChartSettings()
+                            })
+                            .catch((err) => setDemoEodError(problemDetail(err)))
+                            .finally(() => setDemoAutoTradeSaving(false))
+                        }}
+                      />
+                    </Col>
+                    <Col xs={12} md="auto" className="d-flex flex-wrap gap-2 align-items-start justify-content-md-end">
+                      <Button
+                        type="button"
+                        variant="outline-primary"
+                        size="sm"
+                        disabled={demoEodLoading}
+                        onClick={() => void loadDemoEodSummary()}
+                      >
+                        {demoEodLoading ? 'Loading…' : 'Refresh EOD summary'}
+                      </Button>
+                    </Col>
+                  </Row>
+                  {demoEodError ? (
+                    <Alert variant="warning" className="py-2 small mt-3 mb-0">
+                      {demoEodError}
+                    </Alert>
+                  ) : null}
+                  {demoEodSummary ? (
+                    <div className="mt-3 pt-3 border-top border-secondary-subtle">
+                      <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-3">
+                        End-of-day outcome (hypothetical)
+                      </h6>
+                      <Row className="g-2 small">
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Report day
+                        </Col>
+                        <Col xs={6} sm={8} className="font-monospace">
+                          {demoEodSummary.reportDateIst}{' '}
+                          <span className="text-muted">({demoEodSummary.reportTimeZoneId})</span>
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Demo notional
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {formatInrRupee(demoEodSummary.demoNotionalInr)}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Signals (day)
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.totalSignals}
+                          {demoEodSummary.mayBeTruncated ? (
+                            <span className="text-warning ms-1" title="Loaded row cap reached; counts may be incomplete.">
+                              (may be truncated)
+                            </span>
+                          ) : null}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Pending / resolved legs
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.pendingSignals} / {demoEodSummary.resolvedSignalsUsedForPnl}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Correct / wrong
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          {demoEodSummary.correctOutcomes} / {demoEodSummary.wrongOutcomes}
+                        </Col>
+                        <Col xs={6} sm={4} className="text-secondary">
+                          Hypothetical P&amp;L
+                        </Col>
+                        <Col xs={6} sm={8}>
+                          <span
+                            className={
+                              demoEodSummary.hypotheticalTotalPnlInr > 0
+                                ? 'text-success fw-semibold'
+                                : demoEodSummary.hypotheticalTotalPnlInr < 0
+                                  ? 'text-danger fw-semibold'
+                                  : 'text-body-secondary'
+                            }
+                          >
+                            {formatInrRupee(demoEodSummary.hypotheticalTotalPnlInr)}
+                          </span>
+                        </Col>
+                      </Row>
+                      <p className="text-muted mb-0 mt-2" style={{ fontSize: '0.72rem' }}>
+                        {demoEodSummary.pnlAllocationNote}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
 
               <div className="rounded-3 border border-secondary-subtle shadow-sm overflow-hidden">
                 <div className="px-3 py-2 border-bottom border-secondary-subtle bg-body-secondary d-flex flex-wrap align-items-center justify-content-between gap-2">

@@ -74,4 +74,13 @@ public interface IPriceDirectionPredictionService
         IReadOnlyList<KiteHistoricalCandlePointDto> candlesAsc,
         string interval,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Hypothetical demo EOD outcome from merged favorite-automation rows on <paramref name="reportDateIst"/> (calendar day in report TZ).
+    /// When <paramref name="reportDateIst"/> is null, uses today in that timezone.
+    /// </summary>
+    Task<DemoAutoTradeEodSummaryDto> GetDemoAutoTradeEodSummaryAsync(
+        Guid userId,
+        DateOnly? reportDateIst,
+        CancellationToken ct = default);
 }
