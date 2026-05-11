@@ -51,7 +51,8 @@ public class User
     public string? FavoriteMlAutomationInterval { get; set; }
 
     /// <summary>
-    /// When set (15–3600), enforces at least this many seconds between automated <strong>new</strong> prediction passes for this user
+    /// When set, enforces at least this many <strong>seconds</strong> (always a multiple of 60 from the API) after the previous
+    /// automated <strong>new</strong> prediction pass <strong>started</strong> before starting the next pass for this user
     /// (pending resolution still runs every global cycle). When null, only the host <c>FavoriteMlAutomation:PollInterval*</c> applies.
     /// </summary>
     public int? FavoriteMlAutomationPollIntervalSeconds { get; set; }

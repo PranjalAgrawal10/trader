@@ -125,7 +125,8 @@ public sealed record KiteInstrumentsChartSettingsDto(
     Dictionary<string, string>? IntervalByInstrumentToken = null,
     bool? MlAutomationEnabled = null,
     string? MlAutomationInterval = null,
-    int? MlAutomationPollIntervalSeconds = null,
+    /// <summary>Minimum whole minutes after the previous new-prediction pass started; mirrors DB seconds / 60 (rounded up).</summary>
+    int? MlAutomationPollIntervalMinutes = null,
     /// <summary>Multi-interval trend checkboxes; omit on PUT to leave stored value unchanged.</summary>
     IReadOnlyList<string>? TrendAnalysisIntervals = null);
 
@@ -141,10 +142,10 @@ public sealed class FavoriteMlAutomationPutDto
     public string? Interval { get; set; }
 
     /// <summary>
-    /// When the JSON property is present: <c>0</c> clears the per-user throttle; <c>15</c>–<c>3600</c> sets minimum seconds between new prediction passes.
+    /// When the JSON property is present: <c>0</c> clears the per-user throttle; <c>1</c>–<c>1440</c> sets minimum whole minutes after the previous new pass started.
     /// When absent, the stored value is left unchanged.
     /// </summary>
-    public int? PollIntervalSeconds { get; set; }
+    public int? PollIntervalMinutes { get; set; }
 }
 
 /// <summary>Updates saved visible bar count for one instrument; <c>null</c> <see cref="VisibleBars"/> clears zoom for that token.</summary>

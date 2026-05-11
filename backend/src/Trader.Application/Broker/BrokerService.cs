@@ -14,6 +14,8 @@ public sealed class BrokerService : IBrokerService
 {
     private const int ChartZoomMinBars = 1;
     private const int ChartZoomMaxBars = 500_000;
+    private const int FavoriteMlThrottleMinMinutes = 1;
+    private const int FavoriteMlThrottleMaxMinutes = 1440;
     private static readonly JsonSerializerOptions ChartZoomJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -694,7 +696,7 @@ public sealed class BrokerService : IBrokerService
             ParseChartIntervalOverrideMap(row.ChartIntervalByInstrumentTokenJson),
             row.FavoriteMlAutomationEnabled ?? false,
             row.FavoriteMlAutomationInterval,
-            row.FavoriteMlAutomationPollIntervalSeconds,
+            ThrottleSecondsToApiMinutes(row.FavoriteMlAutomationPollIntervalSeconds),
             ParseTrendAnalysisIntervalsFromJson(row.TrendAnalysisIntervalsJson));
     }
 
@@ -877,18 +879,18 @@ public sealed class BrokerService : IBrokerService
         }
 
         int? pollToStore = row.FavoriteMlAutomationPollIntervalSeconds;
-        if (body.PollIntervalSeconds.HasValue)
+        if (body.PollIntervalMinutes.HasValue)
         {
-            var p = body.PollIntervalSeconds.Value;
-            if (p == 0)
+            var m = body.PollIntervalMinutes.Value;
+            if (m == 0)
                 pollToStore = null;
-            else if (p < 15 || p > 3600)
+            else if (m < FavoriteMlThrottleMinMinutes || m > FavoriteMlThrottleMaxMinutes)
             {
                 throw new InvalidOperationException(
-                    "pollIntervalSeconds must be between 15 and 3600 inclusive, or 0 to clear the per-user throttle.");
+                    $"pollIntervalMinutes must be between {FavoriteMlThrottleMinMinutes} and {FavoriteMlThrottleMaxMinutes} inclusive, or 0 to clear the per-user throttle.");
             }
             else
-                pollToStore = p;
+                pollToStore = m * 60;
         }
 
         await _kiteChartSettings
@@ -926,6 +928,14 @@ public sealed class BrokerService : IBrokerService
             x.Expiry,
             x.Strike,
             x.LotSize);
+
+    /// <summary>Whole minutes for API/SPA; legacy DB values use ceiling so e.g. 90s → 2.</summary>
+    private static int? ThrottleSecondsToApiMinutes(int? seconds)
+    {
+        if (seconds is null or <= 0)
+            return null;
+        return (int)Math.Ceiling(seconds.Value / 60.0);
+    }
 
     private static string? NullableNorm(string? value)
     {

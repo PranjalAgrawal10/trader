@@ -461,7 +461,7 @@ public sealed class BrokerController : ControllerBase
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON { \"enabled\": bool }; optional \"interval\" (empty string clears per-user bar size) and \"pollIntervalSeconds\" (0 clears, 15–3600 sets throttle).",
+                detail: "Send JSON { \"enabled\": bool }; optional \"interval\" (empty string clears per-user bar size) and \"pollIntervalMinutes\" (0 clears, 1–1440 sets min minutes after previous new pass started).",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 

@@ -160,8 +160,8 @@ interface KiteInstrumentsChartSettingsDto {
   mlAutomationEnabled?: boolean
   /** Per-user automation candle interval; omit/null = inherit server override or chart. */
   mlAutomationInterval?: string | null
-  /** Per-user min seconds between new prediction passes; omit/null = no extra throttle. */
-  mlAutomationPollIntervalSeconds?: number | null
+  /** Per-user min whole minutes after the previous new pass started; omit/null = no extra throttle. */
+  mlAutomationPollIntervalMinutes?: number | null
   /** Saved multi-interval trend checkboxes (chart order); omit on PUT to leave unchanged. */
   trendAnalysisIntervals?: string[] | null
 }
@@ -3943,10 +3943,10 @@ export function KiteInstrumentsPage() {
         rawAutoIv && (CHART_INTERVALS as readonly string[]).includes(rawAutoIv) ? rawAutoIv : '',
       )
       setFavoriteMlAutomationPollInput(
-        typeof data.mlAutomationPollIntervalSeconds === 'number' &&
-          data.mlAutomationPollIntervalSeconds >= 15 &&
-          data.mlAutomationPollIntervalSeconds <= 3600
-          ? String(data.mlAutomationPollIntervalSeconds)
+        typeof data.mlAutomationPollIntervalMinutes === 'number' &&
+          data.mlAutomationPollIntervalMinutes >= 1 &&
+          data.mlAutomationPollIntervalMinutes <= 1440
+          ? String(data.mlAutomationPollIntervalMinutes)
           : '',
       )
       mlAutomationPollTouchedRef.current = false
@@ -4064,22 +4064,22 @@ export function KiteInstrumentsPage() {
         setMlAutomationError('Pick a candle interval from the list, or inherit (empty).')
         return
       }
-      const body: { enabled: boolean; interval: string; pollIntervalSeconds?: number } = {
+      const body: { enabled: boolean; interval: string; pollIntervalMinutes?: number } = {
         enabled: favoriteMlAutomationEnabled,
         interval: intervalNorm,
       }
       if (mlAutomationPollTouchedRef.current) {
         const raw = favoriteMlAutomationPollInput.trim()
-        if (raw === '') body.pollIntervalSeconds = 0
+        if (raw === '') body.pollIntervalMinutes = 0
         else {
           const n = parseInt(raw, 10)
-          if (!Number.isFinite(n) || n < 15 || n > 3600) {
+          if (!Number.isFinite(n) || n < 1 || n > 1440) {
             setMlAutomationError(
-              'Min seconds between new runs: leave blank (inherit) or enter a whole number 15–3600.',
+              'Min minutes after previous pass started: leave blank (inherit) or enter a whole number 1–1440.',
             )
             return
           }
-          body.pollIntervalSeconds = n
+          body.pollIntervalMinutes = n
         }
       }
       await api.put('/broker/kite/instruments/favorite-ml-automation', body)
@@ -4324,13 +4324,13 @@ export function KiteInstrumentsPage() {
                   </Form.Group>
                   <Form.Group className="mb-0">
                     <Form.Label column={false} className="small text-secondary mb-0">
-                      Min seconds between new runs
+                      Min minutes after previous pass started
                     </Form.Label>
                     <Form.Control
                       type="number"
                       inputMode="numeric"
-                      min={15}
-                      max={3600}
+                      min={1}
+                      max={1440}
                       step={1}
                       size="sm"
                       style={{ width: '5.5rem' }}
@@ -4341,7 +4341,7 @@ export function KiteInstrumentsPage() {
                         setFavoriteMlAutomationPollInput(e.target.value)
                       }}
                       disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
-                      aria-label="Minimum seconds between automated new prediction passes"
+                      aria-label="Minimum whole minutes after the previous automated new prediction pass started"
                     />
                   </Form.Group>
                   <Button
@@ -4469,7 +4469,7 @@ export function KiteInstrumentsPage() {
                 <span className="font-monospace">FavoriteMlAutomation:PredictionModelId</span>); LightGBM rows are stored
                 separately. Requires Kite session; <strong className="text-body-secondary">FavoriteMlAutomation</strong>{' '}
                 must be on in server config.
-                Use <strong>Auto ML bar interval</strong> above (and optional <strong>min seconds between new runs</strong>)
+                Use <strong>Auto ML bar interval</strong> above (and optional <strong>min minutes after previous new pass started</strong>)
                 so automation does not wait for slower bars unless you want it to. The list below requests up to{' '}
                 <strong>{ML_AUTOMATION_RECENT_FETCH_TAKE.toLocaleString()}</strong> merged rows (classic + LightGBM).
                 <span className="d-block mt-1 text-muted" style={{ fontSize: '0.72rem' }}>
