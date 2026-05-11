@@ -216,12 +216,43 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     public async Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
         Guid userId,
         int take,
+        DateTimeOffset? predictedAtFromUtcInclusive = null,
+        DateTimeOffset? predictedAtToUtcExclusive = null,
         CancellationToken ct = default)
     {
+        if (predictedAtFromUtcInclusive.HasValue != predictedAtToUtcExclusive.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Provide both predictedAtFromUtcInclusive and predictedAtToUtcExclusive, or omit both.");
+        }
+
+        if (predictedAtFromUtcInclusive.HasValue)
+        {
+            var start = predictedAtFromUtcInclusive.Value;
+            var end = predictedAtToUtcExclusive!.Value;
+            if (end <= start)
+            {
+                throw new InvalidOperationException(
+                    "fromUtc must be strictly before toUtcExclusive. Rows use PredictedAtUtc in [start, end).");
+            }
+
+            const int maxRangeDays = 93;
+            var spanDays = (end - start).TotalDays;
+            if (spanDays <= 0 || spanDays > maxRangeDays)
+            {
+                throw new InvalidOperationException(
+                    $"Report range exceeds {maxRangeDays} days between start and end, or bounds are invalid.");
+            }
+        }
+
         take = Math.Clamp(take, 1, MaxAutomationHistoryTake);
         var fetchEach = Math.Min(Math.Max(take * 25, take), MaxAutomationHistoryTake);
-        var legacy = await _predictions.ListAutomationRecentAsync(userId, fetchEach, ct).ConfigureAwait(false);
-        var gbm = await _lightGbmPredictions.ListAutomationRecentAsync(userId, fetchEach, ct).ConfigureAwait(false);
+        var legacy = await _predictions
+            .ListAutomationRecentAsync(userId, fetchEach, predictedAtFromUtcInclusive, predictedAtToUtcExclusive, ct)
+            .ConfigureAwait(false);
+        var gbm = await _lightGbmPredictions
+            .ListAutomationRecentAsync(userId, fetchEach, predictedAtFromUtcInclusive, predictedAtToUtcExclusive, ct)
+            .ConfigureAwait(false);
         return legacy
             .Concat(gbm)
             .OrderByDescending(x => x.PredictedAt)

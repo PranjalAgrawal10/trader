@@ -438,7 +438,7 @@ public sealed class BrokerController : ControllerBase
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON with interval, rangePreset, and graphType.",
+                detail: "Send JSON with interval, rangePreset, and graphType; optional mlAutomationEnabled and trendAnalysisIntervals.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
@@ -461,13 +461,13 @@ public sealed class BrokerController : ControllerBase
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON { \"enabled\": true|false }.",
+                detail: "Send JSON { \"enabled\": bool }; optional \"interval\" (empty string clears per-user bar size) and \"pollIntervalSeconds\" (0 clears, 15–3600 sets throttle).",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 
         try
         {
-            await _broker.SetFavoriteMlAutomationEnabledAsync(User.GetUserId(), body.Enabled, ct);
+            await _broker.SetFavoriteMlAutomationAsync(User.GetUserId(), body, ct);
             return NoContent();
         }
         catch (InvalidOperationException ex)

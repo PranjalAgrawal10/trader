@@ -50,9 +50,12 @@ public interface IPriceDirectionPredictionService
         int take,
         CancellationToken ct = default);
 
+    /// <param name="predictedAtFromUtcInclusive">Half-open window with <paramref name="predictedAtToUtcExclusive"/> on <c>PredictedAtUtc</c>; omit both for unbounded recent rows (legacy).</param>
     Task<IReadOnlyList<MlAutomationPredictionListItemDto>> ListAutomationRecentAsync(
         Guid userId,
         int take,
+        DateTimeOffset? predictedAtFromUtcInclusive = null,
+        DateTimeOffset? predictedAtToUtcExclusive = null,
         CancellationToken ct = default);
 
     Task ResolvePredictionAsync(

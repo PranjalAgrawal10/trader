@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Trader.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Trader.Infrastructure.Persistence;
 namespace Trader.Infrastructure.Migrations
 {
     [DbContext(typeof(TraderDbContext))]
-    partial class TraderDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260511065718_AddFavoriteMlAutomationUserIntervalPoll")]
+    partial class AddFavoriteMlAutomationUserIntervalPoll
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -668,9 +671,6 @@ namespace Trader.Infrastructure.Migrations
                         .HasColumnType("varchar(16)");
 
                     b.Property<string>("KiteInstrumentsChartIntervalByInstrumentTokenJson")
-                        .HasColumnType("longtext");
-
-                    b.Property<string>("KiteInstrumentsTrendAnalysisIntervalsJson")
                         .HasColumnType("longtext");
 
                     b.Property<string>("KiteInstrumentsChartRangePreset")

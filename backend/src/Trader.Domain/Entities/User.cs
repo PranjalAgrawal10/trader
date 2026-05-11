@@ -38,8 +38,26 @@ public class User
     /// <summary>JSON object: instrument token → chart interval override (<c>1m</c>…<c>1d</c>); missing key uses <see cref="KiteInstrumentsChartInterval"/>.</summary>
     public string? KiteInstrumentsChartIntervalByInstrumentTokenJson { get; set; }
 
+    /// <summary>JSON array of chart interval codes (<c>1m</c>…<c>1w</c>) selected for multi-interval trend analysis on favorites / locked grids.</summary>
+    public string? KiteInstrumentsTrendAnalysisIntervalsJson { get; set; }
+
     /// <summary>When true, server background job may run ML predictions for <see cref="KiteFavoriteInstruments"/> (requires global automation + Kite session).</summary>
     public bool FavoriteMlAutomationEnabled { get; set; }
+
+    /// <summary>
+    /// When set (e.g. <c>1m</c>, <c>5m</c>), favorite automation uses this candle interval for every favorite (normalized).
+    /// When null, falls back to <c>FavoriteMlAutomation:PredictionIntervalOverride</c> when non-empty, else saved chart interval / per-token overrides.
+    /// </summary>
+    public string? FavoriteMlAutomationInterval { get; set; }
+
+    /// <summary>
+    /// When set (15–3600), enforces at least this many seconds between automated <strong>new</strong> prediction passes for this user
+    /// (pending resolution still runs every global cycle). When null, only the host <c>FavoriteMlAutomation:PollInterval*</c> applies.
+    /// </summary>
+    public int? FavoriteMlAutomationPollIntervalSeconds { get; set; }
+
+    /// <summary>UTC timestamp of the last automated new-prediction pass start (for per-user poll throttling).</summary>
+    public DateTimeOffset? FavoriteMlAutomationLastNewPassUtc { get; set; }
 
     /// <summary>Authenticator (TOTP) enabled for this account.</summary>
     public bool TwoFactorEnabled { get; set; }

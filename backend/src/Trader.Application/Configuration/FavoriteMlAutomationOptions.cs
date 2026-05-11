@@ -21,7 +21,8 @@ public sealed class FavoriteMlAutomationOptions
     public int PollIntervalMinutes { get; set; } = 1;
 
     /// <summary>
-    /// Candle interval for favorite automation predictions only (e.g. <c>1m</c>).
+    /// Candle interval for favorite automation predictions only (e.g. <c>1m</c>) when the user has not set{' '}
+    /// <see cref="Domain.Entities.User.FavoriteMlAutomationInterval"/>.
     /// When null or whitespace, uses saved chart interval (global toolbar + per-favorite overrides).
     /// Use <c>1m</c> here to run on one-minute bars so automation is not blocked until a 3m/5m bar completes.
     /// </summary>

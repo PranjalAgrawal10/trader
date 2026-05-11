@@ -158,6 +158,12 @@ interface KiteInstrumentsChartSettingsDto {
   zoomByInstrumentToken?: Record<string, number> | null
   intervalByInstrumentToken?: Record<string, string> | null
   mlAutomationEnabled?: boolean
+  /** Per-user automation candle interval; omit/null = inherit server override or chart. */
+  mlAutomationInterval?: string | null
+  /** Per-user min seconds between new prediction passes; omit/null = no extra throttle. */
+  mlAutomationPollIntervalSeconds?: number | null
+  /** Saved multi-interval trend checkboxes (chart order); omit on PUT to leave unchanged. */
+  trendAnalysisIntervals?: string[] | null
 }
 
 /** Nested shape from broker list / movers API (camelCase JSON). */
@@ -220,10 +226,11 @@ function dateToDatetimeLocalInputValue(d: Date): string {
   return `${d.getFullYear()}-${pad2DatetimeLocalComponent(d.getMonth() + 1)}-${pad2DatetimeLocalComponent(d.getDate())}T${pad2DatetimeLocalComponent(d.getHours())}:${pad2DatetimeLocalComponent(d.getMinutes())}`
 }
 
+/** Local calendar day containing “now”: midnight → current minute (for Auto predictions range + list fetch). */
 function initialAutomationEmailReportDatetimeLocal(): { from: string; to: string } {
   const to = new Date()
   to.setSeconds(0, 0)
-  const from = new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const from = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 0, 0, 0, 0)
   return { from: dateToDatetimeLocalInputValue(from), to: dateToDatetimeLocalInputValue(to) }
 }
 
@@ -3028,8 +3035,9 @@ function FavoritesChartsGrid({
         <strong>Trend analysis</strong> checkboxes choose which candle sizes participate in{' '}
         <strong>Multi-interval trend</strong> panels (least-squares on past closes — same{' '}
         <strong>Range</strong> as charts). Use <strong>Interval</strong> to set bar size on every tile (clears symbol
-        drops). Server <strong>Auto ML</strong> often uses <strong>1m</strong> candles (see{' '}
-        <span className="font-monospace text-body-secondary">FavoriteMlAutomation:PredictionIntervalOverride</span>).
+        drops).         Per-user <strong>Auto ML bar interval</strong> lives on the <strong>Auto predictions</strong> tab; otherwise the
+        server may use <span className="font-monospace text-body-secondary">FavoriteMlAutomation:PredictionIntervalOverride</span>{' '}
+        or your chart interval.
       </p>
       <Row className="g-3">
         {favorites.map((row) => (
@@ -3680,6 +3688,9 @@ export function KiteInstrumentsPage() {
 
   const [chartPrefsHydrated, setChartPrefsHydrated] = useState(false)
   const [favoriteMlAutomationEnabled, setFavoriteMlAutomationEnabled] = useState(false)
+  const [favoriteMlAutomationBarInterval, setFavoriteMlAutomationBarInterval] = useState('')
+  const [favoriteMlAutomationPollInput, setFavoriteMlAutomationPollInput] = useState('')
+  const mlAutomationPollTouchedRef = useRef(false)
   const [mlAutomationSaving, setMlAutomationSaving] = useState(false)
   const [mlAutomationError, setMlAutomationError] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
@@ -3914,7 +3925,31 @@ export function KiteInstrumentsPage() {
           : {},
       )
       setChartIntervalByToken(coerceChartIntervalOverrideMap(data.intervalByInstrumentToken))
+      const serverTrend = data.trendAnalysisIntervals
+      if (Array.isArray(serverTrend) && serverTrend.length > 0) {
+        const next: ChartInterval[] = []
+        for (const entry of serverTrend) {
+          const s = String(entry ?? '')
+          if ((CHART_INTERVALS as readonly string[]).includes(s)) next.push(s as ChartInterval)
+        }
+        if (next.length > 0) setTrendAnalysisSelections(orderTrendSelections(next))
+        else setTrendAnalysisSelections(loadTrendAnalysisSelections())
+      } else {
+        setTrendAnalysisSelections(loadTrendAnalysisSelections())
+      }
       setFavoriteMlAutomationEnabled(Boolean(data.mlAutomationEnabled))
+      const rawAutoIv = typeof data.mlAutomationInterval === 'string' ? data.mlAutomationInterval.trim() : ''
+      setFavoriteMlAutomationBarInterval(
+        rawAutoIv && (CHART_INTERVALS as readonly string[]).includes(rawAutoIv) ? rawAutoIv : '',
+      )
+      setFavoriteMlAutomationPollInput(
+        typeof data.mlAutomationPollIntervalSeconds === 'number' &&
+          data.mlAutomationPollIntervalSeconds >= 15 &&
+          data.mlAutomationPollIntervalSeconds <= 3600
+          ? String(data.mlAutomationPollIntervalSeconds)
+          : '',
+      )
+      mlAutomationPollTouchedRef.current = false
       setMlAutomationError(null)
     } catch {
       // keep defaults
@@ -3936,19 +3971,44 @@ export function KiteInstrumentsPage() {
           rangePreset: chartRangePreset,
           graphType: chartGraphType,
           mlAutomationEnabled: favoriteMlAutomationEnabled,
+          trendAnalysisIntervals: orderTrendSelections(trendAnalysisSelections),
         })
         .catch(() => {
           /* non-fatal */
         })
     }, 400)
     return () => window.clearTimeout(t)
-  }, [chartInterval, chartRangePreset, chartGraphType, chartPrefsHydrated, favoriteMlAutomationEnabled])
+  }, [
+    chartInterval,
+    chartRangePreset,
+    chartGraphType,
+    chartPrefsHydrated,
+    favoriteMlAutomationEnabled,
+    trendAnalysisSelections,
+  ])
 
   const loadAutomationRecent = useCallback(async () => {
     try {
       setAutomationRecentLoading(true)
+      const fromTrim = automationEmailReportRange.from.trim()
+      const toTrim = automationEmailReportRange.to.trim()
+      const fromMs = Date.parse(fromTrim)
+      const toMs = Date.parse(toTrim)
+      const maxSpanMs = 93 * 24 * 60 * 60 * 1000
+      const rangeOk =
+        fromTrim.length > 0 &&
+        toTrim.length > 0 &&
+        Number.isFinite(fromMs) &&
+        Number.isFinite(toMs) &&
+        fromMs < toMs &&
+        toMs - fromMs <= maxSpanMs
       const { data } = await api.get<MlAutomationRecentRow[]>('/predictions/price-direction/automation-recent', {
-        params: { take: ML_AUTOMATION_RECENT_FETCH_TAKE },
+        params: {
+          take: ML_AUTOMATION_RECENT_FETCH_TAKE,
+          ...(rangeOk
+            ? { fromUtc: new Date(fromMs).toISOString(), toUtcExclusive: new Date(toMs).toISOString() }
+            : {}),
+        },
       })
       setAutomationRecent(data)
     } catch {
@@ -3956,7 +4016,7 @@ export function KiteInstrumentsPage() {
     } finally {
       setAutomationRecentLoading(false)
     }
-  }, [])
+  }, [automationEmailReportRange.from, automationEmailReportRange.to])
 
   const loadStatus = useCallback(async () => {
     setStatusLoading(true)
@@ -3989,6 +4049,56 @@ export function KiteInstrumentsPage() {
     }
   }, [isZerodha])
 
+  const saveFavoriteMlAutomationSchedule = useCallback(async () => {
+    setMlAutomationSaving(true)
+    setMlAutomationError(null)
+    try {
+      const intervalNorm =
+        favoriteMlAutomationBarInterval.trim() === ''
+          ? ''
+          : favoriteMlAutomationBarInterval.trim()
+      if (
+        intervalNorm !== '' &&
+        !(CHART_INTERVALS as readonly string[]).includes(intervalNorm)
+      ) {
+        setMlAutomationError('Pick a candle interval from the list, or inherit (empty).')
+        return
+      }
+      const body: { enabled: boolean; interval: string; pollIntervalSeconds?: number } = {
+        enabled: favoriteMlAutomationEnabled,
+        interval: intervalNorm,
+      }
+      if (mlAutomationPollTouchedRef.current) {
+        const raw = favoriteMlAutomationPollInput.trim()
+        if (raw === '') body.pollIntervalSeconds = 0
+        else {
+          const n = parseInt(raw, 10)
+          if (!Number.isFinite(n) || n < 15 || n > 3600) {
+            setMlAutomationError(
+              'Min seconds between new runs: leave blank (inherit) or enter a whole number 15–3600.',
+            )
+            return
+          }
+          body.pollIntervalSeconds = n
+        }
+      }
+      await api.put('/broker/kite/instruments/favorite-ml-automation', body)
+      mlAutomationPollTouchedRef.current = false
+      void loadChartSettings()
+      void loadAutomationRecent()
+    } catch (err) {
+      setMlAutomationError(problemDetail(err))
+    } finally {
+      setMlAutomationSaving(false)
+    }
+  }, [
+    favoriteMlAutomationEnabled,
+    favoriteMlAutomationBarInterval,
+    favoriteMlAutomationPollInput,
+    loadChartSettings,
+    loadAutomationRecent,
+  ])
+
   // Only poll automation rows while the user is actually on the Auto predictions tab —
   // the data isn't shown on Browse / Favorites / Locked, so a background 60s poll there
   // just burns API quota (and triggered backend "Too many requests").
@@ -3999,12 +4109,16 @@ export function KiteInstrumentsPage() {
       return
     }
     if (mainTab !== 'automation') return
-    void loadAutomationRecent()
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadAutomationRecent()
     }, 60_000)
     return () => window.clearInterval(id)
   }, [isZerodha, mainTab, loadAutomationRecent])
+
+  useEffect(() => {
+    if (!isZerodha || mainTab !== 'automation') return
+    void loadAutomationRecent()
+  }, [isZerodha, mainTab, automationEmailReportRange.from, automationEmailReportRange.to, loadAutomationRecent])
 
   useEffect(() => {
     if (!isZerodha || mainTab !== 'automation') return
@@ -4179,12 +4293,69 @@ export function KiteInstrumentsPage() {
                     void api
                       .put('/broker/kite/instruments/favorite-ml-automation', { enabled: v })
                       .then(() => {
+                        void loadChartSettings()
                         void loadAutomationRecent()
                       })
                       .catch((err) => setMlAutomationError(problemDetail(err)))
                       .finally(() => setMlAutomationSaving(false))
                   }}
                 />
+                <div className="d-flex flex-wrap align-items-end gap-2 small">
+                  <Form.Group className="mb-0">
+                    <Form.Label column={false} className="small text-secondary mb-0">
+                      Auto ML bar interval
+                    </Form.Label>
+                    <Form.Select
+                      size="sm"
+                      className="font-monospace"
+                      style={{ width: 'auto', minWidth: '6.5rem' }}
+                      value={favoriteMlAutomationBarInterval}
+                      onChange={(e) => setFavoriteMlAutomationBarInterval(e.target.value)}
+                      disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
+                      aria-label="Candle interval for server auto ML on favorites"
+                    >
+                      <option value="">Inherit (server / chart)</option>
+                      {CHART_INTERVALS.map((iv) => (
+                        <option key={iv} value={iv}>
+                          {iv}
+                        </option>
+                      ))}
+                    </Form.Select>
+                  </Form.Group>
+                  <Form.Group className="mb-0">
+                    <Form.Label column={false} className="small text-secondary mb-0">
+                      Min seconds between new runs
+                    </Form.Label>
+                    <Form.Control
+                      type="number"
+                      inputMode="numeric"
+                      min={15}
+                      max={3600}
+                      step={1}
+                      size="sm"
+                      style={{ width: '5.5rem' }}
+                      placeholder="—"
+                      value={favoriteMlAutomationPollInput}
+                      onChange={(e) => {
+                        mlAutomationPollTouchedRef.current = true
+                        setFavoriteMlAutomationPollInput(e.target.value)
+                      }}
+                      disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
+                      aria-label="Minimum seconds between automated new prediction passes"
+                    />
+                  </Form.Group>
+                  <Button
+                    type="button"
+                    variant="outline-secondary"
+                    size="sm"
+                    className="align-self-end"
+                    disabled={!chartPrefsHydrated || mlAutomationSaving || !isZerodha}
+                    title="Saves bar interval and optional throttle to your account (independent of the chart toolbar)."
+                    onClick={() => void saveFavoriteMlAutomationSchedule()}
+                  >
+                    {mlAutomationSaving ? 'Saving…' : 'Apply interval & timing'}
+                  </Button>
+                </div>
                 <div className="d-flex flex-wrap align-items-end gap-2 small">
                   <Form.Group className="mb-0">
                     <Form.Label column={false} className="small text-secondary mb-0">
@@ -4222,10 +4393,10 @@ export function KiteInstrumentsPage() {
                     size="sm"
                     className="text-secondary py-0 align-self-center"
                     disabled={automationReportEmailSending || !isZerodha}
-                    title="Restores defaults: roughly the last seven days ending at the current minute (browser local)."
+                    title="Restores defaults: local midnight today through the current minute."
                     onClick={() => setAutomationEmailReportRange(initialAutomationEmailReportDatetimeLocal())}
                   >
-                    Reset to last 7 days → now
+                    Reset to today → now
                   </Button>
                   <Button
                     type="button"
@@ -4298,8 +4469,8 @@ export function KiteInstrumentsPage() {
                 <span className="font-monospace">FavoriteMlAutomation:PredictionModelId</span>); LightGBM rows are stored
                 separately. Requires Kite session; <strong className="text-body-secondary">FavoriteMlAutomation</strong>{' '}
                 must be on in server config.
-                By default the server uses <strong>1m</strong> candles for automation so predictions are not held until
-                a 3m/5m bar closes. The list below requests up to{' '}
+                Use <strong>Auto ML bar interval</strong> above (and optional <strong>min seconds between new runs</strong>)
+                so automation does not wait for slower bars unless you want it to. The list below requests up to{' '}
                 <strong>{ML_AUTOMATION_RECENT_FETCH_TAKE.toLocaleString()}</strong> merged rows (classic + LightGBM).
                 <span className="d-block mt-1 text-muted" style={{ fontSize: '0.72rem' }}>
                   Server schedule (report timezone, default <strong>Asia/Kolkata</strong>): no <strong>new</strong> auto

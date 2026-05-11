@@ -88,8 +88,8 @@ public interface IBrokerService
     /// <summary>Persists chart UI settings after validation.</summary>
     Task SaveKiteInstrumentsChartSettingsAsync(Guid userId, KiteInstrumentsChartSettingsDto settings, CancellationToken ct = default);
 
-    /// <summary>Updates whether background favorite-ML automation is allowed for this user (server still requires global option + Kite).</summary>
-    Task SetFavoriteMlAutomationEnabledAsync(Guid userId, bool enabled, CancellationToken ct = default);
+    /// <summary>Updates favorite-ML automation toggle and optional per-user candle interval / new-pass throttle.</summary>
+    Task SetFavoriteMlAutomationAsync(Guid userId, FavoriteMlAutomationPutDto body, CancellationToken ct = default);
 
     /// <summary>Updates or clears saved zoom (visible bar count) for one instrument token.</summary>
     Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default);

@@ -438,8 +438,23 @@ public sealed class FavoriteMlAutomationService
             }
         }
 
-        if (suppressNewAutomationPredictions)
+        var suppressNewPredictions = suppressNewAutomationPredictions;
+        if (!suppressNewPredictions && user.FavoriteMlAutomationPollIntervalSeconds is int pollS && pollS > 0)
+        {
+            var sec = Math.Clamp(pollS, 15, 3600);
+            if (user.FavoriteMlAutomationLastNewPassUtc is DateTimeOffset last
+                && DateTimeOffset.UtcNow - last < TimeSpan.FromSeconds(sec))
+            {
+                suppressNewPredictions = true;
+            }
+        }
+
+        if (suppressNewPredictions)
             return;
+
+        await _chartSettings
+            .SetFavoriteMlAutomationLastNewPassUtcAsync(userId, DateTimeOffset.UtcNow, ct)
+            .ConfigureAwait(false);
 
         var engineIds = FavoriteMlAutomationModelSelection.ResolveEngineIdsToRun(
             _engineRegistry,
@@ -450,7 +465,7 @@ public sealed class FavoriteMlAutomationService
             ct.ThrowIfCancellationRequested();
             try
             {
-                var interval = IntervalForAutomation(globalInterval, intervalOverrides, fav.InstrumentToken);
+                var interval = IntervalForAutomation(user, globalInterval, intervalOverrides, fav.InstrumentToken);
                 var hist = await _broker
                     .GetKiteHistoricalCandlesAsync(userId, fav.InstrumentToken, interval, null, null, ct)
                     .ConfigureAwait(false);
@@ -541,10 +556,15 @@ public sealed class FavoriteMlAutomationService
     }
 
     private string IntervalForAutomation(
+        User user,
         string globalInterval,
         IReadOnlyDictionary<string, string> overrides,
         string instrumentToken)
     {
+        var userRaw = user.FavoriteMlAutomationInterval?.Trim();
+        if (!string.IsNullOrEmpty(userRaw))
+            return SafeNormalizeInterval(userRaw, "1m");
+
         var raw = _opts.PredictionIntervalOverride?.Trim();
         if (!string.IsNullOrEmpty(raw))
             return SafeNormalizeInterval(raw, "1m");
