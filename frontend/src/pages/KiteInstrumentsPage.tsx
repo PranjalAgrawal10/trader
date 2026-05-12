@@ -525,8 +525,8 @@ function ManualPaperTradePanel({
       ) : null}
       <Row className="g-2 align-items-end mb-3">
         <Col xs={6} sm={4} md={3}>
-          <Form.Group controlId={`${idPrefix}-paper-contracts`} className="mb-0">
-            <Form.Label className="small text-secondary mb-1">Contracts (each row)</Form.Label>
+          <Form.Group controlId={`${idPrefix}-paper-lots`} className="mb-0">
+            <Form.Label className="small text-secondary mb-1">Lots (per Buy / Sell)</Form.Label>
             <Form.Control
               size="sm"
               type="text"
@@ -535,7 +535,7 @@ function ManualPaperTradePanel({
               value={demoPaperContracts}
               onChange={(e) => setDemoPaperContracts(e.target.value)}
               disabled={tradingInFlight}
-              aria-describedby={`${idPrefix}-contracts-help`}
+              aria-describedby={`${idPrefix}-lots-help`}
             />
           </Form.Group>
         </Col>
@@ -551,8 +551,10 @@ function ManualPaperTradePanel({
           </Button>
         </Col>
       </Row>
-      <Form.Text id={`${idPrefix}-contracts-help`} className="text-muted d-block small mb-2">
-        One size for every <strong>Buy</strong>/<strong>Sell</strong>. Highlighted row matches the scalper symbol (click symbol to select).
+      <Form.Text id={`${idPrefix}-lots-help`} className="text-muted d-block small mb-2">
+        One value for every <strong>Buy</strong>/<strong>Sell</strong>. Each <strong>lot</strong> = Kite{' '}
+        <strong>lot size × LTP</strong> (cash debited/credited). Quantity in shares/units for that fill ={' '}
+        <strong>lots × lot size</strong>. Highlighted row matches the scalper symbol (click symbol to select).
       </Form.Text>
       {!isZerodha || tradingLocks.length === 0 ? (
         <p className="small text-muted mb-0 py-3 border rounded px-3 bg-body-tertiary">
@@ -574,7 +576,7 @@ function ManualPaperTradePanel({
                 <th scope="col">Type</th>
                 <th scope="col">Lot</th>
                 <th scope="col" className="text-end">
-                  Open long
+                  Open (lots)
                 </th>
                 <th scope="col" className="text-end text-nowrap">
                   Actions
@@ -677,7 +679,7 @@ function ManualPaperTradePanel({
                   <th scope="col">Symbol</th>
                   <th scope="col">Ex</th>
                   <th scope="col" className="text-end">
-                    Contracts
+                    Lots
                   </th>
                   <th scope="col" className="text-end">
                     LTP
@@ -692,7 +694,7 @@ function ManualPaperTradePanel({
                     Wallet after
                   </th>
                   <th scope="col" className="text-end">
-                    Open long after
+                    Open lots after
                   </th>
                 </tr>
               </thead>
@@ -741,7 +743,7 @@ function ManualPaperTradePanel({
               key={p.instrumentToken}
               className={`font-monospace py-1 ${idx < demoPaperPositions.length - 1 ? 'border-bottom border-secondary-subtle' : ''}`}
             >
-              {p.tradingsymbol} · open {p.openContracts} contract{p.openContracts === 1 ? '' : 's'}
+              {p.tradingsymbol} · open {p.openContracts} lot{p.openContracts === 1 ? '' : 's'}
               {p.lotSize != null ? ` · lot ${p.lotSize}` : ''}
             </div>
           ))}
@@ -4708,8 +4710,8 @@ function InstrumentChartCard({
               and an optional custom-period <strong>EMA</strong>. A cyan dashed <strong>LTP</strong> line tracks the streamed last
               price on candles, line, and bar views when subscribed; live ticks also update the in-progress{' '}
               <strong>candle</strong> in Candles view. Lime dashed verticals mark candles where OPEN demo{' '}
-              <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> contracts); an{' '}
-              <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold contracts.{' '}
+              <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> lots); an{' '}
+              <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold lots.{' '}
               <strong>ML next-bar bias</strong> calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
               <span className="font-monospace">model</span> query (see{' '}
@@ -5440,7 +5442,7 @@ export function KiteInstrumentsPage() {
         return
       }
       if (!Number.isFinite(n) || n < 1) {
-        setDemoPaperTradeError('Contracts must be a whole number ≥ 1.')
+        setDemoPaperTradeError('Lots must be a whole number ≥ 1.')
         return
       }
       setDemoPaperTradeBusy({ side, instrumentToken: token })
@@ -5456,7 +5458,7 @@ export function KiteInstrumentsPage() {
         setDemoPaperToken(token)
         setDemoAutoTradeNotionalInr(data.walletBalanceAfter)
         setDemoPaperTradeLast(
-          `${side.toUpperCase()} ${data.contracts} × ${data.tradingsymbol} @ ${data.lastPrice.toFixed(4)} — cash ${formatInrRupee(data.cashFlowInr)} · wallet ${formatInrRupee(data.walletBalanceAfter)} · open ${data.openContractsAfter}`,
+          `${side.toUpperCase()} ${data.contracts} lot${data.contracts === 1 ? '' : 's'} × ${data.tradingsymbol} @ ${data.lastPrice.toFixed(4)} (lot size ${data.lotSize}) — cash ${formatInrRupee(data.cashFlowInr)} · wallet ${formatInrRupee(data.walletBalanceAfter)} · open ${data.openContractsAfter}`,
         )
         await Promise.all([loadDemoPaperPositions(), loadDemoPaperTrades()])
         await loadDemoEodSummary()
@@ -6986,7 +6988,8 @@ export function KiteInstrumentsPage() {
                 intro={
                   <p className="small text-secondary mb-0">
                     Each locked row: <strong>Buy</strong> debits the wallet, <strong>Sell</strong> credits and closes open longs
-                    (Kite LTP × saved lot). Use one <strong>Contracts</strong> value for every action. No broker orders.
+                    (Kite <strong>LTP × lot size × lots</strong>). Use one <strong>Lots</strong> field for Buy and Sell on every row (API field{' '}
+                    <span className="font-monospace">contracts</span> = lots). No broker orders.
                     Add locks on <Link to="/instruments?tab=locked">Locked for trading</Link>.
                   </p>
                 }
@@ -7168,9 +7171,9 @@ export function KiteInstrumentsPage() {
                     <p className="small text-secondary mb-2">
                       Same calendar day and <strong>Locked for trading</strong> filter as EOD; rows refresh about every{' '}
                       <strong>12s</strong> while <strong>Demo auto-trade</strong> is open. Hypothetical P&amp;L uses Kite{' '}
-                      <strong>lot sizes</strong> saved on locks: each leg&apos;s INR slice is floored to whole contracts using
+                      <strong>lot sizes</strong> saved on locks: each leg&apos;s INR slice is floored to whole lots using
                       next open→next close (when present) vs ref close→next close; <strong>Buy</strong> / <strong>Sell</strong>{' '}
-                      follow long vs short semantics; gross ₹ is (sell − buy) × lot × contracts for long/up and the inverse for
+                      follow long vs short semantics; gross ₹ is (sell − buy) × lot size × lots for long/up and the inverse for
                       short/down (before illustrative fees).
                     </p>
                     {demoTodayLegsError ? (
@@ -7304,7 +7307,7 @@ export function KiteInstrumentsPage() {
                                       </span>
                                     ) : null}
                                   </td>
-                                  <td className="text-end text-nowrap font-monospace" title="Contracts × lot multiplier">
+                                  <td className="text-end text-nowrap font-monospace" title="Lots × lot size × price">
                                     {(leg.instrumentLotMultiplier ?? 0) > 0 && (leg.demoWholeLotsTraded ?? 0) > 0
                                       ? `${leg.demoWholeLotsTraded}×${leg.instrumentLotMultiplier}`
                                       : '—'}

@@ -335,6 +335,65 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         return new KiteInstrumentsFetchResult(true, null, items, scanTruncated);
     }
 
+    /// <inheritdoc />
+    public async Task<KiteInstrumentsFetchResult> FetchInstrumentRowByTokenAsync(
+        string exchange,
+        string instrumentToken,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(exchange))
+            return new KiteInstrumentsFetchResult(false, "exchange is required.", Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        var tokenNeedle = instrumentToken.Trim();
+        if (tokenNeedle.Length == 0 || !tokenNeedle.All(char.IsAsciiDigit))
+            return new KiteInstrumentsFetchResult(false, "A numeric instrument_token is required.", Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        var exRaw = exchange.Trim();
+        var exUpper = exRaw.ToUpperInvariant();
+        var exEscaped = Uri.EscapeDataString(exRaw);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"instruments/{exEscaped}");
+        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return new KiteInstrumentsFetchResult(false, $"instruments/{exUpper}: not found.", Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for instruments/{exUpper}.";
+            return new KiteInstrumentsFetchResult(false, msg, Array.Empty<KiteInstrumentListItemDto>(), false);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream);
+
+        if (await reader.ReadLineAsync(ct) is null)
+            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            var row = TryParseRow(line);
+            if (row is null || !string.Equals(row.InstrumentToken, tokenNeedle, StringComparison.Ordinal))
+                continue;
+
+            if (!string.Equals(row.Exchange.Trim(), exUpper, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            return new KiteInstrumentsFetchResult(true, null, new[] { row }, false);
+        }
+
+        return new KiteInstrumentsFetchResult(
+            false,
+            $"Instrument token {tokenNeedle} was not found on exchange {exUpper}.",
+            Array.Empty<KiteInstrumentListItemDto>(),
+            false);
+    }
+
     /// <summary>
     /// Kite spot (NSE+BSE) universe: cash EQ/BE/BZ, <c>instrument_type</c> INDEX if present, and indices marked <c>segment=INDICES</c> (often <c>instrument_type</c> EQ per Kite — same as stocks).
     /// </summary>

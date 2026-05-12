@@ -152,7 +152,7 @@ public sealed class DemoAutoTradePutDto
     public string? Strategy { get; set; }
 }
 
-/// <summary>Manual paper buy/sell at Kite LTP for a <strong>Locked for trading</strong> instrument (adjusts wallet; no orders).</summary>
+/// <summary>Manual paper buy/sell at Kite LTP for a Locked for trading instrument (adjusts wallet; no orders).</summary>
 public sealed class DemoPaperTradeRequestDto
 {
     public string? InstrumentToken { get; set; }
@@ -160,7 +160,10 @@ public sealed class DemoPaperTradeRequestDto
     /// <summary><c>buy</c> or <c>sell</c> (close long).</summary>
     public string? Side { get; set; }
 
-    /// <summary>Whole contracts; each uses lot size × LTP from the lock + quote.</summary>
+    /// <summary>
+    /// Number of exchange lots (Kite <c>lot_size</c> units per lot). Notional per fill ≈ <c>lots × lot_size × LTP</c> (server rounding applies).
+    /// JSON property name remains <c>contracts</c> for compatibility.
+    /// </summary>
     public int Contracts { get; set; }
 }
 
@@ -169,11 +172,13 @@ public sealed record DemoPaperTradeResultDto(
     string Tradingsymbol,
     string Exchange,
     string Side,
+    /// <summary>Exchange lots (JSON: <c>contracts</c>).</summary>
     int Contracts,
     decimal LastPrice,
     int LotSize,
     decimal CashFlowInr,
     decimal WalletBalanceAfter,
+    /// <summary>Open long in lots (same unit as <see cref="Contracts"/>).</summary>
     int OpenContractsAfter);
 
 /// <summary>Append-only manual demo paper fills (newest rows returned first).</summary>
@@ -184,6 +189,7 @@ public sealed record DemoPaperTradeHistoryRowDto(
     string Tradingsymbol,
     string Exchange,
     string Side,
+    /// <summary>Exchange lots (JSON: <c>contracts</c>).</summary>
     int Contracts,
     decimal LastPrice,
     int LotSize,

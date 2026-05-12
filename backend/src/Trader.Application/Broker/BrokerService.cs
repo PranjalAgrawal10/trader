@@ -851,7 +851,7 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException("Side must be buy or sell.");
 
         if (request.Contracts < 1 || request.Contracts > 1_000_000)
-            throw new InvalidOperationException("Contracts must be between 1 and 1,000,000.");
+            throw new InvalidOperationException("Lots must be between 1 and 1,000,000.");
 
         await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
 
@@ -859,9 +859,33 @@ public sealed class BrokerService : IBrokerService
         if (lockRow is null)
             throw new InvalidOperationException("Instrument must be in Locked for trading to paper trade.");
 
-        if (lockRow.LotSize is not int lotMult || lotMult < 1)
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var instrumentRowFetch = await _kiteInstruments
+            .FetchInstrumentRowByTokenAsync(lockRow.Exchange, token, apiKey, accessToken, ct)
+            .ConfigureAwait(false);
+
+        int lotMult;
+        if (instrumentRowFetch.Success
+            && instrumentRowFetch.Items.Count == 1
+            && instrumentRowFetch.Items[0].LotSize is int kiteLot
+            && kiteLot >= 1)
+        {
+            lotMult = kiteLot;
+            if (lockRow.LotSize != lotMult)
+                lockRow.LotSize = lotMult;
+        }
+        else if (lockRow.LotSize is int lockedLot && lockedLot >= 1)
+        {
+            lotMult = lockedLot;
+        }
+        else
+        {
+            var hint = instrumentRowFetch.ErrorMessage ?? "instrument row was not returned.";
             throw new InvalidOperationException(
-                "This lock is missing lot size; remove it from Locked for trading and add the symbol again from search.");
+                $"Could not resolve exchange lot size ({hint}). Remove the lock and add the symbol again from search.");
+        }
+
+        var lots = request.Contracts;
 
         var quote = await GetKiteInstrumentLiveQuoteAsync(userId, lockRow.Exchange, lockRow.Tradingsymbol, ct)
             .ConfigureAwait(false);
@@ -870,7 +894,10 @@ public sealed class BrokerService : IBrokerService
         if (ltp <= 0)
             throw new InvalidOperationException("Could not read a positive last price for this instrument.");
 
-        var legCash = decimal.Round(decimal.Round(ltp * lotMult, 2, MidpointRounding.AwayFromZero) * request.Contracts, 2, MidpointRounding.AwayFromZero);
+        var legCash = decimal.Round(
+            decimal.Round(ltp * lotMult, 2, MidpointRounding.AwayFromZero) * lots,
+            2,
+            MidpointRounding.AwayFromZero);
 
         var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
         if (user is null)
@@ -903,7 +930,7 @@ public sealed class BrokerService : IBrokerService
                 _demoPaperPositions.Add(pos);
             }
 
-            pos.OpenContracts += request.Contracts;
+            pos.OpenContracts += lots;
             pos.UpdatedAtUtc = DateTimeOffset.UtcNow;
             openAfter = pos.OpenContracts;
 
@@ -913,18 +940,18 @@ public sealed class BrokerService : IBrokerService
                     Id = Guid.NewGuid(),
                     UserId = userId,
                     InstrumentToken = token,
-                    ContractsRemaining = request.Contracts,
+                    ContractsRemaining = lots,
                     BoughtAtUtc = DateTimeOffset.UtcNow,
                 });
         }
         else
         {
-            if (pos is null || pos.OpenContracts < request.Contracts)
-                throw new InvalidOperationException("Not enough open paper contracts to sell.");
+            if (pos is null || pos.OpenContracts < lots)
+                throw new InvalidOperationException("Not enough open lots to sell.");
 
-            await _demoPaperBuyLegs.ApplyFifoSellAsync(userId, token, request.Contracts, ct).ConfigureAwait(false);
+            await _demoPaperBuyLegs.ApplyFifoSellAsync(userId, token, lots, ct).ConfigureAwait(false);
 
-            pos.OpenContracts -= request.Contracts;
+            pos.OpenContracts -= lots;
             pos.UpdatedAtUtc = DateTimeOffset.UtcNow;
             openAfter = pos.OpenContracts;
 
@@ -946,7 +973,7 @@ public sealed class BrokerService : IBrokerService
                 Tradingsymbol = lockRow.Tradingsymbol,
                 Exchange = lockRow.Exchange,
                 Side = side,
-                Contracts = request.Contracts,
+                Contracts = lots,
                 LastPrice = ltp,
                 LotSize = lotMult,
                 CashFlowInr = cashFlow,
@@ -962,7 +989,7 @@ public sealed class BrokerService : IBrokerService
             lockRow.Tradingsymbol,
             lockRow.Exchange,
             side,
-            request.Contracts,
+            lots,
             ltp,
             lotMult,
             cashFlow,

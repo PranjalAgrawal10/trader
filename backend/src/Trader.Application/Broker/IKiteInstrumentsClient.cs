@@ -25,6 +25,16 @@ public interface IKiteInstrumentsClient
         bool equityCashOnly = false,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Streams Kite <c>/instruments/{exchange}</c> until the row with matching <paramref name="instrumentToken"/> is found (authoritative <c>lot_size</c>).
+    /// </summary>
+    Task<KiteInstrumentsFetchResult> FetchInstrumentRowByTokenAsync(
+        string exchange,
+        string instrumentToken,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
+
     /// <summary>Kite <c>GET /instruments/historical/{token}/{interval}</c> — <paramref name="fromUtc"/> / <paramref name="toUtc"/> are converted to IST in the query string.</summary>
     Task<KiteHistoricalFetchResult> FetchHistoricalCandlesAsync(
         string instrumentToken,
