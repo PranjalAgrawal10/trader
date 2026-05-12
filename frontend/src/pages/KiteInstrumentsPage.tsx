@@ -51,7 +51,7 @@ import {
 } from '../api/kiteChartHistorical'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
-import { ManualTradeCeLiveChart } from '../components/ManualTradeCeLiveChart'
+import { ManualTradeScalperView } from '../components/ManualTradeScalperView'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { CandlestickChart } from '../components/CandlestickChart'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
@@ -85,6 +85,7 @@ import {
   CUSTOM_EMA_PERIOD_MAX,
   CUSTOM_EMA_PERIOD_MIN,
   DEFAULT_MA_LINE_VISIBILITY,
+  extendYDomainWithLivePrice,
   MA_EMA_FAST_PERIOD,
   MA_EMA_SLOW_PERIOD,
   MA_LINE_COLORS,
@@ -96,7 +97,6 @@ import {
   type MaLineVisibility,
 } from '../utils/movingAverages'
 import { LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
-import { isKiteCeOption } from '../utils/scalperChartHelpers'
 
 interface BrokerStatusResponse {
   connected: boolean
@@ -4156,10 +4156,21 @@ function InstrumentChartCard({
 
   const chartData = useMemo(() => sliceChartForZoom(displayWithMa, zoomVisibleBars), [displayWithMa, zoomVisibleBars])
 
-  const rechartsYDomain = useMemo(
-    () => yDomainForOhlcAndVisibleMas(chartData, maLineVisibility),
-    [chartData, maLineVisibility],
-  )
+  const rechartsYDomain = useMemo(() => {
+    const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
+    return extendYDomainWithLivePrice(base, liveLastPrice)
+  }, [chartData, maLineVisibility, liveLastPrice])
+
+  const liveLtpReferenceLine =
+    liveLastPrice != null && Number.isFinite(liveLastPrice) ? (
+      <ReferenceLine
+        y={liveLastPrice}
+        stroke="#38bdf8"
+        strokeWidth={1.65}
+        strokeDasharray="6 7"
+        label={{ value: 'LTP', position: 'insideRight', fill: '#38bdf8', fontSize: 10, fontWeight: 600 }}
+      />
+    ) : null
 
   const onChartZoomIn = useCallback(() => {
     onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, displayWithMa.length))
@@ -4328,6 +4339,7 @@ function InstrumentChartCard({
                       data={chartData}
                       maLineVisibility={maLineVisibility}
                       customEmaPeriod={customEmaApplied}
+                      livePrice={liveLastPrice ?? null}
                     />
                   ) : (
                     <div className="position-relative w-100 h-100">
@@ -4357,6 +4369,7 @@ function InstrumentChartCard({
                               />
                               <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                              {liveLtpReferenceLine}
                             </LineChart>
                           ) : (
                             <ComposedChart data={chartData} margin={CHART_MARGINS}>
@@ -4381,6 +4394,7 @@ function InstrumentChartCard({
                               />
                               <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                              {liveLtpReferenceLine}
                             </ComposedChart>
                           )}
                         </ResponsiveContainer>
@@ -4394,9 +4408,9 @@ function InstrumentChartCard({
               Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible.
               Charts include <strong>SMA 20</strong>, <strong>EMA 9</strong>, <strong>EMA 21</strong>, optional S/R bands,
               optional <strong>Trend LR</strong> on <strong>candles</strong> (least-squares regression on close over zoomed bars),
-              and an optional custom-period <strong>EMA</strong>. Live <strong>LTP</strong> and in-progress{' '}
-              <strong>candle</strong> (Candles view) use SignalR + Kite WebSocket when a row is selected (market hours /
-              session). <strong>ML next-bar bias</strong> calls{' '}
+              and an optional custom-period <strong>EMA</strong>. A cyan dashed <strong>LTP</strong> line tracks the streamed last
+              price on candles, line, and bar views when subscribed; live ticks also update the in-progress{' '}
+              <strong>candle</strong> in Candles view. <strong>ML next-bar bias</strong> calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
               <span className="font-monospace">model</span> query (see{' '}
               <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.
@@ -4463,18 +4477,6 @@ export function KiteInstrumentsPage() {
   const favoriteKeySet = useMemo(() => new Set(favorites.map(favoriteRowKey)), [favorites])
 
   const tradingLockKeySet = useMemo(() => new Set(tradingLocks.map(favoriteRowKey)), [tradingLocks])
-
-  const ceLocksForManualTradeChart = useMemo(
-    () =>
-      tradingLocks
-        .filter(isKiteCeOption)
-        .map((r) => ({
-          instrumentToken: r.instrumentToken,
-          tradingsymbol: r.tradingsymbol,
-          exchange: r.exchange,
-        })),
-    [tradingLocks],
-  )
 
   const favoriteByInstrumentToken = useMemo(() => {
     const m = new Map<string, KiteInstrumentRow>()
@@ -6598,10 +6600,15 @@ export function KiteInstrumentsPage() {
                 </Alert>
               ) : null}
               <p className="small text-secondary mb-0">
-                <strong>CE chart</strong> uses locks with instrument type CE (calls). Paper buy/sell still uses any{' '}
-                <Link to="/instruments?tab=locked">locked</Link> derivative.
+                <strong>Scalper view</strong>: live candles and LTP ticks for whichever lock you select — the same instrument
+                is used for manual paper buy/sell below.
               </p>
-              <ManualTradeCeLiveChart isZerodha={isZerodha} ceLocks={ceLocksForManualTradeChart} />
+              <ManualTradeScalperView
+                isZerodha={isZerodha}
+                tradingLocks={tradingLocks}
+                selectedInstrumentToken={demoPaperToken}
+                onSelectedInstrumentTokenChange={setDemoPaperToken}
+              />
               <ManualPaperTradePanel
                 heading={<h2 className="h6 text-body mb-2">Manual paper trade</h2>}
                 intro={

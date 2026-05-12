@@ -150,6 +150,30 @@ export function yDomainForOhlcAndVisibleMas(
   return [min - pad, max + pad]
 }
 
+/** Include a streamed quote so the chart Y scale and overlays keep the live price visible. */
+export function extendYDomainWithLivePrice(
+  domain: [number, number] | undefined,
+  livePrice: number | null | undefined,
+): [number, number] | undefined {
+  if (livePrice == null || !Number.isFinite(livePrice)) return domain
+  if (!domain) {
+    const pad = livePrice === 0 ? 1 : Math.abs(livePrice) * 0.001
+    return [livePrice - pad, livePrice + pad]
+  }
+  let min = domain[0]
+  let max = domain[1]
+  min = Math.min(min, livePrice)
+  max = Math.max(max, livePrice)
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return domain
+  if (min === max) {
+    const pad = min === 0 ? 1 : Math.abs(min) * 0.001
+    return [min - pad, max + pad]
+  }
+  const span = max - min
+  const pad = span * 0.02
+  return [min - pad, max + pad]
+}
+
 export function attachMovingAverages(points: ChartPointOhlc[]): ChartPointWithMa[] {
   if (points.length === 0) return []
 

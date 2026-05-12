@@ -96,9 +96,3 @@ export function pctChange(prev: number, next: number): string {
   const p = ((next - prev) / prev) * 100
   return p >= 0 ? `+${p.toFixed(2)}%` : `${p.toFixed(2)}%`
 }
-
-/** Kite F&amp;O call options use instrument type CE. */
-export function isKiteCeOption(row: { instrumentType?: string | null }): boolean {
-  const t = (row.instrumentType ?? '').trim().toUpperCase()
-  return t === 'CE'
-}

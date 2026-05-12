@@ -424,7 +424,12 @@ export function ScalperPage() {
                 </div>
               ) : selected && displaySeries.length > 0 ? (
                 <div style={{ height: 'min(62vh, 560px)', minHeight: '320px' }}>
-                  <CandlestickChart data={displaySeries} maLineVisibility={SCALPER_MA} customEmaPeriod={null} />
+                  <CandlestickChart
+                    data={displaySeries}
+                    maLineVisibility={SCALPER_MA}
+                    customEmaPeriod={null}
+                    livePrice={live.lastPrice}
+                  />
                 </div>
               ) : selected && !chartLoading ? (
                 <p className="text-muted small mb-0">No candle data returned for this range.</p>

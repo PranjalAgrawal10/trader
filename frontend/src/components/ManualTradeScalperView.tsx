@@ -20,10 +20,11 @@ import {
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import type { ChartPointWithMa } from '../utils/movingAverages'
 
-export interface ManualTradeCeChartInstrument {
+export interface ManualTradeScalperInstrument {
   instrumentToken: string
   tradingsymbol: string
   exchange: string
+  instrumentType?: string | null
 }
 
 function problemDetail(err: unknown): string {
@@ -34,15 +35,18 @@ function problemDetail(err: unknown): string {
   return 'Request failed.'
 }
 
-/** Live candlestick strip (scalper-style) scoped to CE locks — used on Manual paper trade. */
-export function ManualTradeCeLiveChart({
+/** Tight-interval candles + live ticks (same behaviour as `/scalper`), bound to locks and manual paper-trade symbol. */
+export function ManualTradeScalperView({
   isZerodha,
-  ceLocks,
+  tradingLocks,
+  selectedInstrumentToken,
+  onSelectedInstrumentTokenChange,
 }: {
   isZerodha: boolean
-  ceLocks: ManualTradeCeChartInstrument[]
+  tradingLocks: ManualTradeScalperInstrument[]
+  selectedInstrumentToken: string
+  onSelectedInstrumentTokenChange: (instrumentToken: string) => void
 }) {
-  const [chartToken, setChartToken] = useState<string>('')
   const [interval, setInterval] = useState<ScalperInterval>('1m')
   const [rangePreset, setRangePreset] = useState<ScalperRange>('last30m')
   const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
@@ -51,17 +55,9 @@ export function ManualTradeCeLiveChart({
   const [chartLoading, setChartLoading] = useState(false)
 
   const selected = useMemo(
-    () => ceLocks.find((r) => r.instrumentToken === chartToken) ?? null,
-    [ceLocks, chartToken],
+    () => tradingLocks.find((r) => r.instrumentToken === selectedInstrumentToken) ?? null,
+    [tradingLocks, selectedInstrumentToken],
   )
-
-  useEffect(() => {
-    if (ceLocks.length === 0) {
-      setChartToken('')
-      return
-    }
-    setChartToken((t) => (t && ceLocks.some((c) => c.instrumentToken === t) ? t : ceLocks[0]!.instrumentToken))
-  }, [ceLocks])
 
   const live = useLiveMarketTick(selected?.instrumentToken ?? null, isZerodha && selected != null)
 
@@ -123,15 +119,18 @@ export function ManualTradeCeLiveChart({
 
   if (!isZerodha) return null
 
-  if (ceLocks.length === 0) {
+  const typeLabel = selected?.instrumentType?.trim()
+  const instLabel = manualTradeScalperFormatInstrumentLabel(selected)
+
+  if (tradingLocks.length === 0) {
     return (
       <Card className="border-secondary">
-        <Card.Header className="py-2 small fw-semibold">Live CE chart (scalper)</Card.Header>
+        <Card.Header className="py-2 small fw-semibold">Scalper view</Card.Header>
         <Card.Body className="py-3">
           <p className="small text-secondary mb-2">
-            No <strong>call (CE)</strong> contracts in <strong>Locked for trading</strong>. Add CE option locks to see
-            live candles here, or use the full{' '}
-            <Link to="/scalper">Scalper</Link> page for any symbol.
+            No <strong>Locked for trading</strong> instruments yet. Add a lock to chart and paper-trade the same symbol
+            here, or open the standalone{' '}
+            <Link to="/scalper">Scalper</Link> page.
           </p>
           <Link to="/instruments?tab=locked" className="btn btn-outline-secondary btn-sm">
             Open locks
@@ -145,10 +144,10 @@ export function ManualTradeCeLiveChart({
     <Card className="border-secondary">
       <Card.Header className="py-2 d-flex flex-wrap align-items-center gap-2 justify-content-between">
         <div className="d-flex flex-wrap align-items-center gap-2">
-          <span className="small fw-semibold text-uppercase text-secondary letter-spacing-1">Live CE (scalper)</span>
+          <span className="small fw-semibold text-uppercase text-secondary letter-spacing-1">Scalper view</span>
           {selected ? (
             <>
-              <Badge bg="secondary">CE</Badge>
+              {instLabel !== null ? <Badge bg="secondary">{instLabel}</Badge> : null}
               <span className="fw-semibold font-monospace small">{selected.tradingsymbol}</span>
               <Badge bg="dark">{selected.exchange}</Badge>
               {live.lastPrice != null ? (
@@ -162,7 +161,9 @@ export function ManualTradeCeLiveChart({
                 </span>
               ) : null}
             </>
-          ) : null}
+          ) : (
+            <span className="text-muted small">Pick a locked symbol below.</span>
+          )}
         </div>
         <Link to="/scalper" className="btn btn-outline-secondary btn-sm">
           Full scalper
@@ -171,15 +172,21 @@ export function ManualTradeCeLiveChart({
       <Card.Body className="p-2 p-md-3">
         <Row className="g-2 align-items-end mb-2">
           <Col xs={12} md>
-            <Form.Group controlId="manual-trade-ce-symbol" className="mb-0">
-              <Form.Label className="small text-secondary mb-1">CE lock</Form.Label>
+            <Form.Group controlId="manual-trade-scalper-symbol" className="mb-0">
+              <Form.Label className="small text-secondary mb-1">
+                Locked instrument <span className="text-muted">(same as paper trade)</span>
+              </Form.Label>
               <Form.Select
                 size="sm"
-                value={chartToken}
-                onChange={(e) => setChartToken(e.target.value)}
-                aria-label="Select call option lock for chart"
+                value={
+                  tradingLocks.some((r) => r.instrumentToken === selectedInstrumentToken.trim())
+                    ? selectedInstrumentToken
+                    : tradingLocks[0]?.instrumentToken ?? ''
+                }
+                onChange={(e) => onSelectedInstrumentTokenChange(e.target.value)}
+                aria-label="Locked instrument for scalper and paper trade"
               >
-                {ceLocks.map((r) => (
+                {tradingLocks.map((r) => (
                   <option key={r.instrumentToken} value={r.instrumentToken}>
                     {r.tradingsymbol} ({r.exchange})
                   </option>
@@ -213,11 +220,18 @@ export function ManualTradeCeLiveChart({
           </Col>
         </Row>
 
+        {typeLabel?.length ? (
+          <p className="small text-muted mb-2 mb-md-3">
+            Instrument type{' '}
+            <span className="font-monospace">{typeLabel}</span> · polls ~{SCALPER_POLL_MS / 1000}s + live ticks when
+            open.
+          </p>
+        ) : null}
+
         {chartError ? <Alert variant="danger" className="py-2 small mb-2">{chartError}</Alert> : null}
         {candleMeta ? (
           <div className="small text-muted mb-2 font-monospace">
-            {candleMeta.interval} · {formatLocalDateTime(candleMeta.from)} → {formatLocalDateTime(candleMeta.to)} · poll
-            ~{SCALPER_POLL_MS / 1000}s + ticks
+            {candleMeta.interval} · {formatLocalDateTime(candleMeta.from)} → {formatLocalDateTime(candleMeta.to)}
           </div>
         ) : null}
 
@@ -228,12 +242,31 @@ export function ManualTradeCeLiveChart({
           </div>
         ) : selected && displaySeries.length > 0 ? (
           <div style={{ height: 'min(48vh, 440px)', minHeight: '260px' }}>
-            <CandlestickChart data={displaySeries} maLineVisibility={SCALPER_MA} customEmaPeriod={null} />
+            <CandlestickChart
+              data={displaySeries}
+              maLineVisibility={SCALPER_MA}
+              customEmaPeriod={null}
+              livePrice={live.lastPrice}
+            />
           </div>
         ) : selected && !chartLoading ? (
           <p className="text-muted small mb-0">No candle data for this range.</p>
+        ) : !selected ? (
+          <p className="text-muted small mb-0">Select an instrument.</p>
         ) : null}
       </Card.Body>
     </Card>
   )
+}
+
+function manualTradeScalperFormatInstrumentLabel(row: ManualTradeScalperInstrument | null): string | null {
+  if (!row) return null
+  const raw = row.instrumentType?.trim().toUpperCase()
+  if (!raw) return null
+  if (raw === 'EQ') return 'EQ'
+  if (raw === 'CE') return 'CE'
+  if (raw === 'PE') return 'PE'
+  if (raw === 'FUT') return 'Fut'
+  if (raw.length <= 12) return raw
+  return raw.slice(0, 11) + '…'
 }

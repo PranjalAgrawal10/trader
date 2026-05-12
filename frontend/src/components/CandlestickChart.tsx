@@ -28,6 +28,16 @@ const CANDLE = {
   text: '#adb5bd',
 }
 
+/** Horizontal guide for streamed last price (SignalR ticks), drawn above candles. */
+const LIVE_LTP_LINE = '#38bdf8'
+
+function formatChartLivePriceLabel(p: number): string {
+  if (!Number.isFinite(p)) return ''
+  const a = Math.abs(p)
+  const digits = a >= 100 ? 2 : a >= 1 ? 4 : 4
+  return p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: digits })
+}
+
 type MaKey = keyof Pick<
   ChartPointWithMa,
   'sma20' | 'ema9' | 'ema21' | 'emaCustom' | 'srSupport' | 'srResistance'
@@ -116,11 +126,14 @@ export function CandlestickChart({
   data,
   maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
   customEmaPeriod = null,
+  livePrice = null,
 }: {
   data: ChartPointWithMa[]
   maLineVisibility?: MaLineVisibility
   /** Period label in the corner legend (values come from <code>data[].emaCustom</code>). */
   customEmaPeriod?: number | null
+  /** Draw a horizontal LTP guide when streamed quotes are available (e.g. market hub ticks). */
+  livePrice?: number | null
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
@@ -193,6 +206,11 @@ export function CandlestickChart({
         }
       }
     }
+    const lp = livePrice
+    if (lp != null && Number.isFinite(lp)) {
+      min = Math.min(min, lp)
+      max = Math.max(max, lp)
+    }
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null
     if (min === max) {
       const pad = min === 0 ? 1 : Math.abs(min) * 0.001
@@ -257,7 +275,7 @@ export function CandlestickChart({
       xTicks,
       plotBottomY,
     }
-  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod])
+  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice])
 
   const yTicks = useMemo(() => {
     if (!layout) return []
@@ -274,10 +292,13 @@ export function CandlestickChart({
 
   if (data.length === 0) return null
 
+  const livePriceShown =
+    livePrice != null && Number.isFinite(livePrice) ? (livePrice as number) : null
+
   return (
     <div ref={ref} className="w-100 h-100 position-relative">
       {layout ? (
-        <svg width={w} height={h} className="d-block" role="img" aria-label="OHLC candlestick chart with MA, EMA, and optional linear close trend">
+        <svg width={w} height={h} className="d-block" role="img" aria-label="OHLC candlestick chart with overlays and optional live last-price line">
           {yTicks.map((tp) => (
             <g key={tp}>
               <line
@@ -410,6 +431,36 @@ export function CandlestickChart({
               strokeLinejoin="round"
               style={{ pointerEvents: 'none' }}
             />
+          ) : null}
+          {livePriceShown != null && layout ? (
+            <g style={{ pointerEvents: 'none' }}>
+              <title>{`Live LTP ${formatChartLivePriceLabel(livePriceShown)}`}</title>
+              <line
+                x1={PAD.left}
+                x2={w - PAD.right}
+                y1={layout.yPrice(livePriceShown)}
+                y2={layout.yPrice(livePriceShown)}
+                stroke={LIVE_LTP_LINE}
+                strokeWidth={1.65}
+                strokeDasharray="6 7"
+                strokeLinecap="round"
+              />
+              <text
+                x={w - PAD.right - 4}
+                y={layout.yPrice(livePriceShown) - 4}
+                fill={LIVE_LTP_LINE}
+                fontSize={10}
+                fontWeight={700}
+                textAnchor="end"
+                style={{
+                  userSelect: 'none',
+                  filter:
+                    'drop-shadow(1px 0 0 rgb(33 37 41 / 85%)) drop-shadow(-1px 0 0 rgb(33 37 41 / 85%)) drop-shadow(0 1px 0 rgb(33 37 41 / 85%))',
+                }}
+              >
+                LTP {formatChartLivePriceLabel(livePriceShown)}
+              </text>
+            </g>
           ) : null}
           {hover ? (
             <line
