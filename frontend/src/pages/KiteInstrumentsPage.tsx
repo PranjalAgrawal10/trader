@@ -2672,11 +2672,14 @@ function MlNextBarBiasBar({
   interval,
   compact,
   candleSeries,
+  collapseMlByDefault,
 }: {
   instrumentToken: string
   interval: ChartInterval
   compact?: boolean
   candleSeries: ChartPointWithMa[]
+  /** When true (e.g. All favorites tiles), only a one-line toggle is shown until expanded. */
+  collapseMlByDefault?: boolean
 }) {
   const [mlPred, setMlPred] = useState<PriceDirectionApiResponse | null>(null)
   const [mlLoading, setMlLoading] = useState(false)
@@ -2687,7 +2690,14 @@ function MlNextBarBiasBar({
   const [lightGbmHistory, setLightGbmHistory] = useState<MlPredictionLogEntry[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const historySourceRef = useRef<'api' | 'local'>('api')
+  const mlBiasSectionId = useId()
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
+  const useMinimizedMlChrome = Boolean(collapseMlByDefault) && !fullscreenActive
+  const [mlSectionOpen, setMlSectionOpen] = useState(() => !Boolean(collapseMlByDefault))
+
+  useEffect(() => {
+    if (fullscreenActive) setMlSectionOpen(true)
+  }, [fullscreenActive])
 
   const storesPredictionsInLightGbm = useMemo(() => {
     if (selectedPriceModelId)
@@ -2935,179 +2945,243 @@ function MlNextBarBiasBar({
           : undefined
       }
     >
-      <div className={`d-flex flex-wrap align-items-center gap-2 ${fullscreenActive ? 'mb-2 flex-shrink-0' : gapClass}`}>
-        {priceModels && priceModels.models.length > 0 ? (
-          <Form.Select
+      {useMinimizedMlChrome ? (
+        <div className={`d-flex flex-wrap align-items-center gap-2 ${gapClass}`}>
+          <Button
+            type="button"
+            variant="outline-secondary"
             size="sm"
-            className="py-0 w-auto"
-            style={{ maxWidth: '14rem', fontSize: compact ? '0.72rem' : '0.8rem' }}
-            value={selectedPriceModelId}
-            aria-label="Price direction model"
-            title={(() => {
-              const m = priceModels.models.find((x) => x.id === selectedPriceModelId)
-              return m?.description ?? `Server default (${priceModels.defaultModelId})`
-            })()}
-            onChange={(e) => setSelectedPriceModelId(e.target.value)}
+            className="py-0 px-2 d-inline-flex align-items-center gap-2"
+            onClick={() => setMlSectionOpen((o) => !o)}
+            aria-expanded={mlSectionOpen}
+            aria-controls={mlBiasSectionId}
+            id={`${mlBiasSectionId}-toggle`}
           >
-            <option value="">{`Default (${priceModels.defaultModelId})`}</option>
-            {priceModels.models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.id}
-              </option>
-            ))}
-          </Form.Select>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline-info"
-          size="sm"
-          className="py-0 px-2"
-          disabled={mlLoading}
-          onClick={() => void fetchMlBias()}
-        >
-          {mlLoading ? (
-            <>
-              <Spinner animation="border" size="sm" className="me-1" />
-              ML…
-            </>
-          ) : (
-            'ML next-bar bias'
-          )}
-        </Button>
-        {!showHistoryDataTables ? (
-          <>
+            <span className="text-secondary" style={{ fontSize: '0.65rem', width: '0.65rem' }}>
+              {mlSectionOpen ? '▼' : '▶'}
+            </span>
+            <span style={{ fontSize: compact ? '0.72rem' : undefined }}>ML prediction</span>
+            {mlPred ? (
+              <span
+                className={`font-monospace fw-semibold ${
+                  mlPred.direction === 'up'
+                    ? 'text-success'
+                    : mlPred.direction === 'down'
+                      ? 'text-danger'
+                      : 'text-secondary'
+                }`}
+                style={{ fontSize: compact ? '0.72rem' : undefined }}
+              >
+                {mlPred.direction.toUpperCase()} · {mlPred.confidence}%
+              </span>
+            ) : mlLoading ? (
+              <Spinner animation="border" size="sm" role="status" />
+            ) : (
+              <span className="text-muted fw-normal" style={{ fontSize: '0.68rem' }}>
+                (collapsed)
+              </span>
+            )}
+          </Button>
+          {!mlSectionOpen ? (
             <Button
               type="button"
-              variant="outline-secondary"
+              variant="outline-info"
               size="sm"
               className="py-0 px-2"
-              disabled={historyLoading}
-              onClick={() => void reloadHistory()}
-              title="Reload prediction history from server"
-              aria-label="Refresh prediction history"
+              style={{ fontSize: compact ? '0.72rem' : undefined }}
+              disabled={mlLoading}
+              onClick={() => void fetchMlBias()}
+              title="Run ML with the selected default model (expand to change model)"
             >
-              {historyLoading ? (
+              {mlLoading ? (
                 <>
-                  <Spinner animation="border" size="sm" className="me-1" role="status" />
-                  …
+                  <Spinner animation="border" size="sm" className="me-1" />
+                  ML…
                 </>
               ) : (
-                '↻ Predictions'
+                'Run ML'
               )}
             </Button>
-            {canFullscreenPredictions ? (
-              <Button
-                type="button"
-                variant="outline-secondary"
-                size="sm"
-                className="py-0 px-2"
-                onClick={() => void toggleFullscreen()}
-                title={fullscreenActive ? 'Exit full screen' : 'Full screen predictions and chart'}
-                aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen predictions'}
-              >
-                {fullscreenActive
-                  ? compact
-                    ? 'Exit'
-                    : 'Exit full screen'
-                  : compact
-                    ? 'Full'
-                    : 'Full predictions'}
-              </Button>
-            ) : null}
-          </>
-        ) : null}
-        {mlPred ? (
-          <span
-            className={`small font-monospace fw-semibold ${
-              mlPred.direction === 'up'
-                ? 'text-success'
-                : mlPred.direction === 'down'
-                  ? 'text-danger'
-                  : 'text-secondary'
-            }`}
-          >
-            {mlPred.direction.toUpperCase()} · {mlPred.confidence}% ·{' '}
-            <span className="fw-normal text-muted">{mlPred.modelId}</span>
-          </span>
-        ) : null}
-      </div>
+          ) : null}
+        </div>
+      ) : null}
       {mlError ? (
         <Alert variant="warning" className={`py-1 small ${gapClass}`}>
           {mlError}
         </Alert>
       ) : null}
-      {mlPred ? (
-        <p
-          className={`small text-muted ${fullscreenActive ? 'mb-2' : gapClass}`}
-          style={{ fontSize: compact ? '0.72rem' : '0.75rem' }}
-        >
-          {mlPred.detail}
-        </p>
-      ) : null}
-      {fullscreenActive ? (
-        <div className="flex-shrink-0 overflow-visible mb-2">
-          <MlFullscreenAllModelsPies
-            priceModels={priceModels}
-            history={history}
-            lightGbmHistory={lightGbmHistory}
-            compact={compact}
-          />
-        </div>
-      ) : null}
-      {history.length > 0 ? (
-        <div
-          className={`rounded border border-secondary ${fullscreenActive ? 'mb-0 flex-grow-1 d-flex flex-column' : gapClass}`}
-          style={{
-            maxHeight: fullscreenActive
-              ? undefined
-              : compact
-                ? ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT
-                : ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT,
-            flex: fullscreenActive ? '1 1 auto' : undefined,
-            minHeight: fullscreenActive ? 0 : undefined,
-            overflow: 'auto',
-            WebkitOverflowScrolling: 'touch',
-          }}
-        >
-          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
-            <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              ML history — classic ({history.length})
-            </span>
+      <Collapse in={!useMinimizedMlChrome || mlSectionOpen}>
+        <div id={mlBiasSectionId}>
+          <div className={`d-flex flex-wrap align-items-center gap-2 ${fullscreenActive ? 'mb-2 flex-shrink-0' : gapClass}`}>
+            {priceModels && priceModels.models.length > 0 ? (
+              <Form.Select
+                size="sm"
+                className="py-0 w-auto"
+                style={{ maxWidth: '14rem', fontSize: compact ? '0.72rem' : '0.8rem' }}
+                value={selectedPriceModelId}
+                aria-label="Price direction model"
+                title={(() => {
+                  const m = priceModels.models.find((x) => x.id === selectedPriceModelId)
+                  return m?.description ?? `Server default (${priceModels.defaultModelId})`
+                })()}
+                onChange={(e) => setSelectedPriceModelId(e.target.value)}
+              >
+                <option value="">{`Default (${priceModels.defaultModelId})`}</option>
+                {priceModels.models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.id}
+                  </option>
+                ))}
+              </Form.Select>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline-info"
+              size="sm"
+              className="py-0 px-2"
+              disabled={mlLoading}
+              onClick={() => void fetchMlBias()}
+            >
+              {mlLoading ? (
+                <>
+                  <Spinner animation="border" size="sm" className="me-1" />
+                  ML…
+                </>
+              ) : (
+                'ML next-bar bias'
+              )}
+            </Button>
+            {!showHistoryDataTables ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline-secondary"
+                  size="sm"
+                  className="py-0 px-2"
+                  disabled={historyLoading}
+                  onClick={() => void reloadHistory()}
+                  title="Reload prediction history from server"
+                  aria-label="Refresh prediction history"
+                >
+                  {historyLoading ? (
+                    <>
+                      <Spinner animation="border" size="sm" className="me-1" role="status" />
+                      …
+                    </>
+                  ) : (
+                    '↻ Predictions'
+                  )}
+                </Button>
+                {canFullscreenPredictions ? (
+                  <Button
+                    type="button"
+                    variant="outline-secondary"
+                    size="sm"
+                    className="py-0 px-2"
+                    onClick={() => void toggleFullscreen()}
+                    title={fullscreenActive ? 'Exit full screen' : 'Full screen predictions and chart'}
+                    aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen predictions'}
+                  >
+                    {fullscreenActive
+                      ? compact
+                        ? 'Exit'
+                        : 'Exit full screen'
+                      : compact
+                        ? 'Full'
+                        : 'Full predictions'}
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
+            {mlPred ? (
+              <span
+                className={`small font-monospace fw-semibold ${
+                  mlPred.direction === 'up'
+                    ? 'text-success'
+                    : mlPred.direction === 'down'
+                      ? 'text-danger'
+                      : 'text-secondary'
+                }`}
+              >
+                {mlPred.direction.toUpperCase()} · {mlPred.confidence}% ·{' '}
+                <span className="fw-normal text-muted">{mlPred.modelId}</span>
+              </span>
+            ) : null}
           </div>
-          <MlPredictionHistoryTableWithFilter
-            rows={mlHistoryTableRows}
-            compact={compact}
-            headActions={mlHistoryHeadActions}
-          />
+          {mlPred ? (
+            <p
+              className={`small text-muted ${fullscreenActive ? 'mb-2' : gapClass}`}
+              style={{ fontSize: compact ? '0.72rem' : '0.75rem' }}
+            >
+              {mlPred.detail}
+            </p>
+          ) : null}
+          {fullscreenActive ? (
+            <div className="flex-shrink-0 overflow-visible mb-2">
+              <MlFullscreenAllModelsPies
+                priceModels={priceModels}
+                history={history}
+                lightGbmHistory={lightGbmHistory}
+                compact={compact}
+              />
+            </div>
+          ) : null}
+          {history.length > 0 ? (
+            <div
+              className={`rounded border border-secondary ${fullscreenActive ? 'mb-0 flex-grow-1 d-flex flex-column' : gapClass}`}
+              style={{
+                maxHeight: fullscreenActive
+                  ? undefined
+                  : compact
+                    ? ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT
+                    : ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT,
+                flex: fullscreenActive ? '1 1 auto' : undefined,
+                minHeight: fullscreenActive ? 0 : undefined,
+                overflow: 'auto',
+                WebkitOverflowScrolling: 'touch',
+              }}
+            >
+              <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
+                <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
+                  ML history — classic ({history.length})
+                </span>
+              </div>
+              <MlPredictionHistoryTableWithFilter
+                rows={mlHistoryTableRows}
+                compact={compact}
+                headActions={mlHistoryHeadActions}
+              />
+            </div>
+          ) : null}
+          {lightGbmHistory.length > 0 ? (
+            <div
+              className={`rounded border border-secondary ${fullscreenActive ? 'mb-0 flex-grow-1 d-flex flex-column' : gapClass}`}
+              style={{
+                maxHeight: fullscreenActive
+                  ? undefined
+                  : compact
+                    ? ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT
+                    : ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT,
+                flex: fullscreenActive ? '1 1 auto' : undefined,
+                minHeight: fullscreenActive ? 0 : undefined,
+                overflow: 'auto',
+                WebkitOverflowScrolling: 'touch',
+              }}
+            >
+              <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
+                <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
+                  ML history — LightGBM triple-barrier ({lightGbmHistory.length})
+                </span>
+              </div>
+              <MlPredictionHistoryTableWithFilter
+                rows={mlLightGbmHistoryTableRows}
+                compact={compact}
+                headActions={mlHistoryHeadActions}
+              />
+            </div>
+          ) : null}
         </div>
-      ) : null}
-      {lightGbmHistory.length > 0 ? (
-        <div
-          className={`rounded border border-secondary ${fullscreenActive ? 'mb-0 flex-grow-1 d-flex flex-column' : gapClass}`}
-          style={{
-            maxHeight: fullscreenActive
-              ? undefined
-              : compact
-                ? ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT
-                : ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT,
-            flex: fullscreenActive ? '1 1 auto' : undefined,
-            minHeight: fullscreenActive ? 0 : undefined,
-            overflow: 'auto',
-            WebkitOverflowScrolling: 'touch',
-          }}
-        >
-          <div className="px-2 py-1 bg-body-secondary text-secondary border-bottom border-secondary flex-shrink-0">
-            <span className="text-uppercase" style={{ fontSize: compact ? '0.62rem' : '0.65rem' }}>
-              ML history — LightGBM triple-barrier ({lightGbmHistory.length})
-            </span>
-          </div>
-          <MlPredictionHistoryTableWithFilter
-            rows={mlLightGbmHistoryTableRows}
-            compact={compact}
-            headActions={mlHistoryHeadActions}
-          />
-        </div>
-      ) : null}
+      </Collapse>
     </div>
   )
 }
@@ -3276,6 +3350,7 @@ function CompactPriceChart({
             instrumentToken={row.instrumentToken}
             interval={interval}
             compact
+            collapseMlByDefault
             candleSeries={seriesWithCustom}
           />
         </>
@@ -3309,6 +3384,7 @@ function CompactPriceChart({
                 instrumentToken={row.instrumentToken}
                 interval={interval}
                 compact
+                collapseMlByDefault
                 candleSeries={seriesWithCustom}
               />
             </div>
@@ -3434,6 +3510,7 @@ function FavoriteTileAutomationMlPanel({
   automationRecentLoading: boolean
   automationPriceModels: PriceDirectionModelsApiResponse | null
 }) {
+  const [automationPanelOpen, setAutomationPanelOpen] = useState(false)
   const rowsForSymbol = useMemo(() => {
     const t = instrumentToken.trim()
     return sortByPredictedAtNewestFirst(
@@ -3452,70 +3529,91 @@ function FavoriteTileAutomationMlPanel({
 
   return (
     <div className="mt-2 rounded-3 border border-secondary-subtle overflow-hidden shadow-sm">
-      <div className="px-2 py-1 border-bottom border-secondary-subtle bg-body-secondary">
-        <div className="small text-secondary text-uppercase mb-0" style={{ fontSize: '0.65rem' }}>
+      <button
+        type="button"
+        className="w-100 text-start px-2 py-1 border-0 bg-body-secondary border-bottom border-secondary-subtle d-flex align-items-center justify-content-between gap-2"
+        onClick={() => setAutomationPanelOpen((o) => !o)}
+        aria-expanded={automationPanelOpen}
+      >
+        <span className="small text-secondary text-uppercase mb-0" style={{ fontSize: '0.65rem' }}>
           Auto ML predictions
+        </span>
+        <span className="d-flex align-items-center gap-2 flex-shrink-0">
+          {automationRecentLoading && rowsForSymbol.length === 0 ? (
+            <Spinner animation="border" size="sm" role="status" />
+          ) : (
+            <span className="text-muted font-monospace" style={{ fontSize: '0.65rem' }}>
+              {rowsForSymbol.length} row{rowsForSymbol.length === 1 ? '' : 's'}
+            </span>
+          )}
+          <span className="text-secondary user-select-none" style={{ fontSize: '0.65rem' }}>
+            {automationPanelOpen ? '▼' : '▶'}
+          </span>
+        </span>
+      </button>
+      <Collapse in={automationPanelOpen}>
+        <div>
+          <div className="p-2 bg-body-tertiary bg-opacity-25">
+            <p className="text-muted mb-2" style={{ fontSize: '0.62rem' }}>
+              Same time range as the <strong>Auto predictions</strong> tab (adjust there to change this list).
+            </p>
+            {automationRecentLoading && rowsForSymbol.length === 0 ? (
+              <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.7rem' }}>
+                <Spinner animation="border" size="sm" role="status" />
+                Loading…
+              </div>
+            ) : rowsForSymbol.length === 0 ? (
+              <p className="text-muted mb-0 fst-italic" style={{ fontSize: '0.68rem' }}>
+                No automation rows in range for this symbol yet.
+              </p>
+            ) : (
+              <div className="table-responsive" style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                <Table striped bordered size="sm" className="mb-0 align-middle font-monospace" style={{ fontSize: '0.63rem' }}>
+                  <thead className="table-light text-nowrap">
+                    <tr>
+                      <th>Time</th>
+                      <th>Iv</th>
+                      <th>Engine</th>
+                      <th>Dir</th>
+                      <th>%</th>
+                      <th>Out</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rowsForSymbol.map((r) => {
+                      const eng = r.engineModelId?.trim() ?? ''
+                      const short = eng.length > 18 ? `${eng.slice(0, 16)}…` : eng
+                      const desc = descByEngineId.get(eng)
+                      return (
+                        <tr key={r.id}>
+                          <td className="text-nowrap">{formatLocalDateTime(r.predictedAt)}</td>
+                          <td>{r.interval}</td>
+                          <td className="text-truncate" style={{ maxWidth: '5.5rem' }} title={desc ? `${eng} — ${desc}` : eng || '—'}>
+                            {short || '—'}
+                          </td>
+                          <td>{r.direction}</td>
+                          <td>{r.confidence}%</td>
+                          <td
+                            className={
+                              r.outcome === 'correct'
+                                ? 'text-success'
+                                : r.outcome === 'wrong'
+                                  ? 'text-danger'
+                                  : 'text-muted'
+                            }
+                          >
+                            {r.outcome}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </Table>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-      <div className="p-2 bg-body-tertiary bg-opacity-25">
-      <p className="text-muted mb-2" style={{ fontSize: '0.62rem' }}>
-        Same time range as the <strong>Auto predictions</strong> tab (adjust there to change this list).
-      </p>
-      {automationRecentLoading && rowsForSymbol.length === 0 ? (
-        <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.7rem' }}>
-          <Spinner animation="border" size="sm" role="status" />
-          Loading…
-        </div>
-      ) : rowsForSymbol.length === 0 ? (
-        <p className="text-muted mb-0 fst-italic" style={{ fontSize: '0.68rem' }}>
-          No automation rows in range for this symbol yet.
-        </p>
-      ) : (
-        <div className="table-responsive" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-          <Table striped bordered size="sm" className="mb-0 align-middle font-monospace" style={{ fontSize: '0.63rem' }}>
-            <thead className="table-light text-nowrap">
-              <tr>
-                <th>Time</th>
-                <th>Iv</th>
-                <th>Engine</th>
-                <th>Dir</th>
-                <th>%</th>
-                <th>Out</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rowsForSymbol.map((r) => {
-                const eng = r.engineModelId?.trim() ?? ''
-                const short = eng.length > 18 ? `${eng.slice(0, 16)}…` : eng
-                const desc = descByEngineId.get(eng)
-                return (
-                  <tr key={r.id}>
-                    <td className="text-nowrap">{formatLocalDateTime(r.predictedAt)}</td>
-                    <td>{r.interval}</td>
-                    <td className="text-truncate" style={{ maxWidth: '5.5rem' }} title={desc ? `${eng} — ${desc}` : eng || '—'}>
-                      {short || '—'}
-                    </td>
-                    <td>{r.direction}</td>
-                    <td>{r.confidence}%</td>
-                    <td
-                      className={
-                        r.outcome === 'correct'
-                          ? 'text-success'
-                          : r.outcome === 'wrong'
-                            ? 'text-danger'
-                            : 'text-muted'
-                      }
-                    >
-                      {r.outcome}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </Table>
-        </div>
-      )}
-      </div>
+      </Collapse>
     </div>
   )
 }
