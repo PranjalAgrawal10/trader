@@ -815,7 +815,7 @@ function InstrumentListPanel({
       <h2 className="h6 mb-2">{title}</h2>
       {truncated && !serverMode ? (
         <Alert variant="warning" className="py-2 small mb-2">
-          List may be incomplete (row cap applied when fetching).
+          List may be incomplete — nearest expiry rows first from a capped CSV buffer; use Search Kite for exact contracts.
         </Alert>
       ) : null}
       {serverMode && serverScanTruncated ? (
@@ -3138,6 +3138,11 @@ function CompactPriceChart({
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
+  const fetchCtxRef = useRef<{
+    token: string | null
+    interval: ChartInterval | null
+    range: ChartRangePreset | null
+  }>({ token: null, interval: null, range: null })
 
   useEffect(() => {
     if (zoomVisibleBars != null && series.length > 0 && zoomVisibleBars > series.length) {
@@ -3147,9 +3152,21 @@ function CompactPriceChart({
 
   useEffect(() => {
     const ac = new AbortController()
+    const token = row.instrumentToken
+
+    const prev = fetchCtxRef.current
+    const contextChanged =
+      prev.token !== token || prev.interval !== interval || prev.range !== rangePreset
+
+    fetchCtxRef.current = { token, interval, range: rangePreset }
+
+    if (contextChanged) {
+      setSeries([])
+      setCandleRange(null)
+      setError(null)
+    }
+
     setLoading(true)
-    setError(null)
-    setCandleRange(null)
 
     const fetchOnce = async (initial: boolean) => {
       try {
@@ -3217,7 +3234,7 @@ function CompactPriceChart({
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
-  const compactHasChart = !loading && !error && series.length > 0
+  const compactHasChart = !error && series.length > 0
   const compactMetaOutside = !fullscreenActive || !compactHasChart
 
   return (
@@ -3247,7 +3264,7 @@ function CompactPriceChart({
       ) : null}
       {compactMetaOutside ? (
         <>
-          {candleRange && !loading && !error ? (
+          {candleRange && !error ? (
             <HistoricalRangeCaption
               compact
               candleInterval={candleRange.interval}
@@ -3280,7 +3297,7 @@ function CompactPriceChart({
         >
           {fullscreenActive ? (
             <div className={CHART_FULLSCREEN_META_WRAP_CLASS} style={CHART_FULLSCREEN_META_WRAP_STYLE}>
-              {candleRange && !loading && !error ? (
+              {candleRange && !error ? (
                 <HistoricalRangeCaption
                   compact
                   candleInterval={candleRange.interval}
@@ -3727,10 +3744,16 @@ function InstrumentChartCard({
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
+  const chartFetchCtxRef = useRef<{
+    token: string | null
+    interval: ChartInterval | null
+    range: ChartRangePreset | null
+  }>({ token: null, interval: null, range: null })
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
   useEffect(() => {
     if (!selection) {
+      chartFetchCtxRef.current = { token: null, interval: null, range: null }
       setSeries([])
       setCandleRange(null)
       setError(null)
@@ -3738,15 +3761,27 @@ function InstrumentChartCard({
       return
     }
 
+    const token = selection.instrumentToken
     const ac = new AbortController()
+
+    const prev = chartFetchCtxRef.current
+    const contextChanged =
+      prev.token !== token || prev.interval !== interval || prev.range !== rangePreset
+
+    chartFetchCtxRef.current = { token, interval, range: rangePreset }
+
+    if (contextChanged) {
+      setSeries([])
+      setCandleRange(null)
+      setError(null)
+    }
+
     setLoading(true)
-    setError(null)
-    setSeries([])
 
     const fetchOnce = async (initial: boolean) => {
       try {
         const data = await fetchMergedHistoricalChartCandles(
-          selection.instrumentToken,
+          token,
           interval,
           historicalRangeQueryParams(rangePreset),
           ac.signal,
@@ -3778,7 +3813,7 @@ function InstrumentChartCard({
       window.clearInterval(timer)
       ac.abort()
     }
-  }, [selection, interval, rangePreset, chartRefreshTick])
+  }, [selection?.instrumentToken, interval, rangePreset, chartRefreshTick])
 
   const displaySeries = useMemo(
     () => mergeLiveTickIntoOhlc(series, liveLastTick ?? null, interval, graphType),
@@ -3818,7 +3853,7 @@ function InstrumentChartCard({
 
   const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
 
-  const browseHasChartData = !loading && !error && displayWithMa.length > 0
+  const browseHasChartData = !error && displayWithMa.length > 0
   const browseDetailMetaInFullscreen = fullscreenActive && browseHasChartData
 
   const browseDetailMeta =
@@ -3857,7 +3892,7 @@ function InstrumentChartCard({
             </Button>
           ) : null}
         </p>
-        {candleRange && !loading && !error ? (
+        {candleRange && !error ? (
           <HistoricalRangeCaption
             candleInterval={candleRange.interval}
             fromIso={candleRange.from}
@@ -4053,7 +4088,7 @@ function InstrumentChartCard({
                 {error}
               </Alert>
             ) : null}
-            {loading || displayWithMa.length === 0 ? (
+            {displayWithMa.length === 0 ? (
               <div style={{ height: '18rem' }}>
                 {loading ? (
                   <div className="d-flex align-items-center gap-2 text-secondary small py-5 justify-content-center">

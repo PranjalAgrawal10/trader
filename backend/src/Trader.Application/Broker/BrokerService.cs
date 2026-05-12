@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -26,10 +27,14 @@ public sealed class BrokerService : IBrokerService
     private static readonly TimeSpan PendingStateTtl = TimeSpan.FromMinutes(20);
 
     /// <summary>
-    /// Browse lists and Kite instrument search: max rows per panel (F&amp;O combined NFO+BFO, MCX, Spot match budget).
-    /// Per-exchange CSV fetches use this as <c>maxRows</c>; merged F&amp;O may be sliced to this total.
+    /// Rows returned to the SPA Browse panels (F&amp;O merged NFO+BFO, MCX) after sorting by nearest expiry.
     /// </summary>
     private const int KiteInstrumentBrowsePanelMaxRows = 50;
+
+    /// <summary>
+    /// Per-exchange CSV streaming cap when building Browse lists. Larger than <see cref="KiteInstrumentBrowsePanelMaxRows"/> so rows can be sorted by expiry (CSV order is arbitrary); callers still receive at most <see cref="KiteInstrumentBrowsePanelMaxRows"/> after merge/sort.
+    /// </summary>
+    private const int KiteInstrumentBrowseExchangeFetchRows = 4000;
 
     /// <summary>
     /// Sentinel for "return every match" when the user runs a search from the UI — the
@@ -150,10 +155,10 @@ public sealed class BrokerService : IBrokerService
     {
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
 
-        var cap = (int?)KiteInstrumentBrowsePanelMaxRows;
-        var nfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("NFO", apiKey, accessToken, cap, ct);
-        var bfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("BFO", apiKey, accessToken, cap, ct);
-        var mcxTask = _kiteInstruments.FetchExchangeInstrumentsAsync("MCX", apiKey, accessToken, cap, ct);
+        var fetchCap = (int?)KiteInstrumentBrowseExchangeFetchRows;
+        var nfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("NFO", apiKey, accessToken, fetchCap, ct);
+        var bfoTask = _kiteInstruments.FetchExchangeInstrumentsAsync("BFO", apiKey, accessToken, fetchCap, ct);
+        var mcxTask = _kiteInstruments.FetchExchangeInstrumentsAsync("MCX", apiKey, accessToken, fetchCap, ct);
 
         await Task.WhenAll(nfoTask, bfoTask, mcxTask).ConfigureAwait(false);
 
@@ -171,6 +176,8 @@ public sealed class BrokerService : IBrokerService
             fnoTruncated |= bfo.Truncated;
         }
 
+        fno.Sort(static (a, b) => CompareInstrumentExpiryAscending(a, b));
+
         var combinedFnoCount = fno.Count;
         if (combinedFnoCount > KiteInstrumentBrowsePanelMaxRows)
         {
@@ -182,7 +189,16 @@ public sealed class BrokerService : IBrokerService
         if (!mcx.Success)
             throw new InvalidOperationException(mcx.ErrorMessage ?? "Could not load MCX instruments from Kite.");
 
-        return new KiteFnoCommodityListsDto(fno, mcx.Items, fnoTruncated, mcx.Truncated);
+        var commodities = new List<KiteInstrumentListItemDto>(mcx.Items);
+        var commoditiesTruncated = mcx.Truncated;
+        commodities.Sort(static (a, b) => CompareInstrumentExpiryAscending(a, b));
+        if (commodities.Count > KiteInstrumentBrowsePanelMaxRows)
+        {
+            commodities = commodities.Take(KiteInstrumentBrowsePanelMaxRows).ToList();
+            commoditiesTruncated = true;
+        }
+
+        return new KiteFnoCommodityListsDto(fno, commodities, fnoTruncated, commoditiesTruncated);
     }
 
     /// <inheritdoc />
@@ -1205,5 +1221,28 @@ public sealed class BrokerService : IBrokerService
         }
 
         return (trimmed, null);
+    }
+
+    /// <summary>Kite CSV expiry is typically <c>yyyy-MM-dd</c>; derivatives without a parseable date sort after dated rows.</summary>
+    private static int CompareInstrumentExpiryAscending(KiteInstrumentListItemDto a, KiteInstrumentListItemDto b)
+    {
+        var da = TryParseKiteExpiryDate(a.Expiry);
+        var db = TryParseKiteExpiryDate(b.Expiry);
+        if (da.HasValue && db.HasValue)
+            return da.Value.CompareTo(db.Value);
+        if (da.HasValue)
+            return -1;
+        if (db.HasValue)
+            return 1;
+        return string.CompareOrdinal(a.Tradingsymbol ?? "", b.Tradingsymbol ?? "");
+    }
+
+    private static DateOnly? TryParseKiteExpiryDate(string? expiry)
+    {
+        if (string.IsNullOrWhiteSpace(expiry))
+            return null;
+        return DateOnly.TryParse(expiry.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+            ? d
+            : null;
     }
 }

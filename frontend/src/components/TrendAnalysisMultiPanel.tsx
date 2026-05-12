@@ -58,6 +58,9 @@ export function TrendAnalysisMultiPanel({
   const shouldAutoRun = variant === 'browseAlways'
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Stable for effect deps — parent often passes a new array instance each render with the same intervals. */
+  const intervalsKey = selectedIntervalsOrdered.join('|')
+  const extrasKey = JSON.stringify(historicalQueryExtra)
   const [rowsByInterval, setRowsByInterval] = useState<
     Record<
       string,
@@ -80,11 +83,12 @@ export function TrendAnalysisMultiPanel({
   }, [instrumentToken])
 
   const fetchAnalysis = useCallback(async () => {
-    if (!instrumentToken || selectedIntervalsOrdered.length === 0) return
+    const intervalsList = intervalsKey.length > 0 ? intervalsKey.split('|') : []
+    if (!instrumentToken || intervalsList.length === 0) return
     setLoading(true)
     setError(null)
     try {
-      const grouped = bucketTrendIntervals(selectedIntervalsOrdered)
+      const grouped = bucketTrendIntervals(intervalsList)
       const results = await Promise.all(
         grouped.map(async (group) => {
           try {
@@ -126,12 +130,12 @@ export function TrendAnalysisMultiPanel({
     } finally {
       setLoading(false)
     }
-  }, [instrumentToken, selectedIntervalsOrdered, JSON.stringify(historicalQueryExtra)])
+  }, [instrumentToken, intervalsKey, extrasKey])
 
   useEffect(() => {
-    if (!instrumentToken || selectedIntervalsOrdered.length === 0) return
+    if (!instrumentToken || intervalsKey.length === 0) return
     void fetchAnalysis()
-  }, [instrumentToken, selectedIntervalsOrdered.join(','), JSON.stringify(historicalQueryExtra), fetchAnalysis])
+  }, [instrumentToken, intervalsKey, extrasKey, fetchAnalysis])
 
   const majority = useMemo(() => {
     let up = 0
