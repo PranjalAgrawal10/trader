@@ -51,6 +51,7 @@ import {
 } from '../api/kiteChartHistorical'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
+import { ManualTradeCeLiveChart } from '../components/ManualTradeCeLiveChart'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { CandlestickChart } from '../components/CandlestickChart'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
@@ -95,6 +96,7 @@ import {
   type MaLineVisibility,
 } from '../utils/movingAverages'
 import { LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
+import { isKiteCeOption } from '../utils/scalperChartHelpers'
 
 interface BrokerStatusResponse {
   connected: boolean
@@ -4462,6 +4464,18 @@ export function KiteInstrumentsPage() {
 
   const tradingLockKeySet = useMemo(() => new Set(tradingLocks.map(favoriteRowKey)), [tradingLocks])
 
+  const ceLocksForManualTradeChart = useMemo(
+    () =>
+      tradingLocks
+        .filter(isKiteCeOption)
+        .map((r) => ({
+          instrumentToken: r.instrumentToken,
+          tradingsymbol: r.tradingsymbol,
+          exchange: r.exchange,
+        })),
+    [tradingLocks],
+  )
+
   const favoriteByInstrumentToken = useMemo(() => {
     const m = new Map<string, KiteInstrumentRow>()
     for (const row of favorites) {
@@ -6583,6 +6597,11 @@ export function KiteInstrumentsPage() {
                   <strong>Zerodha</strong> to use manual paper trade (wallet at Kite LTP × lock lot; no orders).
                 </Alert>
               ) : null}
+              <p className="small text-secondary mb-0">
+                <strong>CE chart</strong> uses locks with instrument type CE (calls). Paper buy/sell still uses any{' '}
+                <Link to="/instruments?tab=locked">locked</Link> derivative.
+              </p>
+              <ManualTradeCeLiveChart isZerodha={isZerodha} ceLocks={ceLocksForManualTradeChart} />
               <ManualPaperTradePanel
                 heading={<h2 className="h6 text-body mb-2">Manual paper trade</h2>}
                 intro={
