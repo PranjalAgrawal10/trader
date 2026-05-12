@@ -80,6 +80,18 @@ export default function App() {
         }
       />
       <Route
+        path="/instruments/manual-trade"
+        element={
+          <Protected>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <Navigate to="/instruments?tab=manual-trade" replace />
+              </RequiresBroker>
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
         path="/instruments/locked"
         element={
           <Protected>
