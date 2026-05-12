@@ -199,6 +199,16 @@ public sealed record DemoAutoTradeLegRowDto(
     string Status,
     string? StatusDetail,
     decimal AllocatedNotionalInr,
+    /// <summary>Kite-style contract multiplier from Locked for trading. <strong>0</strong> when using legacy fractional-notional demo math (no contract map).</summary>
+    int InstrumentLotMultiplier,
+    /// <summary>Integer contracts sized from the INR allocation using the contract multiplier. Zero when unallocated.</summary>
+    int DemoWholeLotsTraded,
+    /// <summary>Approximate ₹ exposure at hypothetical entry (<c>entry × InstrumentLotMultiplier × DemoWholeLotsTraded</c>); legacy mode uses allocation INR only.</summary>
+    decimal CommittedExposureApproxInr,
+    /// <summary>For a long/up leg: purchase price at entry; for a short/down leg: exit cover (buy) price.</summary>
+    decimal? HypotheticalBuyPrice,
+    /// <summary>For a long/up leg: sale price at exit; for a short/down leg: short-sale price at entry.</summary>
+    decimal? HypotheticalSellPrice,
     decimal LegGrossPnlInr,
     decimal LegFeesInr,
     decimal LegNetPnlInr);

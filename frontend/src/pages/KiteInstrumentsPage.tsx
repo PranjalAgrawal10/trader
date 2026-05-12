@@ -283,6 +283,14 @@ interface DemoAutoTradeLegRowDto {
   status: string
   statusDetail: string | null
   allocatedNotionalInr: number
+  /** Kite contract multiplier from Locked for trading; 0 in legacy fractional-notional mode. */
+  instrumentLotMultiplier: number
+  demoWholeLotsTraded: number
+  committedExposureApproxInr: number
+  /** Long/up: buy entry; short/down: exit cover (buy). */
+  hypotheticalBuyPrice: number | null
+  /** Long/up: exit sale; short/down: short-sale entry. */
+  hypotheticalSellPrice: number | null
   legGrossPnlInr: number
   legFeesInr: number
   legNetPnlInr: number
@@ -355,6 +363,14 @@ function formatInrRupee(amount: number): string {
   }).format(amount)
 }
 
+function formatDemoHypotheticalPrice(px: number | null | undefined): string {
+  if (px == null || Number.isNaN(px)) return '—'
+  return new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(px)
+}
+
 function formatDemoAutoTradeLegStatus(status: string): string {
   const m: Record<string, string> = {
     pending: 'Pending',
@@ -365,6 +381,8 @@ function formatDemoAutoTradeLegStatus(status: string): string {
     excluded_low_confidence: 'Excluded · confidence',
     excluded_by_strategy: 'Excluded · preset',
     excluded_zero_allocation: 'Excluded · zero weight',
+    excluded_missing_lot_size: 'Excluded · lot size',
+    excluded_cannot_buy_one_lot: 'Excluded · below 1 lot',
   }
   return m[status] ?? status
 }
@@ -598,9 +616,9 @@ function coerceChartGraphType(v: string | null | undefined): ChartGraphType {
   return 'line'
 }
 
-type MainTab = 'browse' | 'favorites' | 'tradingLocks' | 'automation'
+type MainTab = 'browse' | 'favorites' | 'tradingLocks' | 'automation' | 'autoTrading'
 
-/** Deep-link: <code>?tab=favorites</code> / <code>?tab=fav</code> / <code>?fav=1</code>; <code>?tab=automation</code>; <code>?tab=locked</code>. */
+/** Deep-link: <code>?tab=favorites</code> / <code>?tab=fav</code> / <code>?fav=1</code>; <code>?tab=automation</code>; <code>?tab=demo-auto-trade</code>; <code>?tab=locked</code>. */
 function mainTabFromSearchParams(params: URLSearchParams): MainTab {
   const raw = params.get('tab')
   const tab = raw?.toLowerCase()
@@ -612,6 +630,14 @@ function mainTabFromSearchParams(params: URLSearchParams): MainTab {
   }
   if (tab === 'favorites' || tab === 'fav') return 'favorites'
   if (tab === 'locked' || tab === 'trading-locks' || tab === 'tradinglocks') return 'tradingLocks'
+  if (
+    tab === 'demo-auto-trade' ||
+    tab === 'demoautotrade' ||
+    tab === 'autotrading' ||
+    tab === 'auto-trading' ||
+    tab === 'demo-trade'
+  )
+    return 'autoTrading'
   if (tab === 'automation' || tab === 'auto' || tab === 'auto-ml' || tab === 'automl') return 'automation'
   return 'browse'
 }
@@ -4330,6 +4356,9 @@ export function KiteInstrumentsPage() {
           } else if (next === 'automation') {
             p.set('tab', 'automation')
             p.delete('fav')
+          } else if (next === 'autoTrading') {
+            p.set('tab', 'demo-auto-trade')
+            p.delete('fav')
           } else {
             p.delete('tab')
             p.delete('fav')
@@ -4903,7 +4932,7 @@ export function KiteInstrumentsPage() {
   )
 
   useEffect(() => {
-    if (mainTab !== 'automation' || !chartPrefsHydrated) return
+    if (mainTab !== 'autoTrading' || !chartPrefsHydrated) return
     void loadDemoEodSummary()
   }, [mainTab, chartPrefsHydrated, loadDemoEodSummary])
 
@@ -4978,7 +5007,7 @@ export function KiteInstrumentsPage() {
   const isZerodha = provider?.toLowerCase() === 'zerodha'
 
   useEffect(() => {
-    if (mainTab !== 'automation' || !chartPrefsHydrated || !isZerodha) return
+    if (mainTab !== 'autoTrading' || !chartPrefsHydrated || !isZerodha) return
     void loadDemoTodayLegs()
     const id = window.setInterval(() => {
       void loadDemoTodayLegs()
@@ -5188,7 +5217,7 @@ export function KiteInstrumentsPage() {
   }, [isZerodha, loadFavorites, loadTradingLocks])
 
   useEffect(() => {
-    if (!(mainTab === 'automation' && isZerodha)) return
+    if (!(isZerodha && (mainTab === 'automation' || mainTab === 'autoTrading'))) return
     void loadTradingLocks()
   }, [mainTab, isZerodha, loadTradingLocks])
 
@@ -5221,8 +5250,9 @@ export function KiteInstrumentsPage() {
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Filter preview or press <strong>Enter</strong> / <strong>Search Kite</strong> for a full scan (on{' '}
                   <strong>All favorites</strong> and <strong>Locked for trading</strong>, F&amp;O + Spot + MCX). Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
-                  open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below. Scheduled
-                  automation and the merged prediction log live on the <strong>Auto predictions</strong> tab.
+                  open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below.                   Scheduled
+                  automation and the merged prediction log live on <strong>Auto predictions</strong>; hypothetical{' '}
+                  <strong>Demo auto-trade</strong> settings and reports live on that tab&apos;s sibling.
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">
@@ -5253,6 +5283,9 @@ export function KiteInstrumentsPage() {
               </Nav.Item>
               <Nav.Item>
                 <Nav.Link eventKey="automation">Auto predictions</Nav.Link>
+              </Nav.Item>
+              <Nav.Item>
+                <Nav.Link eventKey="autoTrading">Demo auto-trade</Nav.Link>
               </Nav.Item>
             </Nav>
 
@@ -6250,11 +6283,21 @@ export function KiteInstrumentsPage() {
                   </tbody>
                 </Table>
               </div>
-              <div className="border-top border-secondary-subtle pt-4 mt-1 mb-2">
+            </div>
+            ) : mainTab === 'autoTrading' ? (
+            <div className="mt-3 d-flex flex-column gap-3">
+              {!isZerodha ? (
+                <Alert variant="secondary" className="py-2 small mb-0 border border-secondary-subtle shadow-sm">
+                  <span className="fw-semibold text-body">Kite session required.</span> Connect{' '}
+                  <strong>Zerodha</strong> to configure hypothetical demo P&amp;L.
+                </Alert>
+              ) : null}
+              <div className="border-bottom border-secondary-subtle pb-3 mb-1">
                 <h2 className="h6 text-body mb-1">Demo auto-trade</h2>
                 <p className="small text-secondary mb-0">
-                  Hypothetical EOD and multi-day reports use only automation rows whose instrument token is in{' '}
-                  <strong>Locked for trading</strong> ({tradingLocks.length} saved lock{tradingLocks.length === 1 ? '' : 's'}). Add or remove locks on that tab; refresh EOD after changing locks.
+                  Hypothetical EOD and multi-day reports use automation rows for instruments in{' '}
+                  <strong>Locked for trading</strong> ({tradingLocks.length} saved lock{tradingLocks.length === 1 ? '' : 's'}).
+                  Add or remove locks on that tab; refresh EOD after changing locks.
                 </p>
               </div>
 
@@ -6361,8 +6404,11 @@ export function KiteInstrumentsPage() {
                     </div>
                     <p className="small text-secondary mb-2">
                       Same calendar day and <strong>Locked for trading</strong> filter as EOD; rows refresh about every{' '}
-                      <strong>12s</strong> while this tab is open. Status shows whether the preset allocated notional to each
-                      signal.
+                      <strong>12s</strong> while <strong>Demo auto-trade</strong> is open. Hypothetical P&amp;L uses Kite{' '}
+                      <strong>lot sizes</strong> saved on locks: each leg&apos;s INR slice is floored to whole contracts using
+                      next open→next close (when present) vs ref close→next close; <strong>Buy</strong> / <strong>Sell</strong>{' '}
+                      follow long vs short semantics; gross ₹ is (sell − buy) × lot × contracts for long/up and the inverse for
+                      short/down (before illustrative fees).
                     </p>
                     {demoTodayLegsError ? (
                       <Alert variant="warning" className="py-2 small mb-2">
@@ -6426,7 +6472,11 @@ export function KiteInstrumentsPage() {
                             <th className="text-end">Conf</th>
                             <th>Outcome</th>
                             <th>Status</th>
-                            <th className="text-end">Alloc</th>
+                            <th className="text-end">Lots</th>
+                            <th className="text-end">Buy</th>
+                            <th className="text-end">Sell</th>
+                            <th className="text-end">Exposure</th>
+                            <th className="text-end">Alloc slice</th>
                             <th className="text-end">Gross</th>
                             <th className="text-end">Fees</th>
                             <th className="text-end">Net</th>
@@ -6436,7 +6486,7 @@ export function KiteInstrumentsPage() {
                         <tbody className="font-monospace">
                           {!demoTodayLegs || demoTodayLegs.legs.length === 0 ? (
                             <tr>
-                              <td colSpan={11} className="text-secondary small">
+                              <td colSpan={15} className="text-secondary small">
                                 {demoTodayLegsLoading
                                   ? 'Loading legs…'
                                   : 'No demo legs for today (add trading locks or wait for automation rows).'}
@@ -6488,6 +6538,22 @@ export function KiteInstrumentsPage() {
                                         {leg.statusDetail}
                                       </span>
                                     ) : null}
+                                  </td>
+                                  <td className="text-end text-nowrap font-monospace" title="Contracts × lot multiplier">
+                                    {(leg.instrumentLotMultiplier ?? 0) > 0 && (leg.demoWholeLotsTraded ?? 0) > 0
+                                      ? `${leg.demoWholeLotsTraded}×${leg.instrumentLotMultiplier}`
+                                      : '—'}
+                                  </td>
+                                  <td className="text-end text-nowrap">
+                                    {formatDemoHypotheticalPrice(leg.hypotheticalBuyPrice)}
+                                  </td>
+                                  <td className="text-end text-nowrap">
+                                    {formatDemoHypotheticalPrice(leg.hypotheticalSellPrice)}
+                                  </td>
+                                  <td className="text-end">
+                                    {leg.status === 'allocated' && leg.committedExposureApproxInr > 0
+                                      ? formatInrRupee(leg.committedExposureApproxInr)
+                                      : '—'}
                                   </td>
                                   <td className="text-end">
                                     {leg.allocatedNotionalInr > 0 ? formatInrRupee(leg.allocatedNotionalInr) : '—'}
@@ -6654,7 +6720,8 @@ export function KiteInstrumentsPage() {
                     <p className="small text-secondary mb-2">
                       Per-day hypothetical P&amp;L (same rules as EOD), totals, direction mix, and outcomes by engine /
                       interval — <strong>locked instruments only</strong>. Default window is the last <strong>7</strong> calendar days in the server report timezone;
-                      or reuse <strong>From / To</strong> from <em>Merged log range &amp; email</em> above.
+                      or reuse <strong>From / To</strong> from <strong>Merged log range &amp; email</strong> on{' '}
+                      <strong>Auto predictions</strong> (same browser session).
                     </p>
                     <div className="d-flex flex-wrap gap-2 mb-2">
                       <Button

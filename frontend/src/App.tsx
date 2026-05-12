@@ -66,6 +66,18 @@ export default function App() {
         }
       />
       <Route
+        path="/instruments/demo-auto-trade"
+        element={
+          <Protected>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <Navigate to="/instruments?tab=demo-auto-trade" replace />
+              </RequiresBroker>
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
         path="/instruments/locked"
         element={
           <Protected>

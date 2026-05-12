@@ -606,21 +606,36 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         };
     }
 
-    private static async Task<HashSet<string>> GetTradingLockInstrumentTokenSetAsync(
+    private static Dictionary<string, int> BuildTradingLockLotMultipliers(KiteTradingLocksListDto dto)
+    {
+        var dict = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var it in dto.Items)
+        {
+            var t = it.InstrumentToken?.Trim();
+            if (string.IsNullOrEmpty(t) || it.LotSize is not int lz || lz < 1)
+                continue;
+
+            dict[t] = lz;
+        }
+
+        return dict;
+    }
+
+    private static async Task<(HashSet<string> Tokens, Dictionary<string, int> LotMultipliers)> LoadDemoTradingLocksAsync(
         IBrokerService broker,
         Guid userId,
         CancellationToken ct)
     {
         var locksDto = await broker.GetKiteTradingLocksAsync(userId, ct).ConfigureAwait(false);
-        var set = new HashSet<string>(StringComparer.Ordinal);
+        var tokens = new HashSet<string>(StringComparer.Ordinal);
         foreach (var it in locksDto.Items)
         {
             var t = it.InstrumentToken?.Trim();
             if (!string.IsNullOrEmpty(t))
-                set.Add(t);
+                tokens.Add(t);
         }
 
-        return set;
+        return (tokens, BuildTradingLockLotMultipliers(locksDto));
     }
 
     private static List<MlAutomationPredictionListItemDto> FilterAutomationRowsForDemoTrade(
@@ -666,18 +681,21 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             .ConfigureAwait(false);
 
         var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtc).ToList();
-        var lockTokens = await GetTradingLockInstrumentTokenSetAsync(_broker, userId, ct).ConfigureAwait(false);
+        var (lockTokens, demoLotMultipliers) = await LoadDemoTradingLocksAsync(_broker, userId, ct).ConfigureAwait(false);
         var lockedInstrumentCount = lockTokens.Count;
         var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
         var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
-        var totals = DemoAutoTradeEodSummaryCalculator.Compute(forDemo, notional, normStrategy, chargeParams);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(forDemo, notional, normStrategy, chargeParams, demoLotMultipliers);
         var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
         var note = DemoAutoTradeEodSummaryCalculator.BuildAllocationNote(normStrategy, totals);
         note += lockedInstrumentCount == 0
             ? " Demo auto-trade uses no automation rows when there are zero Locked for trading instruments."
             : $" Demo auto-trade uses only automation rows for instruments in Locked for trading ({lockedInstrumentCount} instrument(s)).";
+        note +=
+            " P&L uses Kite contract lot sizes saved on Locked for trading: INR slices are floored to whole contracts at hypothetical entry," +
+            " gross = (sell−buy)×quantity for long/up and the mirror for short/down; buy/sell prices are on each allocated leg.";
         var ch = _demoAutoTradeOpts.Value.Charges;
         var chargesEnabled = ch.Enabled;
         var flatInr = chargesEnabled ? Math.Max(0m, ch.RoundTripFlatInrPerLeg) : 0m;
@@ -734,13 +752,18 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             .ConfigureAwait(false);
 
         var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtc).ToList();
-        var lockTokens = await GetTradingLockInstrumentTokenSetAsync(_broker, userId, ct).ConfigureAwait(false);
+        var (lockTokens, demoLotMultipliers) = await LoadDemoTradingLocksAsync(_broker, userId, ct).ConfigureAwait(false);
         var lockedInstrumentCount = lockTokens.Count;
         var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
         var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
-        var (_, legs) = DemoAutoTradeEodSummaryCalculator.ComputeWithLegRows(forDemo, notional, normStrategy, chargeParams);
+        var (_, legs) = DemoAutoTradeEodSummaryCalculator.ComputeWithLegRows(
+            forDemo,
+            notional,
+            normStrategy,
+            chargeParams,
+            demoLotMultipliers);
         var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
         var ch = _demoAutoTradeOpts.Value.Charges;
         var chargesEnabled = ch.Enabled;
@@ -818,7 +841,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var inWindow = rows.Where(r => r.PredictedAt >= fromUtc && r.PredictedAt < toUtcExcl).ToList();
         var mayBeTruncated = rows.Count >= MaxAutomationHistoryTake;
 
-        var lockTokens = await GetTradingLockInstrumentTokenSetAsync(_broker, userId, ct).ConfigureAwait(false);
+        var (lockTokens, demoLotMultipliers) = await LoadDemoTradingLocksAsync(_broker, userId, ct).ConfigureAwait(false);
         var lockedInstrumentCount = lockTokens.Count;
         var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
 
@@ -837,7 +860,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             .Select(g =>
             {
                 var list = g.ToList();
-                var t = DemoAutoTradeEodSummaryCalculator.Compute(list, notional, normStrategy, chargeParams);
+                var t = DemoAutoTradeEodSummaryCalculator.Compute(list, notional, normStrategy, chargeParams, demoLotMultipliers);
                 var note = DemoAutoTradeEodSummaryCalculator.BuildAllocationNote(normStrategy, t);
                 return new DemoAutoTradeFullReportDailyDto(
                     g.Key,

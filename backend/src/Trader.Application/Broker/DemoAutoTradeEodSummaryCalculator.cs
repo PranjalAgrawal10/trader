@@ -3,7 +3,9 @@ using Trader.Application.Prediction;
 namespace Trader.Application.Broker;
 
 /// <summary>
-/// Hypothetical end-of-day demo P&amp;L from merged automation rows; allocation rules are illustrative only (no brokerage, no orders).
+/// Hypothetical end-of-day demo P&amp;L from merged automation rows; allocation rules are illustrative only (no live orders).
+/// When a contract lot multiplier map is supplied, allocation is floored to whole contracts and P&amp;L uses
+/// <c>(exit−entry)×lotMultiplier×contracts</c> on Kite OHLC closes (long/up vs short/down); fees scale by contracts.
 /// </summary>
 public static class DemoAutoTradeEodSummaryCalculator
 {
@@ -48,7 +50,7 @@ public static class DemoAutoTradeEodSummaryCalculator
             "No fees, slippage, leverage, position sizing, or real execution. ";
 
         var legNote =
-            $"{totals.AllocatedLegsForPnl} directional leg(s) received allocation from {totals.DirectionalTradeableLegs} priced directional signal(s) this day.";
+            $"{totals.AllocatedLegsForPnl} directional leg(s) received hypothetical allocation from {totals.DirectionalTradeableLegs} priced directional signal(s) this day.";
         if (totals.SkippedLowConfidenceLegs > 0)
             legNote += $" {totals.SkippedLowConfidenceLegs} leg(s) below the confidence cutoff were excluded.";
         legNote += " " + explain;
@@ -66,39 +68,24 @@ public static class DemoAutoTradeEodSummaryCalculator
         IReadOnlyList<MlAutomationPredictionListItemDto> rows,
         decimal totalNotionalInr,
         string? strategyCode,
-        DemoAutoTradeChargeParameters? charges = null) =>
-        ComputeWithLegRows(rows, totalNotionalInr, strategyCode, charges).Totals;
+        DemoAutoTradeChargeParameters? charges = null,
+        IReadOnlyDictionary<string, int>? lotMultipliersByInstrumentToken = null) =>
+        ComputeWithLegRows(rows, totalNotionalInr, strategyCode, charges, lotMultipliersByInstrumentToken).Totals;
 
     public static (DemoAutoTradeEodTotals Totals, IReadOnlyList<DemoAutoTradeLegRowDto> Legs) ComputeWithLegRows(
         IReadOnlyList<MlAutomationPredictionListItemDto> rows,
         decimal totalNotionalInr,
         string? strategyCode,
-        DemoAutoTradeChargeParameters? charges = null)
+        DemoAutoTradeChargeParameters? charges = null,
+        IReadOnlyDictionary<string, int>? lotMultipliersByInstrumentToken = null)
     {
-        var work = BuildAllocationWork(rows, totalNotionalInr, strategyCode);
-        var applyCharges = charges is { ApplyRoundTripCosts: true };
-        var flatPerLeg = charges?.RoundTripFlatInrPerLeg ?? 0m;
-        var turnoverBps = charges?.RoundTripTurnoverBps ?? 0m;
+        var work = BuildAllocationWork(rows, totalNotionalInr, strategyCode, lotMultipliersByInstrumentToken);
+        var legs = BuildLegRows(rows, work, charges, lotMultipliersByInstrumentToken);
 
-        decimal grossPnl = 0m;
-        decimal feesInr = 0m;
-        foreach (var r in work.DirectionalTradeable)
-        {
-            if (!work.Allocations.TryGetValue(r.Id, out var notionalAllocated) || notionalAllocated <= 0m)
-                continue;
-
-            var dir = (r.Direction ?? string.Empty).Trim();
-            var ret = DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose!.Value);
-            if (ret is null)
-                continue;
-
-            grossPnl += notionalAllocated * ret.Value;
-            if (applyCharges)
-                feesInr += flatPerLeg + Math.Abs(notionalAllocated) * (turnoverBps / 10000m);
-        }
-
+        var allocated = legs.Where(l => string.Equals(l.Status, "allocated", StringComparison.Ordinal)).ToList();
+        var grossPnl = allocated.Sum(l => l.LegGrossPnlInr);
+        var feesInr = allocated.Sum(l => l.LegFeesInr);
         var netPnl = grossPnl - feesInr;
-        var allocatedCount = work.Allocations.Values.Count(v => v > 0m);
 
         var totals = new DemoAutoTradeEodTotals(
             TotalSignals: work.TotalSignals,
@@ -107,13 +94,12 @@ public static class DemoAutoTradeEodSummaryCalculator
             WrongOutcomes: work.WrongOutcomes,
             SkippedNoNextClose: work.SkippedNoNextClose,
             DirectionalTradeableLegs: work.DirectionalTradeable.Count,
-            AllocatedLegsForPnl: allocatedCount,
+            AllocatedLegsForPnl: allocated.Count,
             SkippedLowConfidenceLegs: work.SkippedLowConfidenceLegs,
             HypotheticalGrossPnlInr: decimal.Round(grossPnl, 2, MidpointRounding.AwayFromZero),
             HypotheticalChargesInr: decimal.Round(feesInr, 2, MidpointRounding.AwayFromZero),
             HypotheticalTotalPnlInr: decimal.Round(netPnl, 2, MidpointRounding.AwayFromZero));
 
-        var legs = BuildLegRows(rows, work, charges);
         return (totals, legs);
     }
 
@@ -132,9 +118,11 @@ public static class DemoAutoTradeEodSummaryCalculator
     private static AllocationWork BuildAllocationWork(
         IReadOnlyList<MlAutomationPredictionListItemDto> rows,
         decimal totalNotionalInr,
-        string? strategyCode)
+        string? strategyCode,
+        IReadOnlyDictionary<string, int>? lotMultipliersByInstrumentToken)
     {
         var strategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(strategyCode);
+        var useLots = lotMultipliersByInstrumentToken is not null;
         var totalSignals = rows.Count;
         var pending = 0;
         var correct = 0;
@@ -173,6 +161,17 @@ public static class DemoAutoTradeEodSummaryCalculator
 
             if (DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose!.Value) is null)
                 continue;
+
+            if (useLots)
+            {
+                var tok = (r.InstrumentToken ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(tok)
+                    || !lotMultipliersByInstrumentToken!.TryGetValue(tok, out var mult)
+                    || mult < 1)
+                {
+                    continue;
+                }
+            }
 
             directionalTradeable.Add(r);
         }
@@ -265,8 +264,10 @@ public static class DemoAutoTradeEodSummaryCalculator
     private static List<DemoAutoTradeLegRowDto> BuildLegRows(
         IReadOnlyList<MlAutomationPredictionListItemDto> rows,
         AllocationWork work,
-        DemoAutoTradeChargeParameters? charges)
+        DemoAutoTradeChargeParameters? charges,
+        IReadOnlyDictionary<string, int>? lotMultipliersByInstrumentToken)
     {
+        var useLots = lotMultipliersByInstrumentToken is not null;
         var applyCharges = charges is { ApplyRoundTripCosts: true };
         var flatPerLeg = charges?.RoundTripFlatInrPerLeg ?? 0m;
         var turnoverBps = charges?.RoundTripTurnoverBps ?? 0m;
@@ -282,7 +283,7 @@ public static class DemoAutoTradeEodSummaryCalculator
         {
             if (string.Equals(r.Outcome, "pending", StringComparison.OrdinalIgnoreCase))
             {
-                list.Add(LegRow(r, "pending", null, 0m, 0m, 0m, 0m));
+                list.Add(ExcludeLeg(r, "pending", null));
                 continue;
             }
 
@@ -290,31 +291,43 @@ public static class DemoAutoTradeEodSummaryCalculator
             if (dir.Equals("neutral", StringComparison.OrdinalIgnoreCase))
             {
                 list.Add(
-                    LegRow(
-                        r,
-                        "excluded_neutral",
-                        "Neutral direction receives no notional.",
-                        0m,
-                        0m,
-                        0m,
-                        0m));
+                    ExcludeLeg(r, "excluded_neutral", "Neutral direction receives no notional."));
                 continue;
             }
 
             if (r.NextClose is null || r.RefClose <= 0m)
             {
-                list.Add(LegRow(r, "excluded_no_price", "Missing ref close or next close.", 0m, 0m, 0m, 0m));
+                list.Add(ExcludeLeg(r, "excluded_no_price", "Missing ref close or next close."));
                 continue;
             }
 
             if (!directionalSet.Contains(r.Id))
             {
                 var retTry = DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose.Value);
-                var st = retTry is null ? "excluded_not_directional" : "excluded_no_price";
-                var det = retTry is null
-                    ? "Up/down directional return could not be scored."
-                    : "Row not in priced directional set.";
-                list.Add(LegRow(r, st, det, 0m, 0m, 0m, 0m));
+                if (retTry is null)
+                {
+                    list.Add(
+                        ExcludeLeg(r, "excluded_not_directional", "Up/down directional return could not be scored."));
+                    continue;
+                }
+
+                if (useLots)
+                {
+                    var tokBad = (r.InstrumentToken ?? string.Empty).Trim();
+                    if (string.IsNullOrEmpty(tokBad)
+                        || !lotMultipliersByInstrumentToken!.TryGetValue(tokBad, out var lm)
+                        || lm < 1)
+                    {
+                        list.Add(
+                            ExcludeLeg(
+                                r,
+                                "excluded_missing_lot_size",
+                                "No Kite lot size on this Locked for trading row; lock the contract again from Browse."));
+                        continue;
+                    }
+                }
+
+                list.Add(ExcludeLeg(r, "excluded_no_price", "Row not in priced directional set."));
                 continue;
             }
 
@@ -324,65 +337,183 @@ public static class DemoAutoTradeEodSummaryCalculator
                     ? $"Below {HighConvictionMinConfidence}% confidence cutoff."
                     : "Not selected under this allocation preset (e.g. one pick per symbol/engine or top-half).";
                 list.Add(
-                    LegRow(
+                    ExcludeLeg(
                         r,
                         isHighConviction ? "excluded_low_confidence" : "excluded_by_strategy",
-                        detail,
-                        0m,
-                        0m,
-                        0m,
-                        0m));
+                        detail));
                 continue;
             }
 
             if (!work.Allocations.TryGetValue(r.Id, out var alloc) || alloc <= 0m)
             {
                 list.Add(
-                    LegRow(
+                    ExcludeLeg(
                         r,
                         "excluded_zero_allocation",
-                        "Preset left this leg with zero notional (e.g. implied-edge weights).",
-                        0m,
-                        0m,
-                        0m,
-                        0m));
+                        "Preset left this leg with zero notional (e.g. implied-edge weights)."));
+                continue;
+            }
+
+            if (useLots)
+            {
+                var token = (r.InstrumentToken ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(token)
+                    || !lotMultipliersByInstrumentToken!.TryGetValue(token, out var lotMult)
+                    || lotMult < 1)
+                {
+                    list.Add(
+                        ExcludeLeg(
+                            r,
+                            "excluded_missing_lot_size",
+                            "No Kite lot size on this Locked for trading row; lock the contract again from Browse."));
+                    continue;
+                }
+
+                if (!TryResolveEntryPrice(r.RefClose, r.NextOpen, out var entryPx))
+                {
+                    list.Add(ExcludeLeg(r, "excluded_no_price", "Could not resolve entry price."));
+                    continue;
+                }
+
+                var oneContractAnchor = entryPx * lotMult;
+                if (oneContractAnchor <= 0m)
+                {
+                    list.Add(ExcludeLeg(r, "excluded_no_price", "Invalid entry × lot multiplier."));
+                    continue;
+                }
+
+                var whole = (int)Math.Floor(alloc / oneContractAnchor);
+                if (whole < 1)
+                {
+                    list.Add(
+                        LegRow(
+                            r,
+                            "excluded_cannot_buy_one_lot",
+                            $"INR slice {decimal.Round(alloc, 2, MidpointRounding.AwayFromZero):0.##} is below one whole contract (~{decimal.Round(oneContractAnchor, 2, MidpointRounding.AwayFromZero):0.##} at entry).",
+                            decimal.Round(alloc, 2, MidpointRounding.AwayFromZero),
+                            lotMult,
+                            0,
+                            0m,
+                            null,
+                            null,
+                            0m,
+                            0m,
+                            0m));
+                    continue;
+                }
+
+                var exitPx = r.NextClose!.Value;
+                var grossOpt = TryDirectionalRupeePnl(
+                    dir,
+                    entryPx,
+                    exitPx,
+                    lotMult,
+                    whole,
+                    out var buyPx,
+                    out var sellPx);
+                if (grossOpt is null)
+                {
+                    list.Add(
+                        LegRow(
+                            r,
+                            "excluded_not_directional",
+                            null,
+                            decimal.Round(alloc, 2, MidpointRounding.AwayFromZero),
+                            lotMult,
+                            0,
+                            0m,
+                            null,
+                            null,
+                            0m,
+                            0m,
+                            0m));
+                    continue;
+                }
+
+                var gross = grossOpt.Value;
+                var fees = EstimateContractLegFees(applyCharges, flatPerLeg, turnoverBps, entryPx, lotMult, whole);
+                var net = gross - fees;
+                var committed = entryPx * lotMult * whole;
+                list.Add(
+                    LegRow(
+                        r,
+                        "allocated",
+                        null,
+                        decimal.Round(alloc, 2, MidpointRounding.AwayFromZero),
+                        lotMult,
+                        whole,
+                        committed,
+                        buyPx,
+                        sellPx,
+                        gross,
+                        fees,
+                        net));
                 continue;
             }
 
             var ret = DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose!.Value);
             if (ret is null)
             {
-                list.Add(LegRow(r, "excluded_not_directional", null, alloc, 0m, 0m, 0m));
+                list.Add(
+                    LegRow(
+                        r,
+                        "excluded_not_directional",
+                        null,
+                        decimal.Round(alloc, 2, MidpointRounding.AwayFromZero),
+                        0,
+                        0,
+                        decimal.Round(alloc, 2, MidpointRounding.AwayFromZero),
+                        null,
+                        null,
+                        0m,
+                        0m,
+                        0m));
                 continue;
             }
 
-            var gross = alloc * ret.Value;
-            var fees = 0m;
+            var grossLegacy = alloc * ret.Value;
+            var feesLegacy = 0m;
             if (applyCharges)
-                fees = flatPerLeg + Math.Abs(alloc) * (turnoverBps / 10000m);
-            var net = gross - fees;
+                feesLegacy = flatPerLeg + Math.Abs(alloc) * (turnoverBps / 10000m);
+            var netLegacy = grossLegacy - feesLegacy;
             list.Add(
                 LegRow(
                     r,
                     "allocated",
                     null,
                     decimal.Round(alloc, 2, MidpointRounding.AwayFromZero),
-                    decimal.Round(gross, 2, MidpointRounding.AwayFromZero),
-                    decimal.Round(fees, 2, MidpointRounding.AwayFromZero),
-                    decimal.Round(net, 2, MidpointRounding.AwayFromZero)));
+                    0,
+                    0,
+                    decimal.Round(alloc, 2, MidpointRounding.AwayFromZero),
+                    null,
+                    null,
+                    grossLegacy,
+                    feesLegacy,
+                    netLegacy));
         }
 
         return list;
     }
 
+    private static DemoAutoTradeLegRowDto ExcludeLeg(
+        MlAutomationPredictionListItemDto r,
+        string status,
+        string? statusDetail) =>
+        LegRow(r, status, statusDetail, 0m, 0, 0, 0m, null, null, 0m, 0m, 0m);
+
     private static DemoAutoTradeLegRowDto LegRow(
         MlAutomationPredictionListItemDto r,
         string status,
         string? statusDetail,
-        decimal alloc,
-        decimal gross,
-        decimal fees,
-        decimal net) =>
+        decimal allocatedNotionalInr,
+        int instrumentLotMultiplier,
+        int demoWholeLotsTraded,
+        decimal committedExposureApproxInr,
+        decimal? hypotheticalBuyPrice,
+        decimal? hypotheticalSellPrice,
+        decimal legGrossPnlInr,
+        decimal legFeesInr,
+        decimal legNetPnlInr) =>
         new(
             r.Id,
             r.PredictedAt,
@@ -399,10 +530,74 @@ public static class DemoAutoTradeEodSummaryCalculator
             r.NextClose,
             status,
             statusDetail,
-            alloc,
-            gross,
-            fees,
-            net);
+            allocatedNotionalInr,
+            instrumentLotMultiplier,
+            demoWholeLotsTraded,
+            committedExposureApproxInr,
+            hypotheticalBuyPrice is { } bp ? decimal.Round(bp, 4, MidpointRounding.AwayFromZero) : null,
+            hypotheticalSellPrice is { } sp ? decimal.Round(sp, 4, MidpointRounding.AwayFromZero) : null,
+            decimal.Round(legGrossPnlInr, 2, MidpointRounding.AwayFromZero),
+            decimal.Round(legFeesInr, 2, MidpointRounding.AwayFromZero),
+            decimal.Round(legNetPnlInr, 2, MidpointRounding.AwayFromZero));
+
+    private static bool TryResolveEntryPrice(decimal refClose, decimal? nextOpen, out decimal entry)
+    {
+        if (nextOpen is { } o && o > 0m)
+        {
+            entry = o;
+            return true;
+        }
+
+        entry = refClose;
+        return refClose > 0m;
+    }
+
+    private static decimal? TryDirectionalRupeePnl(
+        string direction,
+        decimal entryPrice,
+        decimal exitPrice,
+        int lotMultiplier,
+        int wholeContracts,
+        out decimal buyPrice,
+        out decimal sellPrice)
+    {
+        buyPrice = 0m;
+        sellPrice = 0m;
+        if (lotMultiplier < 1 || wholeContracts < 1)
+            return null;
+
+        var qty = lotMultiplier * wholeContracts;
+        if (direction.Equals("up", StringComparison.OrdinalIgnoreCase))
+        {
+            buyPrice = entryPrice;
+            sellPrice = exitPrice;
+            return (exitPrice - entryPrice) * qty;
+        }
+
+        if (direction.Equals("down", StringComparison.OrdinalIgnoreCase))
+        {
+            sellPrice = entryPrice;
+            buyPrice = exitPrice;
+            return (entryPrice - exitPrice) * qty;
+        }
+
+        return null;
+    }
+
+    private static decimal EstimateContractLegFees(
+        bool applyCharges,
+        decimal flatPerLeg,
+        decimal turnoverBps,
+        decimal entryPrice,
+        int lotMultiplier,
+        int wholeContracts)
+    {
+        if (!applyCharges || wholeContracts < 1 || lotMultiplier < 1)
+            return 0m;
+
+        var exposure = Math.Abs(entryPrice * lotMultiplier * wholeContracts);
+        return wholeContracts * flatPerLeg + exposure * (turnoverBps / 10000m) * 2m;
+    }
 
     private static Dictionary<Guid, decimal> ConfidenceWeightedAllocation(
         IReadOnlyList<MlAutomationPredictionListItemDto> legs,

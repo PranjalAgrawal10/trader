@@ -71,6 +71,154 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
         Assert.Equal(100m, totals.HypotheticalTotalPnlInr);
     }
 
+    /// <summary>When two whole contracts fit the INR slice at entry × lot multiplier, ₹ move matches legacy %×notional for the toy +1% bar.</summary>
+    [Fact]
+    public void Contract_lot_mode_two_contracts_matches_legacy_gross_for_one_percent_move()
+    {
+        var row = new MlAutomationPredictionListItemDto(
+            Guid.Parse("00000000-0000-4000-8000-000000000501"),
+            DateTimeOffset.Parse("2026-05-11T10:00:00Z"),
+            "tokLot",
+            "X",
+            "NFO",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T09:30:00Z"),
+            100m,
+            "up",
+            72,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
+            101m,
+            "engine");
+
+        var lotMap = new Dictionary<string, int>(StringComparer.Ordinal) { ["tokLot"] = 50 };
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { row },
+            10_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            null,
+            lotMap);
+
+        Assert.Equal(1, totals.AllocatedLegsForPnl);
+        Assert.Equal(100m, totals.HypotheticalTotalPnlInr);
+
+        var (_, legs) = DemoAutoTradeEodSummaryCalculator.ComputeWithLegRows(
+            new[] { row },
+            10_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            null,
+            lotMap);
+        var allocated = Assert.Single(legs.Where(l => l.Status == "allocated"));
+        Assert.Equal(50, allocated.InstrumentLotMultiplier);
+        Assert.Equal(2, allocated.DemoWholeLotsTraded);
+        Assert.Equal(100m, allocated.HypotheticalBuyPrice);
+        Assert.Equal(101m, allocated.HypotheticalSellPrice);
+    }
+
+    [Fact]
+    public void Contract_lot_charge_model_scales_flat_and_turnover_with_contract_count()
+    {
+        var row = new MlAutomationPredictionListItemDto(
+            Guid.Parse("00000000-0000-4000-8000-000000000502"),
+            DateTimeOffset.Parse("2026-05-11T10:00:00Z"),
+            "tokCharges",
+            "X",
+            "NFO",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T09:30:00Z"),
+            100m,
+            "up",
+            72,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
+            101m,
+            "e");
+
+        var lotMap = new Dictionary<string, int>(StringComparer.Ordinal) { ["tokCharges"] = 50 };
+        var fees = new DemoAutoTradeChargeParameters(true, 40m, 2m);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { row },
+            10_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            fees,
+            lotMap);
+
+        Assert.Equal(100m, totals.HypotheticalGrossPnlInr);
+        Assert.Equal(84m, totals.HypotheticalChargesInr);
+        Assert.Equal(16m, totals.HypotheticalTotalPnlInr);
+    }
+
+    [Fact]
+    public void Contract_slice_below_one_contract_is_excluded()
+    {
+        var row = new MlAutomationPredictionListItemDto(
+            Guid.Parse("00000000-0000-4000-8000-000000000503"),
+            DateTimeOffset.Parse("2026-05-11T10:00:00Z"),
+            "tokPoor",
+            "X",
+            "NFO",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T09:30:00Z"),
+            100m,
+            "up",
+            72,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
+            101m,
+            "e");
+
+        var lotMap = new Dictionary<string, int>(StringComparer.Ordinal) { ["tokPoor"] = 65 };
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { row },
+            4_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            null,
+            lotMap);
+
+        Assert.Equal(0, totals.AllocatedLegsForPnl);
+        var (_, legs) = DemoAutoTradeEodSummaryCalculator.ComputeWithLegRows(
+            new[] { row },
+            4_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            null,
+            lotMap);
+        Assert.Contains(legs, l => l.Status == "excluded_cannot_buy_one_lot");
+    }
+
+    [Fact]
+    public void Contract_map_without_multiplier_excludes_priced_leg()
+    {
+        var row = new MlAutomationPredictionListItemDto(
+            Guid.Parse("00000000-0000-4000-8000-000000000504"),
+            DateTimeOffset.Parse("2026-05-11T10:00:00Z"),
+            "noLotToken",
+            "X",
+            "NFO",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T09:30:00Z"),
+            100m,
+            "up",
+            72,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
+            101m,
+            "e");
+
+        var emptyMap = new Dictionary<string, int>(StringComparer.Ordinal);
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { row },
+            10_000m,
+            DemoAutoTradeStrategyIds.EqualSplit,
+            null,
+            emptyMap);
+
+        Assert.Equal(0, totals.DirectionalTradeableLegs);
+    }
+
     // When NextOpen is set, return is next open→next close (not ref→next close).
     [Fact]
     public void Market_style_uses_next_open_to_next_close_when_next_open_present()
