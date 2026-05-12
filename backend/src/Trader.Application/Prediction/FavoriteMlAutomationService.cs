@@ -436,10 +436,23 @@ public sealed class FavoriteMlAutomationService
 
                 var last = hist.Candles[^1];
                 var token = fav.InstrumentToken.Trim();
+                if (FavoriteMlAutomationBarSchedule.ShouldDeferOutsideTradingSession(
+                        _opts,
+                        DateTime.UtcNow,
+                        hist.Interval,
+                        fav.Exchange))
+                    continue;
+
                 // N-minute cadence: user poll interval > 0 → space passes by N only; do not gate on m-bar phase (intrabar delay).
                 var hasRunEveryNCadence = user.FavoriteMlAutomationPollIntervalSeconds is int pollCadence && pollCadence > 0;
                 if (!hasRunEveryNCadence)
                 {
+                    if (FavoriteMlAutomationBarSchedule.ShouldDeferOutsideIstMinutePhase(
+                            _opts,
+                            DateTimeOffset.UtcNow,
+                            hist.Interval))
+                        continue;
+
                     var barLen = ChartUiIntervals.BarDuration(hist.Interval);
                     var minAfterOpen = user.FavoriteMlAutomationMinSecondsAfterBarOpen ?? _opts.MinSecondsAfterBarOpenForAutomation;
                     if (!FavoriteMlAutomationIntrabar.IsReadyForNewPredictionOnRefBar(

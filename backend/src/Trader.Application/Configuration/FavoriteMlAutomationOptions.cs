@@ -91,4 +91,34 @@ public sealed class FavoriteMlAutomationOptions
     /// automation predictions for the whole day (pending resolution still runs). Set false for 24/7 markets or tests.
     /// </summary>
     public bool PauseAutomationOnWeekends { get; set; } = true;
+
+    /// <summary>
+    /// When true (default), <strong>new</strong> intraday automation is limited to <see cref="TradingSessionStartLocalHour"/>/<see cref="TradingSessionStartLocalMinute"/>
+    /// (inclusive) through <see cref="TradingSessionEndLocalHour"/>/<see cref="TradingSessionEndLocalMinute"/> (exclusive) in <see cref="ReportTimeZoneId"/>.
+    /// Daily/weekly candles are exempt. See <see cref="SkipTradingSessionForMcxFavorites"/>.
+    /// </summary>
+    public bool TradingSessionRestrictionsEnabled { get; set; } = true;
+
+    /// <summary>Default NSE-style cash/F&amp;O window (India): 09:15 local open.</summary>
+    public int TradingSessionStartLocalHour { get; set; } = 9;
+
+    public int TradingSessionStartLocalMinute { get; set; } = 15;
+
+    /// <summary>Exclusive end (default 15:30): no new intraday predictions at or after this local clock time.</summary>
+    public int TradingSessionEndLocalHour { get; set; } = 15;
+
+    public int TradingSessionEndLocalMinute { get; set; } = 30;
+
+    /// <summary>When true (default), favorites on exchange <c>MCX</c> bypass <see cref="TradingSessionRestrictionsEnabled"/>.</summary>
+    public bool SkipTradingSessionForMcxFavorites { get; set; } = true;
+
+    /// <summary>
+    /// When true (default), only the first <see cref="IstMinuteBoundarySeconds"/> seconds of each local wall-clock minute
+    /// (in <see cref="ReportTimeZoneId"/>; IST default) qualify for new predictions—pairs with polling so runs line up with round-minute timestamps.
+    /// Does not apply to <strong>N</strong>-minute user cadence. Skipped for <c>1d</c>/<c>1w</c> candles.
+    /// </summary>
+    public bool IstMinuteBoundaryAlignmentEnabled { get; set; } = true;
+
+    /// <summary>Width of each allowed window at the start of a calendar minute (clamped 5–45).</summary>
+    public int IstMinuteBoundarySeconds { get; set; } = 22;
 }
