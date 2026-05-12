@@ -25,6 +25,7 @@ public sealed class TraderDbContext : DbContext
     public DbSet<Trade> Trades => Set<Trade>();
     public DbSet<TradingOrder> TradingOrders => Set<TradingOrder>();
     public DbSet<DemoPaperPosition> DemoPaperPositions => Set<DemoPaperPosition>();
+    public DbSet<DemoPaperBuyLeg> DemoPaperBuyLegs => Set<DemoPaperBuyLeg>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -127,6 +128,15 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.UpdatedAtUtc).HasColumnType("datetime(6)");
             e.HasIndex(x => new { x.UserId, x.InstrumentToken }).IsUnique();
             e.HasOne(x => x.User).WithMany(u => u.DemoPaperPositions).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DemoPaperBuyLeg>(e =>
+        {
+            e.Property(x => x.InstrumentToken).HasMaxLength(64);
+            e.Property(x => x.BoughtAtUtc).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.InstrumentToken, x.BoughtAtUtc });
+            e.HasOne(x => x.User).WithMany(u => u.DemoPaperBuyLegs).HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

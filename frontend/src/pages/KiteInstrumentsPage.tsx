@@ -58,7 +58,8 @@ import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import type { MarketTickBatchItem } from '../services/marketHub'
-import type { ChartPointOhlc } from '../utils/liveCandleMerge'
+import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
+import type { ChartPointOhlc, ChartIntervalKey } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
   CHART_ZOOM_MIN_BARS,
@@ -315,14 +316,19 @@ interface DemoAutoTradeTodayLegsDto {
   mayBeTruncated: boolean
 }
 
+interface DemoPaperOpenBuyMarkerDto {
+  boughtAtUtc: string
+  contractsRemaining: number
+}
+
 interface DemoPaperPositionListItemDto {
   instrumentToken: string
   tradingsymbol: string
   exchange: string
   lotSize: number | null
   openContracts: number
+  openBuys: DemoPaperOpenBuyMarkerDto[]
 }
-
 interface DemoPaperTradeResultDto {
   instrumentToken: string
   tradingsymbol: string
@@ -3494,6 +3500,7 @@ function CompactPriceChart({
   customEmaPeriod,
   zoomVisibleBars,
   onZoomVisibleBarsChange,
+  demoPaperBuyMarkers,
 }: {
   row: KiteInstrumentRow
   rangePreset: ChartRangePreset
@@ -3504,6 +3511,8 @@ function CompactPriceChart({
   customEmaPeriod: number
   zoomVisibleBars: number | null
   onZoomVisibleBarsChange: (bars: number | null) => void
+  /** OPEN demo BUY legs — vertical markers removed FIFO when sells execute. */
+  demoPaperBuyMarkers?: readonly DemoPaperOpenBuyMarkerDto[]
 }) {
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(true)
@@ -3588,6 +3597,29 @@ function CompactPriceChart({
   )
 
   const chartData = useMemo(() => sliceChartForZoom(seriesWithCustom, zoomVisibleBars), [seriesWithCustom, zoomVisibleBars])
+
+  const paperBuyDataIndices = useMemo(
+    () =>
+      [...chartDataIndicesForPaperBuyMarkers(demoPaperBuyMarkers ?? [], chartData, interval as ChartIntervalKey)],
+    [demoPaperBuyMarkers, chartData, interval],
+  )
+
+  const paperBuyReferenceLines = useMemo(() => {
+    return paperBuyDataIndices.map((di, seg) => {
+      const rowPt = chartData[di]
+      if (!rowPt) return null
+      return (
+        <ReferenceLine
+          key={`demo-pbuy-${row.instrumentToken}-${seg}-${rowPt.t}`}
+          x={rowPt.idx}
+          stroke="#84cc16"
+          strokeWidth={1.35}
+          strokeDasharray="5 5"
+          opacity={0.92}
+        />
+      )
+    })
+  }, [paperBuyDataIndices, chartData, row.instrumentToken])
 
   const rechartsYDomain = useMemo(
     () => yDomainForOhlcAndVisibleMas(chartData, maLineVisibility),
@@ -3714,6 +3746,7 @@ function CompactPriceChart({
                   data={chartData}
                   maLineVisibility={maLineVisibility}
                   customEmaPeriod={customEmaApplied}
+                  paperBuyDataIndices={paperBuyDataIndices}
                 />
               </div>
             ) : (
@@ -3745,6 +3778,7 @@ function CompactPriceChart({
                       />
                       <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
                       <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                      {paperBuyReferenceLines}
                     </LineChart>
                   ) : (
                     <ComposedChart data={chartData} margin={CHART_MARGINS}>
@@ -3767,6 +3801,7 @@ function CompactPriceChart({
                       />
                       <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
                       <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
+                      {paperBuyReferenceLines}
                     </ComposedChart>
                   )}
                 </ResponsiveContainer>
@@ -3944,6 +3979,7 @@ function FavoritesChartsGrid({
   automationRecentLoading,
   automationPriceModels,
   zerodhaConnected,
+  demoPaperOpenBuysByInstrumentToken,
 }: {
   favorites: KiteInstrumentRow[]
   rangePreset: ChartRangePreset
@@ -3970,6 +4006,7 @@ function FavoritesChartsGrid({
   automationRecentLoading: boolean
   automationPriceModels: PriceDirectionModelsApiResponse | null
   zerodhaConnected: boolean
+  demoPaperOpenBuysByInstrumentToken: Readonly<Record<string, DemoPaperOpenBuyMarkerDto[]>>
 }) {
   const favHistExtras = useMemo(() => historicalRangeQueryParams(rangePreset), [rangePreset])
   if (favorites.length === 0) return null
@@ -4066,6 +4103,7 @@ function FavoritesChartsGrid({
                   customEmaPeriod={customEmaPeriod}
                   zoomVisibleBars={chartZoomByInstrumentToken[row.instrumentToken] ?? null}
                   onZoomVisibleBarsChange={(bars) => onInstrumentChartZoomChange(row.instrumentToken, bars)}
+                  demoPaperBuyMarkers={demoPaperOpenBuysByInstrumentToken[row.instrumentToken]}
                 />
                 <TrendAnalysisMultiPanel
                   instrumentToken={row.instrumentToken}
@@ -4113,6 +4151,7 @@ function InstrumentChartCard({
   onZoomVisibleBarsChange,
   trendAnalysisSelections,
   onTrendAnalysisSelectionsChange,
+  demoPaperBuyMarkers,
 }: {
   selection: KiteInstrumentRow | null
   rangePreset: ChartRangePreset
@@ -4135,6 +4174,7 @@ function InstrumentChartCard({
   onZoomVisibleBarsChange: (bars: number | null) => void
   trendAnalysisSelections: ChartInterval[]
   onTrendAnalysisSelectionsChange: (next: ChartInterval[]) => void
+  demoPaperBuyMarkers?: readonly DemoPaperOpenBuyMarkerDto[]
 }) {
   const browseHistExtras = useMemo(() => historicalRangeQueryParams(rangePreset), [rangePreset])
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
@@ -4235,6 +4275,30 @@ function InstrumentChartCard({
   }, [displayWithMa.length, zoomVisibleBars, onZoomVisibleBarsChange])
 
   const chartData = useMemo(() => sliceChartForZoom(displayWithMa, zoomVisibleBars), [displayWithMa, zoomVisibleBars])
+
+  const browsePaperBuyDataIndices = useMemo(
+    () =>
+      [...chartDataIndicesForPaperBuyMarkers(demoPaperBuyMarkers ?? [], chartData, interval as ChartIntervalKey)],
+    [demoPaperBuyMarkers, chartData, interval],
+  )
+
+  const browsePaperBuyReferenceLines = useMemo(() => {
+    const tok = selection?.instrumentToken ?? 'na'
+    return browsePaperBuyDataIndices.map((di, seg) => {
+      const rowPt = chartData[di]
+      if (!rowPt) return null
+      return (
+        <ReferenceLine
+          key={`demo-pbuy-${tok}-${seg}-${rowPt.t}`}
+          x={rowPt.idx}
+          stroke="#84cc16"
+          strokeWidth={1.35}
+          strokeDasharray="5 5"
+          opacity={0.92}
+        />
+      )
+    })
+  }, [browsePaperBuyDataIndices, chartData, selection?.instrumentToken])
 
   const rechartsYDomain = useMemo(() => {
     const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
@@ -4420,6 +4484,7 @@ function InstrumentChartCard({
                       maLineVisibility={maLineVisibility}
                       customEmaPeriod={customEmaApplied}
                       livePrice={liveLastPrice ?? null}
+                      paperBuyDataIndices={browsePaperBuyDataIndices}
                     />
                   ) : (
                     <div className="position-relative w-100 h-100">
@@ -4451,6 +4516,7 @@ function InstrumentChartCard({
                               <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                               {liveLtpReferenceLine}
+                              {browsePaperBuyReferenceLines}
                             </LineChart>
                           ) : (
                             <ComposedChart data={chartData} margin={CHART_MARGINS}>
@@ -4476,6 +4542,7 @@ function InstrumentChartCard({
                               <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                               {liveLtpReferenceLine}
+                              {browsePaperBuyReferenceLines}
                             </ComposedChart>
                           )}
                         </ResponsiveContainer>
@@ -4492,7 +4559,9 @@ function InstrumentChartCard({
               optional <strong>Trend LR</strong> on <strong>candles</strong> (least-squares regression on close over zoomed bars),
               and an optional custom-period <strong>EMA</strong>. A cyan dashed <strong>LTP</strong> line tracks the streamed last
               price on candles, line, and bar views when subscribed; live ticks also update the in-progress{' '}
-              <strong>candle</strong> in Candles view. <strong>ML next-bar bias</strong> calls{' '}
+              <strong>candle</strong> in Candles view. Lime dashed verticals mark candles where OPEN demo{' '}
+              <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> contracts).
+              <strong>ML next-bar bias</strong> calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
               <span className="font-monospace">model</span> query (see{' '}
               <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.
@@ -4729,6 +4798,18 @@ export function KiteInstrumentsPage() {
   } | null>(null)
   const [demoPaperTradeError, setDemoPaperTradeError] = useState<string | null>(null)
   const [demoPaperTradeLast, setDemoPaperTradeLast] = useState<string | null>(null)
+  const demoPaperOpenBuysByInstrumentToken = useMemo(() => {
+    const r: Record<string, DemoPaperOpenBuyMarkerDto[]> = {}
+    for (const p of demoPaperPositions) {
+      if (p.openBuys.length > 0) r[p.instrumentToken] = p.openBuys
+    }
+    return r
+  }, [demoPaperPositions])
+
+  const browseDemoPaperOpenBuys = useMemo(
+    () => (chartRow ? demoPaperOpenBuysByInstrumentToken[chartRow.instrumentToken] ?? [] : []),
+    [chartRow, demoPaperOpenBuysByInstrumentToken],
+  )
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
@@ -5131,7 +5212,14 @@ export function KiteInstrumentsPage() {
       const { data } = await api.get<DemoPaperPositionListItemDto[]>(
         '/broker/kite/instruments/demo-paper-positions',
       )
-      setDemoPaperPositions(Array.isArray(data) ? data : [])
+      setDemoPaperPositions(
+        Array.isArray(data)
+          ? data.map((row) => ({
+              ...row,
+              openBuys: Array.isArray(row.openBuys) ? row.openBuys : [],
+            }))
+          : [],
+      )
     } catch (err) {
       setDemoPaperPositionsError(problemDetail(err))
       setDemoPaperPositions([])
@@ -7757,6 +7845,7 @@ export function KiteInstrumentsPage() {
                   automationRecentLoading={automationRecentLoading}
                   automationPriceModels={automationPriceModels}
                   zerodhaConnected={isZerodha}
+                  demoPaperOpenBuysByInstrumentToken={demoPaperOpenBuysByInstrumentToken}
                 />
               </div>
             ) : mainTab === 'tradingLocks' ? (
@@ -7800,6 +7889,7 @@ export function KiteInstrumentsPage() {
                   automationRecentLoading={automationRecentLoading}
                   automationPriceModels={automationPriceModels}
                   zerodhaConnected={isZerodha}
+                  demoPaperOpenBuysByInstrumentToken={demoPaperOpenBuysByInstrumentToken}
                 />
               </div>
             ) : null}
@@ -7835,6 +7925,7 @@ export function KiteInstrumentsPage() {
                 }}
                 trendAnalysisSelections={trendAnalysisSelections}
                 onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
+                demoPaperBuyMarkers={browseDemoPaperOpenBuys}
               />
             ) : null}
           </Card.Body>

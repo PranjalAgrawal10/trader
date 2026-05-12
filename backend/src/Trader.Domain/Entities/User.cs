@@ -106,4 +106,6 @@ public class User
     public ICollection<MlFavoriteEodReportSent> MlFavoriteEodReportsSent { get; set; } = new List<MlFavoriteEodReportSent>();
 
     public ICollection<DemoPaperPosition> DemoPaperPositions { get; set; } = new List<DemoPaperPosition>();
+
+    public ICollection<DemoPaperBuyLeg> DemoPaperBuyLegs { get; set; } = new List<DemoPaperBuyLeg>();
 }

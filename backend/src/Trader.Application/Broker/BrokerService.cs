@@ -68,6 +68,7 @@ public sealed class BrokerService : IBrokerService
     private readonly IWalletService _wallet;
     private readonly IUserRepository _users;
     private readonly IDemoPaperPositionRepository _demoPaperPositions;
+    private readonly IDemoPaperBuyLegRepository _demoPaperBuyLegs;
 
     public BrokerService(
         IBrokerSetupGateway brokerSetup,
@@ -81,7 +82,8 @@ public sealed class BrokerService : IBrokerService
         IMemoryCache memoryCache,
         IWalletService wallet,
         IUserRepository users,
-        IDemoPaperPositionRepository demoPaperPositions)
+        IDemoPaperPositionRepository demoPaperPositions,
+        IDemoPaperBuyLegRepository demoPaperBuyLegs)
     {
         _brokerSetup = brokerSetup;
         _stateCodec = stateCodec;
@@ -95,6 +97,7 @@ public sealed class BrokerService : IBrokerService
         _wallet = wallet;
         _users = users;
         _demoPaperPositions = demoPaperPositions;
+        _demoPaperBuyLegs = demoPaperBuyLegs;
     }
 
     public async Task<BrokerStatusDto> GetStatusAsync(Guid userId, CancellationToken ct = default)
@@ -759,17 +762,30 @@ public sealed class BrokerService : IBrokerService
 
         var locks = await _kiteTradingLocks.ListByUserAsync(userId, ct).ConfigureAwait(false);
         var byTok = locks.ToDictionary(x => x.InstrumentToken, StringComparer.Ordinal);
+        var legs = await _demoPaperBuyLegs.ListOpenByUserAsync(userId, ct).ConfigureAwait(false);
+        var openBuysByToken = legs
+            .GroupBy(l => l.InstrumentToken, StringComparer.Ordinal)
+            .ToDictionary(
+                g => g.Key,
+                g =>
+                    (IReadOnlyList<DemoPaperOpenBuyMarkerDto>)g.OrderBy(l => l.BoughtAtUtc)
+                        .Select(l => new DemoPaperOpenBuyMarkerDto(l.BoughtAtUtc, l.ContractsRemaining))
+                        .ToList(),
+                StringComparer.Ordinal);
+
         var list = new List<DemoPaperPositionListItemDto>(positions.Count);
         foreach (var p in positions)
         {
             byTok.TryGetValue(p.InstrumentToken, out var lk);
+            openBuysByToken.TryGetValue(p.InstrumentToken, out var openBuys);
             list.Add(
                 new DemoPaperPositionListItemDto(
                     p.InstrumentToken,
                     lk?.Tradingsymbol ?? p.InstrumentToken,
                     lk?.Exchange ?? "—",
                     lk?.LotSize,
-                    p.OpenContracts));
+                    p.OpenContracts,
+                    openBuys ?? Array.Empty<DemoPaperOpenBuyMarkerDto>()));
         }
 
         return list;
@@ -847,11 +863,23 @@ public sealed class BrokerService : IBrokerService
             pos.OpenContracts += request.Contracts;
             pos.UpdatedAtUtc = DateTimeOffset.UtcNow;
             openAfter = pos.OpenContracts;
+
+            _demoPaperBuyLegs.Add(
+                new DemoPaperBuyLeg
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    InstrumentToken = token,
+                    ContractsRemaining = request.Contracts,
+                    BoughtAtUtc = DateTimeOffset.UtcNow,
+                });
         }
         else
         {
             if (pos is null || pos.OpenContracts < request.Contracts)
                 throw new InvalidOperationException("Not enough open paper contracts to sell.");
+
+            await _demoPaperBuyLegs.ApplyFifoSellAsync(userId, token, request.Contracts, ct).ConfigureAwait(false);
 
             pos.OpenContracts -= request.Contracts;
             pos.UpdatedAtUtc = DateTimeOffset.UtcNow;

@@ -176,12 +176,15 @@ public sealed record DemoPaperTradeResultDto(
     decimal WalletBalanceAfter,
     int OpenContractsAfter);
 
+public sealed record DemoPaperOpenBuyMarkerDto(DateTimeOffset BoughtAtUtc, int ContractsRemaining);
+
 public sealed record DemoPaperPositionListItemDto(
     string InstrumentToken,
     string Tradingsymbol,
     string Exchange,
     int? LotSize,
-    int OpenContracts);
+    int OpenContracts,
+    IReadOnlyList<DemoPaperOpenBuyMarkerDto> OpenBuys);
 
 /// <summary>Hypothetical same-calendar-day (report TZ) outcome from merged automation rows.</summary>
 public sealed record DemoAutoTradeEodSummaryDto(

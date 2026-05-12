@@ -100,6 +100,7 @@ public static class DependencyInjection
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IDemoPaperPositionRepository, DemoPaperPositionRepository>();
+        services.AddScoped<IDemoPaperBuyLegRepository, DemoPaperBuyLegRepository>();
         services.AddScoped<IKiteFavoriteInstrumentRepository, KiteFavoriteInstrumentRepository>();
         services.AddScoped<IKiteTradingLockInstrumentRepository, KiteTradingLockInstrumentRepository>();
         services.AddScoped<IMlPriceDirectionPredictionRepository, MlPriceDirectionPredictionRepository>();

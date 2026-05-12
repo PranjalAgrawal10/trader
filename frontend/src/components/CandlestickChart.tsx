@@ -128,6 +128,7 @@ export function CandlestickChart({
   maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
   customEmaPeriod = null,
   livePrice = null,
+  paperBuyDataIndices = [],
 }: {
   data: ChartPointWithMa[]
   maLineVisibility?: MaLineVisibility
@@ -135,6 +136,8 @@ export function CandlestickChart({
   customEmaPeriod?: number | null
   /** Draw a horizontal LTP guide when streamed quotes are available (e.g. market hub ticks). */
   livePrice?: number | null
+  /** 0-based indices into <code>data</code>: vertical markers for OPEN demo paper buys (FIFO until sold). */
+  paperBuyDataIndices?: readonly number[]
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
@@ -466,6 +469,27 @@ export function CandlestickChart({
               </text>
             </g>
           ) : null}
+          {paperBuyDataIndices.length > 0
+            ? paperBuyDataIndices.map((di, k) => {
+                if (!layout || di < 0 || di >= data.length) return null
+                const cx = layout.clusterStartX + di * layout.slotW + layout.slotW / 2
+                return (
+                  <g key={`demo-paper-buy-${di}-${k}`} style={{ pointerEvents: 'none' }}>
+                    <title>Open demo BUY (contracts close FIFO on sells)</title>
+                    <line
+                      x1={cx}
+                      x2={cx}
+                      y1={PAD.top}
+                      y2={layout.plotBottomY}
+                      stroke="#84cc16"
+                      strokeWidth={1.35}
+                      strokeDasharray="5 5"
+                      opacity={0.92}
+                    />
+                  </g>
+                )
+              })
+            : null}
           {hover ? (
             <line
               x1={layout.clusterStartX + hover.idx * layout.slotW + layout.slotW / 2}
