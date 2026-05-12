@@ -192,6 +192,8 @@ public sealed record DemoAutoTradeLegRowDto(
     int Confidence,
     string Outcome,
     decimal RefClose,
+    /// <summary>Next bar open when resolved; demo P&amp;L uses this as market-style entry when present.</summary>
+    decimal? NextOpen,
     decimal? NextClose,
     /// <summary><c>allocated</c>, <c>pending</c>, or <c>excluded_*</c>.</summary>
     string Status,

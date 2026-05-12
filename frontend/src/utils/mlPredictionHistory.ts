@@ -18,6 +18,7 @@ export type MlPredictionLogEntry = {
   detail: string
   outcome: MlPredictionOutcome
   nextBarTime?: string | null
+  nextOpen?: number | null
   nextClose?: number | null
   /** When true, outcome updates are synced via the API */
   serverBacked?: boolean
@@ -82,6 +83,7 @@ export type MlPriceDirectionHistoryApiRow = {
   detail: string
   outcome: MlPredictionOutcome
   nextBarTime: string | null
+  nextOpen?: number | null
   nextClose: number | null
   labelThresholdFractionApplied?: number | null
   censorReason?: string | null
@@ -121,6 +123,7 @@ export function historyItemsFromApi(rows: MlPriceDirectionHistoryApiRow[]): MlPr
     detail: x.detail,
     outcome: x.outcome,
     nextBarTime: x.nextBarTime ? toIsoBarTime(x.nextBarTime) : null,
+    nextOpen: x.nextOpen ?? undefined,
     nextClose: x.nextClose ?? undefined,
     serverBacked: true,
   }))

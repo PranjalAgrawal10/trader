@@ -36,6 +36,10 @@ public class MlLightGbmTripleBarrierPrediction
     public string? Source { get; set; }
 
     public DateTimeOffset? NextBarTimeUtc { get; set; }
+
+    /// <summary>Next bar open (resolution); used for hypothetical market-style entry in demo auto-trade P&amp;L.</summary>
+    public decimal? NextOpen { get; set; }
+
     public decimal? NextClose { get; set; }
 
     /// <summary>Threshold applied when this row was created (for reproducible labeling).</summary>

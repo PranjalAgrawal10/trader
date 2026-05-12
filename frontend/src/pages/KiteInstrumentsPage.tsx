@@ -277,6 +277,8 @@ interface DemoAutoTradeLegRowDto {
   confidence: number
   outcome: string
   refClose: number
+  /** Next-bar open when resolved; API sends null for legacy rows. */
+  nextOpen: number | null
   nextClose: number | null
   status: string
   statusDetail: string | null
@@ -306,7 +308,7 @@ const DEMO_AUTO_TRADE_STRATEGY_OPTIONS: { id: string; label: string; hint: strin
   {
     id: 'equal_split',
     label: 'Equal risk per signal',
-    hint: 'Splits the demo notional evenly across every directional signal with a resolved next close.',
+    hint: 'Splits the demo notional evenly across every directional signal with resolved next-bar prices (next open→next close when available, else ref close→next close).',
   },
   {
     id: 'confidence_weighted',
@@ -405,6 +407,8 @@ interface MlAutomationRecentRow {
   confidence: number
   outcome: 'pending' | 'correct' | 'wrong'
   nextBarTime: string | null
+  /** Next-bar open when resolved from Kite candles (demo P&L uses this as entry when set). */
+  nextOpen: number | null
   nextClose: number | null
   /** Registered prediction engine id for this automation row (which model slot was invoked). */
   engineModelId: string

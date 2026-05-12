@@ -425,6 +425,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     private readonly record struct ResolutionSnapshot(
         string Outcome,
         DateTimeOffset NextBarTimeUtc,
+        decimal NextOpen,
         decimal NextClose,
         sbyte? LabelNextBar,
         string? CensorReason,
@@ -482,13 +483,14 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             l5 = PriceDirectionLabeling.ClassifySignedLabel(refClose, c5.Close, thresh);
         }
 
-        return new ResolutionSnapshot(outcome, next.Time, next.Close, labelNext, censorReason, n3t, n3c, l3, n5t, n5c, l5);
+        return new ResolutionSnapshot(outcome, next.Time, next.Open, next.Close, labelNext, censorReason, n3t, n3c, l3, n5t, n5c, l5);
     }
 
     private static void CopySnapshotTo(MlPriceDirectionPrediction row, ResolutionSnapshot s)
     {
         row.Outcome = s.Outcome;
         row.NextBarTimeUtc = s.NextBarTimeUtc;
+        row.NextOpen = s.NextOpen;
         row.NextClose = s.NextClose;
         row.LabelNextBar = s.LabelNextBar;
         row.CensorReason = s.CensorReason;
@@ -504,6 +506,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     {
         row.Outcome = s.Outcome;
         row.NextBarTimeUtc = s.NextBarTimeUtc;
+        row.NextOpen = s.NextOpen;
         row.NextClose = s.NextClose;
         row.LabelNextBar = s.LabelNextBar;
         row.CensorReason = s.CensorReason;
@@ -544,6 +547,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             x.Detail,
             x.Outcome,
             x.NextBarTimeUtc,
+            x.NextOpen,
             x.NextClose,
             x.Source,
             x.EngineModelId,
@@ -569,6 +573,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
             x.Detail,
             x.Outcome,
             x.NextBarTimeUtc,
+            x.NextOpen,
             x.NextClose,
             x.Source,
             x.EngineModelId,

@@ -43,7 +43,8 @@ public static class DemoAutoTradeEodSummaryCalculator
         var norm = DemoAutoTradeStrategyIds.NormalizeOrDefault(strategyId);
         var (_, _, explain) = DemoAutoTradeStrategyIds.Describe(norm);
         var baseNote =
-            "Illustrative only — not advice. Directions up/down vs ref→next return; neutral legs get no allocation. " +
+            "Illustrative only — not advice. When next-bar open is stored, hypothetical returns use next open→next close (market-style entry); " +
+            "otherwise ref close→next close. Neutral legs get no allocation. " +
             "No fees, slippage, leverage, position sizing, or real execution. ";
 
         var legNote =
@@ -87,7 +88,7 @@ public static class DemoAutoTradeEodSummaryCalculator
                 continue;
 
             var dir = (r.Direction ?? string.Empty).Trim();
-            var ret = DirectionalReturnFraction(dir, r.RefClose, r.NextClose!.Value);
+            var ret = DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose!.Value);
             if (ret is null)
                 continue;
 
@@ -170,7 +171,7 @@ public static class DemoAutoTradeEodSummaryCalculator
             if (dir.Equals("neutral", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (DirectionalReturnFraction(dir, r.RefClose, r.NextClose!.Value) is null)
+            if (DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose!.Value) is null)
                 continue;
 
             directionalTradeable.Add(r);
@@ -308,10 +309,10 @@ public static class DemoAutoTradeEodSummaryCalculator
 
             if (!directionalSet.Contains(r.Id))
             {
-                var retTry = DirectionalReturnFraction(dir, r.RefClose, r.NextClose.Value);
+                var retTry = DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose.Value);
                 var st = retTry is null ? "excluded_not_directional" : "excluded_no_price";
                 var det = retTry is null
-                    ? "Up/down move vs ref→next could not be scored."
+                    ? "Up/down directional return could not be scored."
                     : "Row not in priced directional set.";
                 list.Add(LegRow(r, st, det, 0m, 0m, 0m, 0m));
                 continue;
@@ -348,7 +349,7 @@ public static class DemoAutoTradeEodSummaryCalculator
                 continue;
             }
 
-            var ret = DirectionalReturnFraction(dir, r.RefClose, r.NextClose!.Value);
+            var ret = DirectionalReturnFraction(dir, r.RefClose, r.NextOpen, r.NextClose!.Value);
             if (ret is null)
             {
                 list.Add(LegRow(r, "excluded_not_directional", null, alloc, 0m, 0m, 0m));
@@ -394,6 +395,7 @@ public static class DemoAutoTradeEodSummaryCalculator
             r.Confidence,
             (r.Outcome ?? string.Empty).Trim(),
             r.RefClose,
+            r.NextOpen,
             r.NextClose,
             status,
             statusDetail,
@@ -481,7 +483,32 @@ public static class DemoAutoTradeEodSummaryCalculator
         return allocations;
     }
 
-    private static decimal? DirectionalReturnFraction(string direction, decimal refClose, decimal nextClose)
+    /// <summary>
+    /// Signed fractional return for a directional bet. When <paramref name="nextOpen"/> is positive, uses next open→next close (market-style);
+    /// otherwise ref close→next close for backward compatibility with older rows.
+    /// </summary>
+    private static decimal? DirectionalReturnFraction(
+        string direction,
+        decimal refClose,
+        decimal? nextOpen,
+        decimal nextClose)
+    {
+        if (nextOpen is { } entry && entry > 0m)
+        {
+            var move = (nextClose - entry) / entry;
+            if (direction.Equals("up", StringComparison.OrdinalIgnoreCase))
+                return move;
+
+            if (direction.Equals("down", StringComparison.OrdinalIgnoreCase))
+                return -move;
+
+            return null;
+        }
+
+        return DirectionalReturnFractionRefToNextClose(direction, refClose, nextClose);
+    }
+
+    private static decimal? DirectionalReturnFractionRefToNextClose(string direction, decimal refClose, decimal nextClose)
     {
         if (refClose <= 0m)
             return null;

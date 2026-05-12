@@ -117,6 +117,7 @@ public sealed class MlLightGbmTripleBarrierPredictionRepository : IMlLightGbmTri
                 p.Confidence,
                 p.Outcome,
                 p.NextBarTimeUtc,
+                p.NextOpen,
                 p.NextClose,
                 p.EngineModelId ?? p.ModelId);
         return await q.Take(take).ToListAsync(ct).ConfigureAwait(false);

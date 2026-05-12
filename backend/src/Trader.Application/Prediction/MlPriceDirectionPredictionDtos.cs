@@ -11,6 +11,7 @@ public sealed record MlPriceDirectionPredictionItemDto(
     string Detail,
     string Outcome,
     DateTimeOffset? NextBarTime,
+    decimal? NextOpen,
     decimal? NextClose,
     string? Source = null,
     string? EngineModelId = null,
@@ -37,6 +38,7 @@ public sealed record MlAutomationPredictionListItemDto(
     int Confidence,
     string Outcome,
     DateTimeOffset? NextBarTime,
+    decimal? NextOpen,
     decimal? NextClose,
     string EngineModelId);
 

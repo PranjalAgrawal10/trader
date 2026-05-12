@@ -133,6 +133,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.Outcome).HasMaxLength(16);
             e.Property(x => x.Source).HasMaxLength(32);
             e.Property(x => x.NextBarTimeUtc).HasColumnType("datetime(6)");
+            e.Property(x => x.NextOpen).HasPrecision(28, 8);
             e.Property(x => x.NextClose).HasPrecision(28, 8);
             e.Property(x => x.LabelThresholdFractionApplied).HasPrecision(28, 10);
             e.Property(x => x.CensorReason).HasMaxLength(32);
@@ -159,6 +160,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.Outcome).HasMaxLength(16);
             e.Property(x => x.Source).HasMaxLength(32);
             e.Property(x => x.NextBarTimeUtc).HasColumnType("datetime(6)");
+            e.Property(x => x.NextOpen).HasPrecision(28, 8);
             e.Property(x => x.NextClose).HasPrecision(28, 8);
             e.Property(x => x.LabelThresholdFractionApplied).HasPrecision(28, 10);
             e.Property(x => x.CensorReason).HasMaxLength(32);

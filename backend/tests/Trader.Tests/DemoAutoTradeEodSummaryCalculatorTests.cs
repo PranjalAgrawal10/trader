@@ -21,6 +21,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             72,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             "mlnet-sdca-logistic-v1");
 
@@ -52,6 +53,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             72,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             "mlnet-sdca-logistic-v1");
 
@@ -66,6 +68,35 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
         Assert.Equal(0, totals.WrongOutcomes);
         Assert.Equal(1, totals.DirectionalTradeableLegs);
         Assert.Equal(1, totals.AllocatedLegsForPnl);
+        Assert.Equal(100m, totals.HypotheticalTotalPnlInr);
+    }
+
+    // When NextOpen is set, return is next open→next close (not ref→next close).
+    [Fact]
+    public void Market_style_uses_next_open_to_next_close_when_next_open_present()
+    {
+        var row = new MlAutomationPredictionListItemDto(
+            Guid.Parse("00000000-0000-4000-8000-000000000081"),
+            DateTimeOffset.Parse("2026-05-11T10:00:00Z"),
+            "256265",
+            "NIFTY",
+            "NFO",
+            "5m",
+            DateTimeOffset.Parse("2026-05-11T09:30:00Z"),
+            999m,
+            "up",
+            72,
+            "correct",
+            DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            100m,
+            101m,
+            "e");
+
+        var totals = DemoAutoTradeEodSummaryCalculator.Compute(
+            new[] { row },
+            10_000m,
+            DemoAutoTradeStrategyIds.EqualSplit);
+
         Assert.Equal(100m, totals.HypotheticalTotalPnlInr);
     }
 
@@ -85,6 +116,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             50,
             "correct",
             DateTimeOffset.Parse("2026-05-11T10:01:00Z"),
+            null,
             200m,
             "e");
 
@@ -101,6 +133,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             50,
             "wrong",
             DateTimeOffset.Parse("2026-05-11T10:03:00Z"),
+            null,
             60m,
             "e");
 
@@ -133,6 +166,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             40,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             110m,
             "e");
 
@@ -149,6 +183,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             80,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             "e");
 
@@ -179,6 +214,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             50,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             "e");
 
@@ -195,6 +231,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             90,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             50m,
             "e");
 
@@ -310,6 +347,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             conf,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             engine);
 
@@ -327,6 +365,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             conf,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             "e");
 
@@ -344,6 +383,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             conf,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             "e");
 
@@ -361,6 +401,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
             conf,
             "correct",
             DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+            null,
             101m,
             "e");
 
@@ -382,6 +423,7 @@ public sealed class DemoAutoTradeEodSummaryCalculatorTests
                 72,
                 "correct",
                 DateTimeOffset.Parse("2026-05-11T09:35:00Z"),
+                null,
                 101m,
                 "mlnet-sdca-logistic-v1"),
         };
