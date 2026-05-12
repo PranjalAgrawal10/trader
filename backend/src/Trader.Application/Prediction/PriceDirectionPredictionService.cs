@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
+using Trader.Application.Wallet;
 using Trader.Domain.Entities;
 
 namespace Trader.Application.Prediction;
@@ -29,6 +30,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
     private readonly IOptionsSnapshot<PriceDirectionPredictionOptions> _opts;
     private readonly IOptionsSnapshot<FavoriteMlAutomationOptions> _favoriteMlAutomationOpts;
     private readonly IOptionsSnapshot<DemoAutoTradeOptions> _demoAutoTradeOpts;
+    private readonly IWalletService _wallet;
 
     public PriceDirectionPredictionService(
         IBrokerService broker,
@@ -38,7 +40,8 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         IKiteInstrumentsChartSettingsGateway kiteChartSettings,
         IOptionsSnapshot<PriceDirectionPredictionOptions> opts,
         IOptionsSnapshot<FavoriteMlAutomationOptions> favoriteMlAutomationOpts,
-        IOptionsSnapshot<DemoAutoTradeOptions> demoAutoTradeOpts)
+        IOptionsSnapshot<DemoAutoTradeOptions> demoAutoTradeOpts,
+        IWalletService wallet)
     {
         _broker = broker;
         _engines = engines;
@@ -48,6 +51,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         _opts = opts;
         _favoriteMlAutomationOpts = favoriteMlAutomationOpts;
         _demoAutoTradeOpts = demoAutoTradeOpts;
+        _wallet = wallet;
     }
 
     public async Task<PriceDirectionPredictionEnvelope> PredictForInstrumentAsync(
@@ -656,6 +660,12 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         return list;
     }
 
+    private async Task<decimal> GetDemoTradeNotionalInrAsync(Guid userId, CancellationToken ct)
+    {
+        var bal = (await _wallet.GetBalanceAsync(userId, ct).ConfigureAwait(false)).Balance;
+        return decimal.Round(Math.Max(0m, bal), 2, MidpointRounding.AwayFromZero);
+    }
+
     /// <inheritdoc />
     public async Task<DemoAutoTradeEodSummaryDto> GetDemoAutoTradeEodSummaryAsync(
         Guid userId,
@@ -684,7 +694,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var (lockTokens, demoLotMultipliers) = await LoadDemoTradingLocksAsync(_broker, userId, ct).ConfigureAwait(false);
         var lockedInstrumentCount = lockTokens.Count;
         var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
-        var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
+        var notional = await GetDemoTradeNotionalInrAsync(userId, ct).ConfigureAwait(false);
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
         var totals = DemoAutoTradeEodSummaryCalculator.Compute(forDemo, notional, normStrategy, chargeParams, demoLotMultipliers);
@@ -755,7 +765,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var (lockTokens, demoLotMultipliers) = await LoadDemoTradingLocksAsync(_broker, userId, ct).ConfigureAwait(false);
         var lockedInstrumentCount = lockTokens.Count;
         var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
-        var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
+        var notional = await GetDemoTradeNotionalInrAsync(userId, ct).ConfigureAwait(false);
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
         var (_, legs) = DemoAutoTradeEodSummaryCalculator.ComputeWithLegRows(
@@ -845,7 +855,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var lockedInstrumentCount = lockTokens.Count;
         var forDemo = FilterAutomationRowsForDemoTrade(inWindow, lockTokens);
 
-        var notional = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr;
+        var notional = await GetDemoTradeNotionalInrAsync(userId, ct).ConfigureAwait(false);
         var normStrategy = DemoAutoTradeStrategyIds.NormalizeOrDefault(chartRow.DemoAutoTradeStrategy);
         var stratMeta = DemoAutoTradeStrategyIds.Describe(normStrategy);
         var chargeParams = DemoAutoTradeOptionsChargeResolver.Resolve(_demoAutoTradeOpts.Value);
@@ -959,7 +969,7 @@ public sealed class PriceDirectionPredictionService : IPriceDirectionPredictionS
         var rangeSummary = $"{startLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} → {endLocal.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} ({tzId})";
 
         var disclaimer =
-            "Hypothetical demo only: each calendar day applies the full demo notional to that day's automation signals under your saved allocation preset. " +
+            "Hypothetical demo only: each calendar day applies your current wallet balance (paper INR) as the demo notional to that day's automation signals under your saved allocation preset. " +
             (lockedInstrumentCount == 0
                 ? "No instruments are in Locked for trading; this report uses zero automation rows for demo math. "
                 : $"Only automation rows for instruments in Locked for trading ({lockedInstrumentCount} instrument(s)) are included. ") +

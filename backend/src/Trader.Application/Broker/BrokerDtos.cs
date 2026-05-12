@@ -138,7 +138,7 @@ public sealed record KiteInstrumentsChartSettingsDto(
     IReadOnlyList<string>? TrendAnalysisIntervals = null,
     /// <summary>Demo auto-trade intent (no live orders).</summary>
     bool DemoAutoTradeEnabled = false,
-    /// <summary>Fixed demo portfolio notional in INR for UI and EOD math.</summary>
+    /// <summary>Current wallet balance in INR (paper funds). Drives demo auto-trade allocation size.</summary>
     decimal DemoAutoTradeNotionalInr = DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr,
     /// <summary>Allocation preset slug (<see cref="DemoAutoTradeStrategyIds"/>).</summary>
     string? DemoAutoTradeStrategy = null);
@@ -151,6 +151,37 @@ public sealed class DemoAutoTradePutDto
     /// <summary>Strategy id (<see cref="DemoAutoTradeStrategyIds"/>); omit or null to keep the stored preset.</summary>
     public string? Strategy { get; set; }
 }
+
+/// <summary>Manual paper buy/sell at Kite LTP for a <strong>Locked for trading</strong> instrument (adjusts wallet; no orders).</summary>
+public sealed class DemoPaperTradeRequestDto
+{
+    public string? InstrumentToken { get; set; }
+
+    /// <summary><c>buy</c> or <c>sell</c> (close long).</summary>
+    public string? Side { get; set; }
+
+    /// <summary>Whole contracts; each uses lot size × LTP from the lock + quote.</summary>
+    public int Contracts { get; set; }
+}
+
+public sealed record DemoPaperTradeResultDto(
+    string InstrumentToken,
+    string Tradingsymbol,
+    string Exchange,
+    string Side,
+    int Contracts,
+    decimal LastPrice,
+    int LotSize,
+    decimal CashFlowInr,
+    decimal WalletBalanceAfter,
+    int OpenContractsAfter);
+
+public sealed record DemoPaperPositionListItemDto(
+    string InstrumentToken,
+    string Tradingsymbol,
+    string Exchange,
+    int? LotSize,
+    int OpenContracts);
 
 /// <summary>Hypothetical same-calendar-day (report TZ) outcome from merged automation rows.</summary>
 public sealed record DemoAutoTradeEodSummaryDto(

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Configuration;
+using Trader.Application.Wallet;
 using Trader.Domain.Entities;
 
 namespace Trader.Application.Broker;
@@ -64,6 +65,9 @@ public sealed class BrokerService : IBrokerService
     private readonly IKiteInstrumentsChartSettingsGateway _kiteChartSettings;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
     private readonly IMemoryCache _memoryCache;
+    private readonly IWalletService _wallet;
+    private readonly IUserRepository _users;
+    private readonly IDemoPaperPositionRepository _demoPaperPositions;
 
     public BrokerService(
         IBrokerSetupGateway brokerSetup,
@@ -74,7 +78,10 @@ public sealed class BrokerService : IBrokerService
         IKiteTradingLockInstrumentRepository kiteTradingLocks,
         IKiteInstrumentsChartSettingsGateway kiteChartSettings,
         IOptions<ZerodhaKiteOptions> kiteOptions,
-        IMemoryCache memoryCache)
+        IMemoryCache memoryCache,
+        IWalletService wallet,
+        IUserRepository users,
+        IDemoPaperPositionRepository demoPaperPositions)
     {
         _brokerSetup = brokerSetup;
         _stateCodec = stateCodec;
@@ -85,6 +92,9 @@ public sealed class BrokerService : IBrokerService
         _kiteChartSettings = kiteChartSettings;
         _kiteOptions = kiteOptions;
         _memoryCache = memoryCache;
+        _wallet = wallet;
+        _users = users;
+        _demoPaperPositions = demoPaperPositions;
     }
 
     public async Task<BrokerStatusDto> GetStatusAsync(Guid userId, CancellationToken ct = default)
@@ -705,6 +715,9 @@ public sealed class BrokerService : IBrokerService
         if (row is null)
             throw new InvalidOperationException("User not found.");
 
+        var wallet = await _wallet.GetBalanceAsync(userId, ct).ConfigureAwait(false);
+        var notional = decimal.Round(Math.Max(0m, wallet.Balance), 2, MidpointRounding.AwayFromZero);
+
         return new KiteInstrumentsChartSettingsDto(
             row.Interval,
             row.RangePreset,
@@ -717,7 +730,7 @@ public sealed class BrokerService : IBrokerService
             row.FavoriteMlAutomationMinSecondsAfterBarOpen,
             ParseTrendAnalysisIntervalsFromJson(row.TrendAnalysisIntervalsJson),
             row.DemoAutoTradeEnabled ?? false,
-            DemoAutoTradeEodSummaryCalculator.DefaultNotionalInr,
+            notional,
             DemoAutoTradeStrategyIds.NormalizeOrDefault(row.DemoAutoTradeStrategy));
     }
 
@@ -732,6 +745,139 @@ public sealed class BrokerService : IBrokerService
             normalized = DemoAutoTradeStrategyIds.ParseRequired(strategyRaw);
 
         await _kiteChartSettings.SetDemoAutoTradePreferencesAsync(userId, enabled, normalized, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DemoPaperPositionListItemDto>> GetDemoPaperPositionsAsync(
+        Guid userId,
+        CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+        var positions = await _demoPaperPositions.ListByUserAsync(userId, ct).ConfigureAwait(false);
+        if (positions.Count == 0)
+            return Array.Empty<DemoPaperPositionListItemDto>();
+
+        var locks = await _kiteTradingLocks.ListByUserAsync(userId, ct).ConfigureAwait(false);
+        var byTok = locks.ToDictionary(x => x.InstrumentToken, StringComparer.Ordinal);
+        var list = new List<DemoPaperPositionListItemDto>(positions.Count);
+        foreach (var p in positions)
+        {
+            byTok.TryGetValue(p.InstrumentToken, out var lk);
+            list.Add(
+                new DemoPaperPositionListItemDto(
+                    p.InstrumentToken,
+                    lk?.Tradingsymbol ?? p.InstrumentToken,
+                    lk?.Exchange ?? "—",
+                    lk?.LotSize,
+                    p.OpenContracts));
+        }
+
+        return list;
+    }
+
+    /// <inheritdoc />
+    public async Task<DemoPaperTradeResultDto> ExecuteDemoPaperTradeAsync(
+        Guid userId,
+        DemoPaperTradeRequestDto request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var token = (request.InstrumentToken ?? string.Empty).Trim();
+        if (token.Length == 0 || !token.All(char.IsAsciiDigit))
+            throw new InvalidOperationException("A numeric instrument token is required.");
+
+        var side = (request.Side ?? string.Empty).Trim().ToLowerInvariant();
+        if (side is not ("buy" or "sell"))
+            throw new InvalidOperationException("Side must be buy or sell.");
+
+        if (request.Contracts < 1 || request.Contracts > 1_000_000)
+            throw new InvalidOperationException("Contracts must be between 1 and 1,000,000.");
+
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+
+        var lockRow = await _kiteTradingLocks.FindAsync(userId, token, ct).ConfigureAwait(false);
+        if (lockRow is null)
+            throw new InvalidOperationException("Instrument must be in Locked for trading to paper trade.");
+
+        if (lockRow.LotSize is not int lotMult || lotMult < 1)
+            throw new InvalidOperationException(
+                "This lock is missing lot size; remove it from Locked for trading and add the symbol again from search.");
+
+        var quote = await GetKiteInstrumentLiveQuoteAsync(userId, lockRow.Exchange, lockRow.Tradingsymbol, ct)
+            .ConfigureAwait(false);
+
+        var ltp = quote.LastPrice;
+        if (ltp <= 0)
+            throw new InvalidOperationException("Could not read a positive last price for this instrument.");
+
+        var legCash = decimal.Round(decimal.Round(ltp * lotMult, 2, MidpointRounding.AwayFromZero) * request.Contracts, 2, MidpointRounding.AwayFromZero);
+
+        var user = await _users.GetByIdAsync(userId, ct).ConfigureAwait(false);
+        if (user is null)
+            throw new InvalidOperationException("User not found.");
+
+        DemoPaperPosition? pos = await _demoPaperPositions.FindByUserAndTokenAsync(userId, token, ct)
+            .ConfigureAwait(false);
+
+        decimal cashFlow;
+        int openAfter;
+
+        if (side == "buy")
+        {
+            if (user.WalletBalance < legCash)
+                throw new InvalidOperationException("Insufficient wallet balance for this paper buy.");
+
+            user.WalletBalance = decimal.Round(user.WalletBalance - legCash, 2, MidpointRounding.AwayFromZero);
+            cashFlow = -legCash;
+
+            if (pos is null)
+            {
+                pos = new DemoPaperPosition
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = userId,
+                    InstrumentToken = token,
+                    OpenContracts = 0,
+                    UpdatedAtUtc = DateTimeOffset.UtcNow,
+                };
+                _demoPaperPositions.Add(pos);
+            }
+
+            pos.OpenContracts += request.Contracts;
+            pos.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            openAfter = pos.OpenContracts;
+        }
+        else
+        {
+            if (pos is null || pos.OpenContracts < request.Contracts)
+                throw new InvalidOperationException("Not enough open paper contracts to sell.");
+
+            pos.OpenContracts -= request.Contracts;
+            pos.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            openAfter = pos.OpenContracts;
+
+            var nextBal = user.WalletBalance + legCash;
+            if (nextBal > WalletService.MaxWalletBalance)
+                throw new InvalidOperationException($"Wallet balance cannot exceed {WalletService.MaxWalletBalance:N2}.");
+
+            user.WalletBalance = decimal.Round(nextBal, 2, MidpointRounding.AwayFromZero);
+            cashFlow = legCash;
+        }
+
+        await _users.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return new DemoPaperTradeResultDto(
+            token,
+            lockRow.Tradingsymbol,
+            lockRow.Exchange,
+            side,
+            request.Contracts,
+            ltp,
+            lotMult,
+            cashFlow,
+            user.WalletBalance,
+            openAfter);
     }
 
     public async Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default)

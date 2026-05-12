@@ -94,6 +94,15 @@ public interface IBrokerService
     /// <summary>Persists demo auto-trade toggle and optional strategy preset (no live orders).</summary>
     Task SetDemoAutoTradePreferencesAsync(Guid userId, bool enabled, string? strategyRaw, CancellationToken ct = default);
 
+    /// <summary>Open demo paper longs (whole contracts). Enriched from trading locks where possible.</summary>
+    Task<IReadOnlyList<DemoPaperPositionListItemDto>> GetDemoPaperPositionsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>Market-style paper trade at cached LTP: buy debits wallet and adds contracts; sell credits wallet and reduces open long.</summary>
+    Task<DemoPaperTradeResultDto> ExecuteDemoPaperTradeAsync(
+        Guid userId,
+        DemoPaperTradeRequestDto request,
+        CancellationToken ct = default);
+
     /// <summary>Updates or clears saved zoom (visible bar count) for one instrument token.</summary>
     Task SaveKiteInstrumentsChartZoomAsync(Guid userId, KiteInstrumentsChartZoomPutDto body, CancellationToken ct = default);
 

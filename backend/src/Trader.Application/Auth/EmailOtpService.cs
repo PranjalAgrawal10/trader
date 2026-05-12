@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
@@ -40,6 +41,7 @@ public sealed partial class EmailOtpService : IEmailOtpService
             "Your verification code",
             (plainCode, expiryMinutes) =>
                 $"Your verification code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not request this, you can ignore this email.",
+            buildHtmlBody: null,
             ct);
     }
 
@@ -51,13 +53,58 @@ public sealed partial class EmailOtpService : IEmailOtpService
             "Your Trader sign-in code",
             (plainCode, expiryMinutes) =>
                 $"Your Trader sign-in code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not sign in, change your password and contact support.",
+            BuildLoginSecondFactorHtmlBody,
             ct);
+    }
+
+    /// <remarks>
+    /// HTML clients cannot reliably run JavaScript Clipboard APIs; we include a selectable code block plus a prominent
+    /// "Copy OTP" style treatment with touch-friendly selection hints.
+    /// </remarks>
+    private static string BuildLoginSecondFactorHtmlBody(string plainCode, int expiryMinutes)
+    {
+        var codeEsc = WebUtility.HtmlEncode(plainCode);
+        var expiryEsc = WebUtility.HtmlEncode(expiryMinutes.ToString(CultureInfo.InvariantCulture));
+
+        return
+            $"<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\"></head>"
+            + $"<body style=\"margin:0;padding:28px;background:#f4f6f8;color:#1a202c;"
+            + "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;line-height:1.5;"
+            + "font-size:16px;\">"
+            + "<p style=\"margin:0 0 8px;font-weight:600;\">Trader sign-in</p>"
+            + "<p style=\"margin:0 0 20px;color:#475569;\">Enter this verification code:</p>"
+            + "<!-- Selectable OTP (mobile: tap twice or tap and hold → Select All → Copy). -->"
+            + "<div tabindex=\"0\" aria-label=\"Sign-in verification code\""
+            + " style=\"-webkit-touch-callout:default;-webkit-user-select:text;user-select:text;"
+            + "margin:0 0 20px;padding:16px 20px;font-size:32px;line-height:1.2;font-weight:700;"
+            + "letter-spacing:0.45em;text-align:center;font-family:Consolas,Menlo,'Courier New',monospace;"
+            + "background:#fff;border-radius:14px;border:1px solid #cbd5e1;color:#0f172a;box-sizing:border-box;\">"
+            + codeEsc + "</div>"
+            + "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin:0 0 24px;"
+            + "border-collapse:separate;border-spacing:0;\">"
+            + "<tr><td aria-label=\"Sign-in OTP for copy\""
+            + " style=\"-webkit-touch-callout:default;-webkit-user-select:text;user-select:text;"
+            + "padding:14px 22px;border-radius:9999px;text-align:center;"
+            + "background-color:#0f172a;background-image:linear-gradient(#1e293b,#0f172a);\">"
+            + "<span style=\"color:#e2e8f0;font-size:13px;font-weight:700;"
+            + "letter-spacing:0.18em;text-transform:uppercase;\">Copy OTP&nbsp;&nbsp;</span>"
+            + "<span style=\"color:#f8fafc;font-size:22px;font-weight:800;"
+            + "letter-spacing:0.32em;font-family:Consolas,Menlo,'Courier New',monospace;\">" + codeEsc + "</span>"
+            + "</td></tr></table>"
+            + "<p style=\"margin:-4px 0 16px;color:#64748b;font-size:13px;\">"
+            + "To copy quickly: tap the code or dark <strong style=\"color:#334155;\">COPY OTP</strong> bar, then "
+            + "<strong>Select All</strong> and <strong>Copy</strong> from the menu.</p>"
+            + "<p style=\"margin:0 0 8px;color:#64748b;font-size:14px;\">Expires in "
+            + $"<strong style=\"color:#334155;\">{expiryEsc}</strong> minute(s).</p>"
+            + "<p style=\"margin:0;color:#64748b;font-size:13px;\">If you didn't attempt to sign in, change"
+            + " your password and contact support.</p></body></html>";
     }
 
     private async Task SendSixDigitChallengeAsync(
         string normalizedEmail,
         string subject,
-        Func<string, int, string> buildBody,
+        Func<string, int, string> buildPlainBody,
+        Func<string, int, string>? buildHtmlBody,
         CancellationToken ct)
     {
         var plainCode = GenerateSixDigitCode();
@@ -79,11 +126,27 @@ public sealed partial class EmailOtpService : IEmailOtpService
         await _repository.AddAsync(challenge, ct);
         await _repository.SaveChangesAsync(ct);
 
-        var body = buildBody(plainCode, expiryMinutes);
+        var body = buildPlainBody(plainCode, expiryMinutes);
 
         try
         {
-            await _emailSender.SendPlainTextAsync(normalizedEmail, subject, body, ct);
+            if (buildHtmlBody is not null)
+            {
+                var html = buildHtmlBody(plainCode, expiryMinutes);
+                await _emailSender.SendEmailAsync(
+                        normalizedEmail,
+                        subject,
+                        body,
+                        html,
+                        Array.Empty<EmbeddedEmailImage>(),
+                        Array.Empty<EmailAttachment>(),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                await _emailSender.SendPlainTextAsync(normalizedEmail, subject, body, ct).ConfigureAwait(false);
+            }
         }
         catch
         {

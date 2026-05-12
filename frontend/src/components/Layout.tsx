@@ -35,6 +35,9 @@ export function Layout({ children }: { children: ReactNode }) {
               <Nav.Link as={NavLink} to="/instruments">
                 F&amp;O / Spot / MCX
               </Nav.Link>
+              <Nav.Link as={NavLink} to="/scalper">
+                Scalper
+              </Nav.Link>
               <Nav.Link as={NavLink} to="/strategies">
                 Strategies
               </Nav.Link>
@@ -48,6 +51,9 @@ export function Layout({ children }: { children: ReactNode }) {
             <Nav className="ms-lg-auto align-items-lg-center gap-2 flex-column flex-lg-row">
               <Nav.Link as={NavLink} to="/profile">
                 Profile
+              </Nav.Link>
+              <Nav.Link as={NavLink} to="/wallet">
+                Wallet
               </Nav.Link>
               <Button
                 variant={effectiveTheme === 'dark' ? 'outline-light' : 'outline-dark'}

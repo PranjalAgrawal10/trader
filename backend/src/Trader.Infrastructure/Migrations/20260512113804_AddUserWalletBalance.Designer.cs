@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Trader.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Trader.Infrastructure.Persistence;
 namespace Trader.Infrastructure.Migrations
 {
     [DbContext(typeof(TraderDbContext))]
-    partial class TraderDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260512113804_AddUserWalletBalance")]
+    partial class AddUserWalletBalance
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -92,34 +95,6 @@ namespace Trader.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("BrokerAccounts");
-                });
-
-            modelBuilder.Entity("Trader.Domain.Entities.DemoPaperPosition", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("char(36)");
-
-                    b.Property<string>("InstrumentToken")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("varchar(64)");
-
-                    b.Property<int>("OpenContracts")
-                        .HasColumnType("int");
-
-                    b.Property<DateTimeOffset>("UpdatedAtUtc")
-                        .HasColumnType("datetime(6)");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("char(36)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "InstrumentToken")
-                        .IsUnique();
-
-                    b.ToTable("DemoPaperPositions");
                 });
 
             modelBuilder.Entity("Trader.Domain.Entities.EmailOtpChallenge", b =>
@@ -812,17 +787,6 @@ namespace Trader.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Trader.Domain.Entities.DemoPaperPosition", b =>
-                {
-                    b.HasOne("Trader.Domain.Entities.User", "User")
-                        .WithMany("DemoPaperPositions")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
             modelBuilder.Entity("Trader.Domain.Entities.KiteFavoriteInstrument", b =>
                 {
                     b.HasOne("Trader.Domain.Entities.User", "User")
@@ -928,8 +892,6 @@ namespace Trader.Infrastructure.Migrations
                     b.Navigation("Bots");
 
                     b.Navigation("BrokerAccounts");
-
-                    b.Navigation("DemoPaperPositions");
 
                     b.Navigation("KiteFavoriteInstruments");
 

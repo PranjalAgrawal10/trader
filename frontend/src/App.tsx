@@ -14,6 +14,8 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { StrategiesPage } from './pages/StrategiesPage'
 import { TradesPage } from './pages/TradesPage'
+import { ScalperPage } from './pages/ScalperPage'
+import { WalletPage } from './pages/WalletPage'
 
 function Protected({ children }: { children: ReactElement }) {
   const token = useAuthStore((s) => s.token)
@@ -110,6 +112,16 @@ export default function App() {
         }
       />
       <Route
+        path="/wallet"
+        element={
+          <Protected>
+            <RequiresTwoFactor>
+              <WalletPage />
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
         path="/security"
         element={
           <Protected>
@@ -160,6 +172,18 @@ export default function App() {
             <RequiresTwoFactor>
               <RequiresBroker>
                 <TradesPage />
+              </RequiresBroker>
+            </RequiresTwoFactor>
+          </Protected>
+        }
+      />
+      <Route
+        path="/scalper"
+        element={
+          <Protected>
+            <RequiresTwoFactor>
+              <RequiresBroker>
+                <ScalperPage />
               </RequiresBroker>
             </RequiresTwoFactor>
           </Protected>

@@ -41,6 +41,9 @@ public class User
     /// <summary>JSON array of chart interval codes (<c>1m</c>…<c>1w</c>) selected for multi-interval trend analysis on favorites / locked grids.</summary>
     public string? KiteInstrumentsTrendAnalysisIntervalsJson { get; set; }
 
+    /// <summary>Stored balance for the in-app wallet (simulated top-ups; no payment integration yet).</summary>
+    public decimal WalletBalance { get; set; }
+
     /// <summary>UI-only demo flag: no live orders; EOD summary uses hypothetical allocation from automation rows.</summary>
     public bool DemoAutoTradeEnabled { get; set; }
 
@@ -101,4 +104,6 @@ public class User
         new List<MlLightGbmTripleBarrierPrediction>();
 
     public ICollection<MlFavoriteEodReportSent> MlFavoriteEodReportsSent { get; set; } = new List<MlFavoriteEodReportSent>();
+
+    public ICollection<DemoPaperPosition> DemoPaperPositions { get; set; } = new List<DemoPaperPosition>();
 }

@@ -573,6 +573,41 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    /// <summary>Open demo paper long positions (whole contracts) per locked instrument.</summary>
+    [Authorize]
+    [HttpGet("kite/instruments/demo-paper-positions")]
+    public async Task<ActionResult<IReadOnlyList<DemoPaperPositionListItemDto>>> GetDemoPaperPositions(CancellationToken ct)
+    {
+        var list = await _broker.GetDemoPaperPositionsAsync(User.GetUserId(), ct).ConfigureAwait(false);
+        return Ok(list);
+    }
+
+    /// <summary>Manual paper buy (debits wallet) or sell (credits wallet) at cached Kite LTP — no orders.</summary>
+    [Authorize]
+    [HttpPost("kite/instruments/demo-paper-trade")]
+    public async Task<ActionResult<DemoPaperTradeResultDto>> PostDemoPaperTrade(
+        [FromBody] DemoPaperTradeRequestDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON { \"instrumentToken\", \"side\": \"buy\" | \"sell\", \"contracts\": n }.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.ExecuteDemoPaperTradeAsync(User.GetUserId(), body, ct).ConfigureAwait(false);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     [Authorize]
     [HttpPut("kite/instruments/favorite-ml-automation")]
     public async Task<IActionResult> PutFavoriteMlAutomation([FromBody] FavoriteMlAutomationPutDto? body, CancellationToken ct)

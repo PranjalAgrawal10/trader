@@ -312,6 +312,27 @@ interface DemoAutoTradeTodayLegsDto {
   mayBeTruncated: boolean
 }
 
+interface DemoPaperPositionListItemDto {
+  instrumentToken: string
+  tradingsymbol: string
+  exchange: string
+  lotSize: number | null
+  openContracts: number
+}
+
+interface DemoPaperTradeResultDto {
+  instrumentToken: string
+  tradingsymbol: string
+  exchange: string
+  side: string
+  contracts: number
+  lastPrice: number
+  lotSize: number
+  cashFlowInr: number
+  walletBalanceAfter: number
+  openContractsAfter: number
+}
+
 const DEMO_AUTO_TRADE_STRATEGY_OPTIONS: { id: string; label: string; hint: string }[] = [
   {
     id: 'equal_split',
@@ -4429,6 +4450,14 @@ export function KiteInstrumentsPage() {
   const [demoTodayLegs, setDemoTodayLegs] = useState<DemoAutoTradeTodayLegsDto | null>(null)
   const [demoTodayLegsLoading, setDemoTodayLegsLoading] = useState(false)
   const [demoTodayLegsError, setDemoTodayLegsError] = useState<string | null>(null)
+  const [demoPaperPositions, setDemoPaperPositions] = useState<DemoPaperPositionListItemDto[]>([])
+  const [demoPaperPositionsLoading, setDemoPaperPositionsLoading] = useState(false)
+  const [demoPaperPositionsError, setDemoPaperPositionsError] = useState<string | null>(null)
+  const [demoPaperToken, setDemoPaperToken] = useState('')
+  const [demoPaperContracts, setDemoPaperContracts] = useState('1')
+  const [demoPaperTradeBusy, setDemoPaperTradeBusy] = useState<'buy' | 'sell' | null>(null)
+  const [demoPaperTradeError, setDemoPaperTradeError] = useState<string | null>(null)
+  const [demoPaperTradeLast, setDemoPaperTradeLast] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
@@ -4792,6 +4821,9 @@ export function KiteInstrumentsPage() {
       )
       setDemoEodSummary(data)
       setDemoAutoTradeEnabled(Boolean(data.demoAutoTradeEnabled))
+      if (typeof data.demoNotionalInr === 'number' && Number.isFinite(data.demoNotionalInr)) {
+        setDemoAutoTradeNotionalInr(data.demoNotionalInr)
+      }
       const sid = typeof data.demoAutoTradeStrategy === 'string' ? data.demoAutoTradeStrategy.trim() : ''
       if (sid && DEMO_AUTO_TRADE_STRATEGY_OPTIONS.some((o) => o.id === sid)) setDemoAutoTradeStrategy(sid)
     } catch (err) {
@@ -4810,6 +4842,9 @@ export function KiteInstrumentsPage() {
         '/broker/kite/instruments/demo-auto-trade/today-legs',
       )
       setDemoTodayLegs(data)
+      if (typeof data.demoNotionalInr === 'number' && Number.isFinite(data.demoNotionalInr)) {
+        setDemoAutoTradeNotionalInr(data.demoNotionalInr)
+      }
     } catch (err) {
       setDemoTodayLegsError(problemDetail(err))
       setDemoTodayLegs(null)
@@ -4817,6 +4852,65 @@ export function KiteInstrumentsPage() {
       setDemoTodayLegsLoading(false)
     }
   }, [])
+
+  const loadDemoPaperPositions = useCallback(async () => {
+    try {
+      setDemoPaperPositionsLoading(true)
+      setDemoPaperPositionsError(null)
+      const { data } = await api.get<DemoPaperPositionListItemDto[]>(
+        '/broker/kite/instruments/demo-paper-positions',
+      )
+      setDemoPaperPositions(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setDemoPaperPositionsError(problemDetail(err))
+      setDemoPaperPositions([])
+    } finally {
+      setDemoPaperPositionsLoading(false)
+    }
+  }, [])
+
+  const executeDemoPaperTrade = useCallback(
+    async (side: 'buy' | 'sell') => {
+      setDemoPaperTradeError(null)
+      setDemoPaperTradeLast(null)
+      const n = Number.parseInt(demoPaperContracts.trim(), 10)
+      if (!Number.isFinite(n) || n < 1) {
+        setDemoPaperTradeError('Contracts must be a whole number ≥ 1.')
+        return
+      }
+      if (!demoPaperToken) {
+        setDemoPaperTradeError('Pick a locked instrument.')
+        return
+      }
+      setDemoPaperTradeBusy(side)
+      try {
+        const { data } = await api.post<DemoPaperTradeResultDto>(
+          '/broker/kite/instruments/demo-paper-trade',
+          {
+            instrumentToken: demoPaperToken,
+            side,
+            contracts: n,
+          },
+        )
+        setDemoAutoTradeNotionalInr(data.walletBalanceAfter)
+        setDemoPaperTradeLast(
+          `${side.toUpperCase()} ${data.contracts} × ${data.tradingsymbol} @ ${data.lastPrice.toFixed(4)} — cash ${formatInrRupee(data.cashFlowInr)} · wallet ${formatInrRupee(data.walletBalanceAfter)} · open ${data.openContractsAfter}`,
+        )
+        await loadDemoPaperPositions()
+        await loadDemoEodSummary()
+      } catch (err) {
+        setDemoPaperTradeError(problemDetail(err))
+      } finally {
+        setDemoPaperTradeBusy(null)
+      }
+    },
+    [
+      demoPaperContracts,
+      demoPaperToken,
+      loadDemoPaperPositions,
+      loadDemoEodSummary,
+    ],
+  )
 
   const loadDemoFullReport = useCallback(
     async (mode: 'seven' | 'merged') => {
@@ -5005,6 +5099,19 @@ export function KiteInstrumentsPage() {
   }, [])
 
   const isZerodha = provider?.toLowerCase() === 'zerodha'
+
+  useEffect(() => {
+    if (mainTab !== 'autoTrading' || !chartPrefsHydrated || !isZerodha) return
+    void loadDemoPaperPositions()
+  }, [mainTab, chartPrefsHydrated, isZerodha, loadDemoPaperPositions])
+
+  useEffect(() => {
+    if (mainTab !== 'autoTrading' || tradingLocks.length === 0) return
+    setDemoPaperToken((t) => {
+      if (t && tradingLocks.some((l) => l.instrumentToken === t)) return t
+      return tradingLocks[0]!.instrumentToken
+    })
+  }, [mainTab, tradingLocks])
 
   useEffect(() => {
     if (mainTab !== 'autoTrading' || !chartPrefsHydrated || !isZerodha) return
@@ -6326,7 +6433,7 @@ export function KiteInstrumentsPage() {
                           <span className="fw-semibold">
                             Enable demo auto-trade
                             <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
-                              Marks intent only. Fixed demo size{' '}
+                              Marks intent only. Allocation uses your <strong>Wallet</strong> balance{' '}
                               <strong>{formatInrRupee(demoAutoTradeNotionalInr)}</strong> — hypothetical same-day gross
                               and net P&amp;L from automation rows for instruments in <strong>Locked for trading</strong> only (server filters by lock tokens; host{' '}
                               <span className="font-monospace">DemoAutoTrade:Charges</span>{' '}
@@ -6379,6 +6486,115 @@ export function KiteInstrumentsPage() {
                       </Button>
                     </Col>
                   </Row>
+                  <div className="mt-3 pt-3 border-top border-secondary-subtle">
+                    <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-2">
+                      Manual paper buy / sell
+                    </h6>
+                    <p className="small text-secondary mb-2">
+                      At Kite last price × lot size from your lock. <strong>Buy</strong> debits the wallet;{' '}
+                      <strong>Sell</strong> credits the wallet and closes open long contracts. No broker orders.
+                    </p>
+                    {demoPaperTradeError ? (
+                      <Alert variant="danger" className="py-2 small">
+                        {demoPaperTradeError}
+                      </Alert>
+                    ) : null}
+                    {demoPaperTradeLast ? (
+                      <Alert variant="success" className="py-2 small">
+                        {demoPaperTradeLast}
+                      </Alert>
+                    ) : null}
+                    {demoPaperPositionsError ? (
+                      <Alert variant="warning" className="py-2 small">
+                        {demoPaperPositionsError}
+                      </Alert>
+                    ) : null}
+                    <Row className="g-2 align-items-end flex-wrap">
+                      <Col xs={12} md>
+                        <Form.Group controlId="demo-paper-instrument">
+                          <Form.Label className="small text-secondary mb-1">Locked instrument</Form.Label>
+                          <Form.Select
+                            size="sm"
+                            value={demoPaperToken}
+                            onChange={(e) => setDemoPaperToken(e.target.value)}
+                            disabled={
+                              !isZerodha || tradingLocks.length === 0 || demoPaperTradeBusy !== null
+                            }
+                          >
+                            {tradingLocks.length === 0 ? (
+                              <option value="">No locks — add on Locked tab</option>
+                            ) : (
+                              tradingLocks.map((r) => (
+                                <option key={r.instrumentToken} value={r.instrumentToken}>
+                                  {r.tradingsymbol} ({r.exchange})
+                                </option>
+                              ))
+                            )}
+                          </Form.Select>
+                        </Form.Group>
+                      </Col>
+                      <Col xs={6} sm={4} md={3}>
+                        <Form.Group controlId="demo-paper-contracts">
+                          <Form.Label className="small text-secondary mb-1">Contracts</Form.Label>
+                          <Form.Control
+                            size="sm"
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            value={demoPaperContracts}
+                            onChange={(e) => setDemoPaperContracts(e.target.value)}
+                            disabled={demoPaperTradeBusy !== null}
+                          />
+                        </Form.Group>
+                      </Col>
+                      <Col xs={12} sm="auto" className="d-flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="success"
+                          size="sm"
+                          disabled={
+                            !isZerodha || tradingLocks.length === 0 || demoPaperTradeBusy !== null
+                          }
+                          onClick={() => void executeDemoPaperTrade('buy')}
+                        >
+                          {demoPaperTradeBusy === 'buy' ? '…' : 'Demo buy'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline-danger"
+                          size="sm"
+                          disabled={
+                            !isZerodha || tradingLocks.length === 0 || demoPaperTradeBusy !== null
+                          }
+                          onClick={() => void executeDemoPaperTrade('sell')}
+                        >
+                          {demoPaperTradeBusy === 'sell' ? '…' : 'Demo sell'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline-secondary"
+                          size="sm"
+                          disabled={demoPaperPositionsLoading}
+                          onClick={() => void loadDemoPaperPositions()}
+                        >
+                          {demoPaperPositionsLoading ? '…' : 'Refresh positions'}
+                        </Button>
+                      </Col>
+                    </Row>
+                    {demoPaperPositions.length > 0 ? (
+                      <div className="mt-2 small">
+                        {demoPaperPositions.map((p) => (
+                          <div key={p.instrumentToken} className="font-monospace">
+                            {p.tradingsymbol} · open {p.openContracts} contract
+                            {p.openContracts === 1 ? '' : 's'}
+                            {p.lotSize != null ? ` · lot ${p.lotSize}` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="small text-muted mb-0 mt-2">No open paper longs.</p>
+                    )}
+                  </div>
                   <div className="mt-3 pt-3 border-top border-secondary-subtle">
                     <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                       <h6 className="small fw-semibold text-uppercase text-secondary letter-spacing-1 mb-0">

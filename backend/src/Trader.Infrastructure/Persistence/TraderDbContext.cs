@@ -24,6 +24,7 @@ public sealed class TraderDbContext : DbContext
     public DbSet<Bot> Bots => Set<Bot>();
     public DbSet<Trade> Trades => Set<Trade>();
     public DbSet<TradingOrder> TradingOrders => Set<TradingOrder>();
+    public DbSet<DemoPaperPosition> DemoPaperPositions => Set<DemoPaperPosition>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -46,6 +47,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.KiteInstrumentsChartZoomJson);
             e.Property(x => x.KiteInstrumentsChartIntervalByInstrumentTokenJson);
             e.Property(x => x.KiteInstrumentsTrendAnalysisIntervalsJson);
+            e.Property(x => x.WalletBalance).HasPrecision(18, 2).HasDefaultValue(0);
             e.Property(x => x.DemoAutoTradeEnabled).HasDefaultValue(false);
             e.Property(x => x.DemoAutoTradeStrategy).HasMaxLength(32).HasDefaultValue("equal_split");
             e.Property(x => x.FavoriteMlAutomationEnabled).HasDefaultValue(false);
@@ -116,6 +118,15 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.Strike).HasPrecision(28, 8);
             e.HasIndex(x => new { x.UserId, x.InstrumentToken }).IsUnique();
             e.HasOne(x => x.User).WithMany(u => u.KiteTradingLockInstruments).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DemoPaperPosition>(e =>
+        {
+            e.Property(x => x.InstrumentToken).HasMaxLength(64);
+            e.Property(x => x.UpdatedAtUtc).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.InstrumentToken }).IsUnique();
+            e.HasOne(x => x.User).WithMany(u => u.DemoPaperPositions).HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

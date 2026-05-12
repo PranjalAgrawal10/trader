@@ -5,6 +5,7 @@ using Trader.Application.Broker;
 using Trader.Application.Prediction;
 using Trader.Application.Strategies;
 using Trader.Application.Trades;
+using Trader.Application.Wallet;
 
 namespace Trader.Application;
 
@@ -14,6 +15,7 @@ public static class DependencyInjection
     {
         services.AddMemoryCache();
         services.AddScoped<IAuthService, AuthService>();
+        services.AddScoped<IWalletService, WalletService>();
         services.AddScoped<IBrokerService, BrokerService>();
         services.AddScoped<IStrategyService, StrategyService>();
         services.AddScoped<IBotService, BotService>();
