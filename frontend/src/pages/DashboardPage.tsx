@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Line,
   LineChart,
@@ -26,6 +26,8 @@ interface TradeRow {
   id: string
   executedAt: string
   price: number
+  symbol?: string
+  realizedPnl?: number | null
 }
 
 export function DashboardPage() {
@@ -57,9 +59,30 @@ export function DashboardPage() {
     }
   }, [])
 
-  const chartData = [...trades]
-    .reverse()
-    .map((x, i) => ({ i: i + 1, price: Number(x.price) }))
+  const realizedPnlSeries = useMemo(() => {
+    const sorted = [...trades].sort(
+      (a, b) => new Date(a.executedAt).getTime() - new Date(b.executedAt).getTime(),
+    )
+    let cumulative = 0
+    return sorted.map((t, idx) => {
+      const leg =
+        t.realizedPnl != null && Number.isFinite(Number(t.realizedPnl)) ? Number(t.realizedPnl) : null
+      if (leg != null) cumulative += leg
+      return {
+        seq: idx + 1,
+        cumulativeRealizedPnl: cumulative,
+        tradeRealizedPnl: leg,
+        executedAt: t.executedAt,
+        symbol: t.symbol,
+      }
+    })
+  }, [trades])
+
+  const hasRealizedPnl = trades.some(
+    (t) => t.realizedPnl != null && Number.isFinite(Number(t.realizedPnl)),
+  )
+
+  const priceSeries = [...trades].reverse().map((x, i) => ({ i: i + 1, price: Number(x.price) }))
 
   const isRunning = (s: BotRow['status']) =>
     s === 2 || s === 'Running' || s === 'running'
@@ -107,13 +130,47 @@ export function DashboardPage() {
 
       <Card className="border-secondary">
         <Card.Body>
-          <Card.Subtitle className="text-body-secondary mb-3">Recent trade prices</Card.Subtitle>
+          <Card.Subtitle className="text-body-secondary mb-3">
+            {hasRealizedPnl ? 'Cumulative realized P&L (trade window)' : 'Recent trade prices'}
+          </Card.Subtitle>
           <div style={{ height: '16rem' }}>
-            {chartData.length === 0 ? (
+            {trades.length === 0 ? (
               <p className="text-secondary small mb-0">No trades yet. Start a bot or ingest logs.</p>
+            ) : hasRealizedPnl ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={realizedPnlSeries}>
+                  <XAxis dataKey="seq" stroke="#adb5bd" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
+                  <Tooltip
+                    formatter={(value: number, name: string) =>
+                      name === 'cumulativeRealizedPnl'
+                        ? [new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value), 'Cumulative']
+                        : [value, name]
+                    }
+                    labelFormatter={(_, payload) => {
+                      const p = payload?.[0]?.payload as { executedAt?: string; symbol?: string } | undefined
+                      if (!p?.executedAt) return ''
+                      const sym = p.symbol ? `${p.symbol} · ` : ''
+                      return `${sym}${new Date(p.executedAt).toLocaleString()}`
+                    }}
+                    contentStyle={{
+                      background: '#212529',
+                      border: '1px solid #495057',
+                      borderRadius: 8,
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="cumulativeRealizedPnl"
+                    stroke="#fd7e14"
+                    dot={false}
+                    strokeWidth={2}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
+                <LineChart data={priceSeries}>
                   <XAxis dataKey="i" stroke="#adb5bd" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
                   <Tooltip
@@ -128,6 +185,11 @@ export function DashboardPage() {
               </ResponsiveContainer>
             )}
           </div>
+          {!hasRealizedPnl && trades.length > 0 ? (
+            <p className="text-muted small mb-0 mt-2">
+              Realized P&amp;L will replace this chart when fills include non-empty P&amp;L values.
+            </p>
+          ) : null}
         </Card.Body>
       </Card>
     </Layout>

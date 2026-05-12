@@ -28,6 +28,8 @@ import {
 } from 'react-bootstrap'
 import {
   Bar,
+  BarChart,
+  CartesianGrid,
   Cell,
   ComposedChart,
   Legend,
@@ -35,6 +37,7 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -647,6 +650,31 @@ function rowSearchHaystack(r: KiteInstrumentRow): string {
     .toLowerCase()
 }
 
+/** Mirrors server-side Kite search: whitespace = AND phrases; each phrase splits into letter runs + digit runs. */
+function expandInstrumentSearchTokens(raw: string): string[] {
+  const t = raw.trim().toLowerCase().replace(/\+/g, ' ')
+  const segments = t.split(/\s+/).filter(Boolean)
+  const tokens: string[] = []
+  const partRe = /\d+|[a-z]+/g
+  const aliases: Record<string, string> = {
+    nity: 'nifty',
+    bnfty: 'banknifty',
+  }
+  for (const seg of segments) {
+    let m: RegExpExecArray | null
+    partRe.lastIndex = 0
+    while ((m = partRe.exec(seg)) !== null) {
+      const v = aliases[m[0]] ?? m[0]
+      if (v.length > 0) tokens.push(v)
+    }
+  }
+  return tokens
+}
+
+function rowMatchesInstrumentSearchTokens(haystackLower: string, tokens: string[]): boolean {
+  return tokens.every((tok) => haystackLower.includes(tok))
+}
+
 function InstrumentListPanel({
   title,
   rows,
@@ -693,9 +721,11 @@ function InstrumentListPanel({
 
   const filtered = useMemo(() => {
     if (serverMode) return serverHits
-    const q = deferredSearch.trim().toLowerCase()
+    const q = deferredSearch.trim()
     if (!q) return rows
-    return rows.filter((r) => rowSearchHaystack(r).includes(q))
+    const tokens = expandInstrumentSearchTokens(deferredSearch)
+    if (tokens.length === 0) return rows
+    return rows.filter((r) => rowMatchesInstrumentSearchTokens(rowSearchHaystack(r), tokens))
   }, [rows, deferredSearch, serverMode, serverHits])
 
   useEffect(() => {
@@ -804,7 +834,7 @@ function InstrumentListPanel({
           <InputGroup size="sm">
             <Form.Control
               type="search"
-              placeholder="Symbol, name, exchange, expiry…"
+              placeholder="Symbol or compact token runs (e.g. nifty 25 may)"
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
               disabled={loading && rows.length === 0}
@@ -4674,6 +4704,44 @@ export function KiteInstrumentsPage() {
     [automationEmailReportRange.from, automationEmailReportRange.to],
   )
 
+  const demoFullReportPnlChartRows = useMemo(() => {
+    const days = demoFullReport?.dailySummaries ?? []
+    if (days.length === 0) return []
+    const sorted = [...days].sort((a, b) => a.reportDate.localeCompare(b.reportDate))
+    let cumulativeNet = 0
+    return sorted.map((d) => {
+      cumulativeNet += d.hypotheticalTotalPnlInr
+      return {
+        reportDate: d.reportDate,
+        /** Short axis label (calendar sort stays on full date). */
+        dayLabel: d.reportDate.length >= 10 ? d.reportDate.slice(5, 10) : d.reportDate,
+        netPnl: d.hypotheticalTotalPnlInr,
+        grossPnl: d.hypotheticalGrossPnlInr,
+        charges: d.hypotheticalChargesInr,
+        cumulativeNet,
+      }
+    })
+  }, [demoFullReport?.dailySummaries])
+
+  const demoTodayLegsPnlChartRows = useMemo(() => {
+    const legs = demoTodayLegs?.legs ?? []
+    const allocated = legs.filter((l) => l.status === 'allocated')
+    if (allocated.length === 0) return []
+    const sorted = [...allocated].sort((a, b) => a.predictedAtUtc.localeCompare(b.predictedAtUtc))
+    return sorted.map((leg) => {
+      const raw =
+        leg.tradingsymbol?.trim() ||
+        (leg.exchange?.trim() ? `${leg.exchange.trim()}:${leg.instrumentToken}` : leg.instrumentToken)
+      const sym = raw.length > 14 ? `${raw.slice(0, 13)}…` : raw
+      return {
+        key: leg.predictionId,
+        symbolLabel: sym,
+        symbolFull: raw,
+        netPnl: leg.legNetPnlInr,
+      }
+    })
+  }, [demoTodayLegs?.legs])
+
   const persistDemoAutoTrade = useCallback(
     async (nextEnabled: boolean, nextStrategy: string) => {
       setDemoAutoTradeSaving(true)
@@ -6164,6 +6232,50 @@ export function KiteInstrumentsPage() {
                         {demoTodayLegsError}
                       </Alert>
                     ) : null}
+                    {demoTodayLegsPnlChartRows.length > 0 ? (
+                      <div className="mb-3 border border-secondary-subtle rounded p-2 bg-body-tertiary">
+                        <div className="small fw-semibold text-secondary mb-2">
+                          Allocated legs — net P&amp;L (hypothetical)
+                        </div>
+                        <div style={{ height: 'min(14rem, 32vh)', minHeight: '11rem' }}>
+                          <ResponsiveContainer width="100%" height="100%" debounce={50}>
+                            <BarChart data={demoTodayLegsPnlChartRows} margin={{ top: 4, right: 8, left: 4, bottom: 4 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
+                              <XAxis
+                                dataKey="symbolLabel"
+                                stroke="#adb5bd"
+                                tick={{ fontSize: 9 }}
+                                interval={0}
+                                angle={demoTodayLegsPnlChartRows.length > 6 ? -28 : 0}
+                                textAnchor={demoTodayLegsPnlChartRows.length > 6 ? 'end' : 'middle'}
+                                height={demoTodayLegsPnlChartRows.length > 6 ? 52 : 28}
+                              />
+                              <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={52} />
+                              <Tooltip
+                                formatter={(value: number) => formatInrRupee(value)}
+                                labelFormatter={(_, payload) =>
+                                  payload?.[0]?.payload?.symbolFull != null
+                                    ? String(payload[0].payload.symbolFull)
+                                    : ''
+                                }
+                                contentStyle={{
+                                  background: '#212529',
+                                  border: '1px solid #495057',
+                                  borderRadius: 8,
+                                  fontSize: 12,
+                                }}
+                              />
+                              <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
+                              <Bar dataKey="netPnl" name="Net" maxBarSize={36} radius={[2, 2, 0, 0]}>
+                                {demoTodayLegsPnlChartRows.map((r) => (
+                                  <Cell key={r.key} fill={r.netPnl >= 0 ? '#198754' : '#dc3545'} />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : null}
                     <div
                       className="table-responsive border border-secondary-subtle rounded mb-0"
                       style={{ maxHeight: 'min(420px, 55vh)', overflowY: 'auto' }}
@@ -6552,6 +6664,99 @@ export function KiteInstrumentsPage() {
                         {demoFullReport.dailySummaries.length > 0 ? (
                           <>
                             <div className="fw-semibold text-secondary mb-1 mt-2">Per calendar day</div>
+                            {demoFullReportPnlChartRows.length > 0 ? (
+                              <Row className="g-3 mb-3">
+                                <Col xs={12} lg={6}>
+                                  <div className="small text-secondary mb-1">Daily net P&amp;L</div>
+                                  <div
+                                    className="border border-secondary-subtle rounded p-2 bg-body-tertiary"
+                                    style={{ height: '14rem' }}
+                                  >
+                                    <ResponsiveContainer width="100%" height="100%" debounce={50}>
+                                      <BarChart
+                                        data={demoFullReportPnlChartRows}
+                                        margin={{ top: 8, right: 8, left: 4, bottom: 4 }}
+                                      >
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
+                                        <XAxis dataKey="dayLabel" stroke="#adb5bd" tick={{ fontSize: 10 }} />
+                                        <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={52} />
+                                        <Tooltip
+                                          formatter={(value: number, name: string) => [
+                                            formatInrRupee(value),
+                                            name === 'netPnl'
+                                              ? 'Net'
+                                              : name === 'grossPnl'
+                                                ? 'Gross'
+                                                : 'Fees',
+                                          ]}
+                                          labelFormatter={(_, payload) =>
+                                            payload?.[0]?.payload?.reportDate != null
+                                              ? String(payload[0].payload.reportDate)
+                                              : ''
+                                          }
+                                          contentStyle={{
+                                            background: '#212529',
+                                            border: '1px solid #495057',
+                                            borderRadius: 8,
+                                            fontSize: 12,
+                                          }}
+                                        />
+                                        <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
+                                        <Bar dataKey="netPnl" name="netPnl" maxBarSize={40} radius={[2, 2, 0, 0]}>
+                                          {demoFullReportPnlChartRows.map((r) => (
+                                            <Cell
+                                              key={r.reportDate}
+                                              fill={r.netPnl >= 0 ? '#198754' : '#dc3545'}
+                                            />
+                                          ))}
+                                        </Bar>
+                                      </BarChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </Col>
+                                <Col xs={12} lg={6}>
+                                  <div className="small text-secondary mb-1">Cumulative net P&amp;L</div>
+                                  <div
+                                    className="border border-secondary-subtle rounded p-2 bg-body-tertiary"
+                                    style={{ height: '14rem' }}
+                                  >
+                                    <ResponsiveContainer width="100%" height="100%" debounce={50}>
+                                      <LineChart
+                                        data={demoFullReportPnlChartRows}
+                                        margin={{ top: 8, right: 8, left: 4, bottom: 4 }}
+                                      >
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
+                                        <XAxis dataKey="dayLabel" stroke="#adb5bd" tick={{ fontSize: 10 }} />
+                                        <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={52} />
+                                        <Tooltip
+                                          formatter={(value: number) => formatInrRupee(value)}
+                                          labelFormatter={(_, payload) =>
+                                            payload?.[0]?.payload?.reportDate != null
+                                              ? String(payload[0].payload.reportDate)
+                                              : ''
+                                          }
+                                          contentStyle={{
+                                            background: '#212529',
+                                            border: '1px solid #495057',
+                                            borderRadius: 8,
+                                            fontSize: 12,
+                                          }}
+                                        />
+                                        <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
+                                        <Line
+                                          type="monotone"
+                                          dataKey="cumulativeNet"
+                                          name="Cumulative net"
+                                          stroke="#0dcaf0"
+                                          dot={{ r: 3, fill: '#0dcaf0' }}
+                                          strokeWidth={2}
+                                        />
+                                      </LineChart>
+                                    </ResponsiveContainer>
+                                  </div>
+                                </Col>
+                              </Row>
+                            ) : null}
                             <div className="table-responsive border border-secondary-subtle rounded mb-3">
                               <Table size="sm" striped bordered hover className="mb-0 small">
                                 <thead>

@@ -2,11 +2,12 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Trader.Application.Broker;
 
 namespace Trader.Infrastructure.Broker;
 
-public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
+public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
 {
     private static readonly TimeZoneInfo IndiaTz = ResolveIndiaTimeZone();
 
@@ -281,8 +282,8 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         if (maxMatches < 1)
             return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
-        var needle = NormalizeSearchNeedle(query);
-        if (needle.Length == 0)
+        var tokens = ExpandSearchTokens(query);
+        if (tokens.Count == 0)
             return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
         var ex = Uri.EscapeDataString(exchange);
@@ -320,7 +321,7 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
             // Kite CSV: cash equities use instrument_type EQ; indices often use EQ + segment INDICES (see Kite forum / instruments docs). Type INDEX may also appear.
             if (equityCashOnly && !IsKiteSpotSearchRow(row))
                 continue;
-            if (!RowMatchesNeedle(row, needle))
+            if (!RowMatchesNeedle(row, tokens))
                 continue;
 
             items.Add(row);
@@ -347,19 +348,52 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
         return t is "EQ" or "BE" or "BZ" or "INDEX";
     }
 
-    /// <summary>Lowercase, trim; treat <c>+</c> as space; collapse whitespace (URL <c>q=gold+mini</c> → <c>gold mini</c>).</summary>
-    private static string NormalizeSearchNeedle(string query)
+    /// <summary>
+    /// Builds search tokens: explicit whitespace separates phrases (AND). Within each phrase, letter runs and digit runs become separate tokens so compact queries behave like spaced ones (e.g. <c>nifty12may</c> → nifty + 12 + may).
+    /// </summary>
+    private static List<string> ExpandSearchTokens(string query)
     {
         var t = query.Trim().ToLowerInvariant().Replace('+', ' ');
-        var parts = t.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return string.Join(' ', parts);
+        var segments = t.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var tokens = new List<string>();
+        foreach (var seg in segments)
+        {
+            if (seg.Length == 0)
+                continue;
+
+            foreach (Match m in CompactSearchTokenRegex().Matches(seg))
+            {
+                var raw = m.Value;
+                if (raw.Length == 0)
+                    continue;
+                var normalized = ApplyInstrumentSearchAliases(raw);
+                if (normalized.Length > 0)
+                    tokens.Add(normalized);
+            }
+        }
+
+        return tokens;
+    }
+
+    [GeneratedRegex(@"\d+|[a-z]+", RegexOptions.CultureInvariant)]
+    private static partial Regex CompactSearchTokenRegex();
+
+    /// <summary>Minimal typo shortcuts users type without spaces.</summary>
+    private static string ApplyInstrumentSearchAliases(string alphaNumericLowerToken)
+    {
+        return alphaNumericLowerToken switch
+        {
+            "nity" => "nifty",
+            "bnfty" => "banknifty",
+            _ => alphaNumericLowerToken,
+        };
     }
 
     /// <summary>
-    /// Every whitespace-separated token must appear in the row haystack (order-independent).
-    /// So <c>gold mini</c> matches <c>GOLDMINI</c> (both <c>gold</c> and <c>mini</c> as substrings).
+    /// Every token must appear in the row haystack (order-independent).
+    /// Tokens come from whitespace-separated segments; each segment is split into letter runs and digit runs.
     /// </summary>
-    private static bool RowMatchesNeedle(KiteInstrumentListItemDto row, string needleNormalized)
+    private static bool RowMatchesNeedle(KiteInstrumentListItemDto row, IReadOnlyList<string> tokens)
     {
         var haystack = string.Join(
                 ' ',
@@ -377,7 +411,7 @@ public sealed class KiteInstrumentsClient : IKiteInstrumentsClient
                 })
             .ToLowerInvariant();
 
-        foreach (var token in needleNormalized.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var token in tokens)
         {
             if (token.Length == 0)
                 continue;
