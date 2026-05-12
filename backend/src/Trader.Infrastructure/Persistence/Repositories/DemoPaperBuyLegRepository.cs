@@ -23,7 +23,7 @@ public sealed class DemoPaperBuyLegRepository : IDemoPaperBuyLegRepository
         var legs = await _db.DemoPaperBuyLegs
             .Where(x =>
                 x.UserId == userId &&
-                string.Equals(x.InstrumentToken, instrumentToken, StringComparison.Ordinal) &&
+                x.InstrumentToken == instrumentToken &&
                 x.ContractsRemaining > 0)
             .OrderBy(x => x.BoughtAtUtc)
             .ToListAsync(ct)

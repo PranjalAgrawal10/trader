@@ -582,6 +582,17 @@ public sealed class BrokerController : ControllerBase
         return Ok(list);
     }
 
+    /// <summary>Manual demo paper trade history (newest first).</summary>
+    [Authorize]
+    [HttpGet("kite/instruments/demo-paper-trades")]
+    public async Task<ActionResult<IReadOnlyList<DemoPaperTradeHistoryRowDto>>> GetDemoPaperTradeHistory(
+        [FromQuery] int? take,
+        CancellationToken ct)
+    {
+        var list = await _broker.GetDemoPaperTradeHistoryAsync(User.GetUserId(), take, ct).ConfigureAwait(false);
+        return Ok(list);
+    }
+
     /// <summary>Manual paper buy (debits wallet) or sell (credits wallet) at cached Kite LTP — no orders.</summary>
     [Authorize]
     [HttpPost("kite/instruments/demo-paper-trade")]

@@ -41,11 +41,14 @@ export function ManualTradeScalperView({
   tradingLocks,
   selectedInstrumentToken,
   onSelectedInstrumentTokenChange,
+  paperLastBuyPrice,
 }: {
   isZerodha: boolean
   tradingLocks: ManualTradeScalperInstrument[]
   selectedInstrumentToken: string
   onSelectedInstrumentTokenChange: (instrumentToken: string) => void
+  /** Latest demo paper BUY fill when the selected lock has an open long. */
+  paperLastBuyPrice?: number | null
 }) {
   const [interval, setInterval] = useState<ScalperInterval>('1m')
   const [rangePreset, setRangePreset] = useState<ScalperRange>('last30m')
@@ -247,6 +250,7 @@ export function ManualTradeScalperView({
               maLineVisibility={SCALPER_MA}
               customEmaPeriod={null}
               livePrice={live.lastPrice}
+              paperLastBuyPrice={paperLastBuyPrice ?? null}
             />
           </div>
         ) : selected && !chartLoading ? (

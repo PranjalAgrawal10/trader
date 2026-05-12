@@ -108,4 +108,6 @@ public class User
     public ICollection<DemoPaperPosition> DemoPaperPositions { get; set; } = new List<DemoPaperPosition>();
 
     public ICollection<DemoPaperBuyLeg> DemoPaperBuyLegs { get; set; } = new List<DemoPaperBuyLeg>();
+
+    public ICollection<DemoPaperTradeLog> DemoPaperTradeLogs { get; set; } = new List<DemoPaperTradeLog>();
 }

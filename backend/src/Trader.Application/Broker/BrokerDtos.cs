@@ -176,6 +176,21 @@ public sealed record DemoPaperTradeResultDto(
     decimal WalletBalanceAfter,
     int OpenContractsAfter);
 
+/// <summary>Append-only manual demo paper fills (newest rows returned first).</summary>
+public sealed record DemoPaperTradeHistoryRowDto(
+    Guid Id,
+    DateTimeOffset ExecutedAtUtc,
+    string InstrumentToken,
+    string Tradingsymbol,
+    string Exchange,
+    string Side,
+    int Contracts,
+    decimal LastPrice,
+    int LotSize,
+    decimal CashFlowInr,
+    decimal WalletBalanceAfter,
+    int OpenContractsAfter);
+
 public sealed record DemoPaperOpenBuyMarkerDto(DateTimeOffset BoughtAtUtc, int ContractsRemaining);
 
 public sealed record DemoPaperPositionListItemDto(
@@ -184,7 +199,9 @@ public sealed record DemoPaperPositionListItemDto(
     string Exchange,
     int? LotSize,
     int OpenContracts,
-    IReadOnlyList<DemoPaperOpenBuyMarkerDto> OpenBuys);
+    IReadOnlyList<DemoPaperOpenBuyMarkerDto> OpenBuys,
+    /// <summary>Latest demo BUY fill price from trade logs when <see cref="OpenContracts"/> &gt; 0.</summary>
+    decimal? LastBuyPrice);
 
 /// <summary>Hypothetical same-calendar-day (report TZ) outcome from merged automation rows.</summary>
 public sealed record DemoAutoTradeEodSummaryDto(

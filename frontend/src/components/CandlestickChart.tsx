@@ -32,6 +32,9 @@ const CANDLE = {
 /** Horizontal guide for streamed last price (SignalR ticks), drawn above candles. */
 const LIVE_LTP_LINE = '#38bdf8'
 
+/** Latest demo paper BUY fill (when position open), distinct from live LTP. */
+const PAPER_LAST_BUY_LINE = '#f59e0b'
+
 function formatChartLivePriceLabel(p: number): string {
   if (!Number.isFinite(p)) return ''
   const a = Math.abs(p)
@@ -128,6 +131,7 @@ export function CandlestickChart({
   maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
   customEmaPeriod = null,
   livePrice = null,
+  paperLastBuyPrice = null,
   paperBuyDataIndices = [],
 }: {
   data: ChartPointWithMa[]
@@ -136,6 +140,8 @@ export function CandlestickChart({
   customEmaPeriod?: number | null
   /** Draw a horizontal LTP guide when streamed quotes are available (e.g. market hub ticks). */
   livePrice?: number | null
+  /** Horizontal guide at the latest demo BUY fill when a paper long is open. */
+  paperLastBuyPrice?: number | null
   /** 0-based indices into <code>data</code>: vertical markers for OPEN demo paper buys (FIFO until sold). */
   paperBuyDataIndices?: readonly number[]
 }) {
@@ -217,6 +223,11 @@ export function CandlestickChart({
       min = Math.min(min, lp)
       max = Math.max(max, lp)
     }
+    const pb = paperLastBuyPrice
+    if (pb != null && Number.isFinite(pb)) {
+      min = Math.min(min, pb)
+      max = Math.max(max, pb)
+    }
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null
     if (min === max) {
       const pad = min === 0 ? 1 : Math.abs(min) * 0.001
@@ -282,7 +293,7 @@ export function CandlestickChart({
       plotBottomY,
       plotRightX,
     }
-  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice])
+  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice, paperLastBuyPrice])
 
   const yTicks = useMemo(() => {
     if (!layout) return []
@@ -301,6 +312,10 @@ export function CandlestickChart({
 
   const livePriceShown =
     livePrice != null && Number.isFinite(livePrice) ? (livePrice as number) : null
+  const paperLastBuyShown =
+    paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice)
+      ? (paperLastBuyPrice as number)
+      : null
 
   return (
     <div ref={ref} className="w-100 h-100 position-relative">
@@ -439,6 +454,57 @@ export function CandlestickChart({
               style={{ pointerEvents: 'none' }}
             />
           ) : null}
+          {paperBuyDataIndices.length > 0
+            ? paperBuyDataIndices.map((di, k) => {
+                if (!layout || di < 0 || di >= data.length) return null
+                const cx = layout.clusterStartX + di * layout.slotW + layout.slotW / 2
+                return (
+                  <g key={`demo-paper-buy-${di}-${k}`} style={{ pointerEvents: 'none' }}>
+                    <title>Open demo BUY (contracts close FIFO on sells)</title>
+                    <line
+                      x1={cx}
+                      x2={cx}
+                      y1={PAD.top}
+                      y2={layout.plotBottomY}
+                      stroke="#84cc16"
+                      strokeWidth={1.35}
+                      strokeDasharray="5 5"
+                      opacity={0.92}
+                    />
+                  </g>
+                )
+              })
+            : null}
+          {paperLastBuyShown != null && layout ? (
+            <g style={{ pointerEvents: 'none' }}>
+              <title>{`Last demo BUY ${formatChartLivePriceLabel(paperLastBuyShown)}`}</title>
+              <line
+                x1={PAD.left}
+                x2={layout.plotRightX}
+                y1={layout.yPrice(paperLastBuyShown)}
+                y2={layout.yPrice(paperLastBuyShown)}
+                stroke={PAPER_LAST_BUY_LINE}
+                strokeWidth={1.5}
+                strokeDasharray="4 6"
+                strokeLinecap="round"
+              />
+              <text
+                x={PAD.left + 4}
+                y={layout.yPrice(paperLastBuyShown) - 4}
+                fill={PAPER_LAST_BUY_LINE}
+                fontSize={10}
+                fontWeight={700}
+                textAnchor="start"
+                style={{
+                  userSelect: 'none',
+                  filter:
+                    'drop-shadow(1px 0 0 rgb(33 37 41 / 85%)) drop-shadow(-1px 0 0 rgb(33 37 41 / 85%)) drop-shadow(0 1px 0 rgb(33 37 41 / 85%))',
+                }}
+              >
+                Last buy {formatChartLivePriceLabel(paperLastBuyShown)}
+              </text>
+            </g>
+          ) : null}
           {livePriceShown != null && layout ? (
             <g style={{ pointerEvents: 'none' }}>
               <title>{`Live LTP ${formatChartLivePriceLabel(livePriceShown)}`}</title>
@@ -469,27 +535,6 @@ export function CandlestickChart({
               </text>
             </g>
           ) : null}
-          {paperBuyDataIndices.length > 0
-            ? paperBuyDataIndices.map((di, k) => {
-                if (!layout || di < 0 || di >= data.length) return null
-                const cx = layout.clusterStartX + di * layout.slotW + layout.slotW / 2
-                return (
-                  <g key={`demo-paper-buy-${di}-${k}`} style={{ pointerEvents: 'none' }}>
-                    <title>Open demo BUY (contracts close FIFO on sells)</title>
-                    <line
-                      x1={cx}
-                      x2={cx}
-                      y1={PAD.top}
-                      y2={layout.plotBottomY}
-                      stroke="#84cc16"
-                      strokeWidth={1.35}
-                      strokeDasharray="5 5"
-                      opacity={0.92}
-                    />
-                  </g>
-                )
-              })
-            : null}
           {hover ? (
             <line
               x1={layout.clusterStartX + hover.idx * layout.slotW + layout.slotW / 2}

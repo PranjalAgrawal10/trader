@@ -69,6 +69,7 @@ public sealed class BrokerService : IBrokerService
     private readonly IUserRepository _users;
     private readonly IDemoPaperPositionRepository _demoPaperPositions;
     private readonly IDemoPaperBuyLegRepository _demoPaperBuyLegs;
+    private readonly IDemoPaperTradeLogRepository _demoPaperTradeLogs;
 
     public BrokerService(
         IBrokerSetupGateway brokerSetup,
@@ -83,7 +84,8 @@ public sealed class BrokerService : IBrokerService
         IWalletService wallet,
         IUserRepository users,
         IDemoPaperPositionRepository demoPaperPositions,
-        IDemoPaperBuyLegRepository demoPaperBuyLegs)
+        IDemoPaperBuyLegRepository demoPaperBuyLegs,
+        IDemoPaperTradeLogRepository demoPaperTradeLogs)
     {
         _brokerSetup = brokerSetup;
         _stateCodec = stateCodec;
@@ -98,6 +100,7 @@ public sealed class BrokerService : IBrokerService
         _users = users;
         _demoPaperPositions = demoPaperPositions;
         _demoPaperBuyLegs = demoPaperBuyLegs;
+        _demoPaperTradeLogs = demoPaperTradeLogs;
     }
 
     public async Task<BrokerStatusDto> GetStatusAsync(Guid userId, CancellationToken ct = default)
@@ -773,11 +776,19 @@ public sealed class BrokerService : IBrokerService
                         .ToList(),
                 StringComparer.Ordinal);
 
+        var positionTokens = positions.Select(x => x.InstrumentToken).Distinct(StringComparer.Ordinal).ToArray();
+        var lastBuyByToken = await _demoPaperTradeLogs
+            .GetLatestBuyLastPriceByInstrumentTokensAsync(userId, positionTokens, ct)
+            .ConfigureAwait(false);
+
         var list = new List<DemoPaperPositionListItemDto>(positions.Count);
         foreach (var p in positions)
         {
             byTok.TryGetValue(p.InstrumentToken, out var lk);
             openBuysByToken.TryGetValue(p.InstrumentToken, out var openBuys);
+            decimal? lastBuyPrice = null;
+            if (p.OpenContracts > 0 && lastBuyByToken.TryGetValue(p.InstrumentToken, out var lastBuyPx))
+                lastBuyPrice = lastBuyPx;
             list.Add(
                 new DemoPaperPositionListItemDto(
                     p.InstrumentToken,
@@ -785,7 +796,39 @@ public sealed class BrokerService : IBrokerService
                     lk?.Exchange ?? "—",
                     lk?.LotSize,
                     p.OpenContracts,
-                    openBuys ?? Array.Empty<DemoPaperOpenBuyMarkerDto>()));
+                    openBuys ?? Array.Empty<DemoPaperOpenBuyMarkerDto>(),
+                    lastBuyPrice));
+        }
+
+        return list;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DemoPaperTradeHistoryRowDto>> GetDemoPaperTradeHistoryAsync(
+        Guid userId,
+        int? take = null,
+        CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+        var n = Math.Clamp(take ?? 500, 1, 2000);
+        var rows = await _demoPaperTradeLogs.ListRecentByUserAsync(userId, n, ct).ConfigureAwait(false);
+        var list = new List<DemoPaperTradeHistoryRowDto>(rows.Count);
+        foreach (var r in rows)
+        {
+            list.Add(
+                new DemoPaperTradeHistoryRowDto(
+                    r.Id,
+                    r.ExecutedAtUtc,
+                    r.InstrumentToken,
+                    r.Tradingsymbol,
+                    r.Exchange,
+                    r.Side,
+                    r.Contracts,
+                    r.LastPrice,
+                    r.LotSize,
+                    r.CashFlowInr,
+                    r.WalletBalanceAfter,
+                    r.OpenContractsAfter));
         }
 
         return list;
@@ -892,6 +935,25 @@ public sealed class BrokerService : IBrokerService
             user.WalletBalance = decimal.Round(nextBal, 2, MidpointRounding.AwayFromZero);
             cashFlow = legCash;
         }
+
+        var executedAt = DateTimeOffset.UtcNow;
+        _demoPaperTradeLogs.Add(
+            new DemoPaperTradeLog
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                InstrumentToken = token,
+                Tradingsymbol = lockRow.Tradingsymbol,
+                Exchange = lockRow.Exchange,
+                Side = side,
+                Contracts = request.Contracts,
+                LastPrice = ltp,
+                LotSize = lotMult,
+                CashFlowInr = cashFlow,
+                WalletBalanceAfter = user.WalletBalance,
+                OpenContractsAfter = openAfter,
+                ExecutedAtUtc = executedAt,
+            });
 
         await _users.SaveChangesAsync(ct).ConfigureAwait(false);
 

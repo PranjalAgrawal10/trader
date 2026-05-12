@@ -97,6 +97,12 @@ public interface IBrokerService
     /// <summary>Open demo paper longs (whole contracts). Enriched from trading locks where possible.</summary>
     Task<IReadOnlyList<DemoPaperPositionListItemDto>> GetDemoPaperPositionsAsync(Guid userId, CancellationToken ct = default);
 
+    /// <summary>Recent manual demo paper fills for the Manual trade tab (newest first).</summary>
+    Task<IReadOnlyList<DemoPaperTradeHistoryRowDto>> GetDemoPaperTradeHistoryAsync(
+        Guid userId,
+        int? take = null,
+        CancellationToken ct = default);
+
     /// <summary>Market-style paper trade at cached LTP: buy debits wallet and adds contracts; sell credits wallet and reduces open long.</summary>
     Task<DemoPaperTradeResultDto> ExecuteDemoPaperTradeAsync(
         Guid userId,

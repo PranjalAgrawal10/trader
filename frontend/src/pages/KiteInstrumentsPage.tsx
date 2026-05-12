@@ -328,8 +328,25 @@ interface DemoPaperPositionListItemDto {
   lotSize: number | null
   openContracts: number
   openBuys: DemoPaperOpenBuyMarkerDto[]
+  /** Latest demo BUY fill when `openContracts` > 0 (server). */
+  lastBuyPrice: number | null
 }
 interface DemoPaperTradeResultDto {
+  instrumentToken: string
+  tradingsymbol: string
+  exchange: string
+  side: string
+  contracts: number
+  lastPrice: number
+  lotSize: number
+  cashFlowInr: number
+  walletBalanceAfter: number
+  openContractsAfter: number
+}
+
+interface DemoPaperTradeHistoryRowDto {
+  id: string
+  executedAtUtc: string
   instrumentToken: string
   tradingsymbol: string
   exchange: string
@@ -434,8 +451,12 @@ function ManualPaperTradePanel({
   demoPaperPositions,
   demoPaperPositionsLoading,
   demoPaperPositionsError,
+  demoPaperTrades,
+  demoPaperTradesLoading,
+  demoPaperTradesError,
   executeDemoPaperTrade,
   loadDemoPaperPositions,
+  loadDemoPaperTrades,
 }: {
   heading: ReactNode
   intro: ReactNode
@@ -454,8 +475,12 @@ function ManualPaperTradePanel({
   demoPaperPositions: DemoPaperPositionListItemDto[]
   demoPaperPositionsLoading: boolean
   demoPaperPositionsError: string | null
+  demoPaperTrades: DemoPaperTradeHistoryRowDto[]
+  demoPaperTradesLoading: boolean
+  demoPaperTradesError: string | null
   executeDemoPaperTrade: (side: 'buy' | 'sell', instrumentToken: string) => void
-  loadDemoPaperPositions: () => void
+  loadDemoPaperPositions: () => Promise<void>
+  loadDemoPaperTrades: () => Promise<void>
 }) {
   const idPrefix = useId()
 
@@ -519,10 +544,10 @@ function ManualPaperTradePanel({
             type="button"
             variant="outline-secondary"
             size="sm"
-            disabled={demoPaperPositionsLoading || tradingInFlight}
-            onClick={() => void loadDemoPaperPositions()}
+            disabled={demoPaperPositionsLoading || demoPaperTradesLoading || tradingInFlight}
+            onClick={() => void Promise.all([loadDemoPaperPositions(), loadDemoPaperTrades()])}
           >
-            {demoPaperPositionsLoading ? '…' : 'Refresh positions'}
+            {demoPaperPositionsLoading || demoPaperTradesLoading ? '…' : 'Refresh positions & history'}
           </Button>
         </Col>
       </Row>
@@ -623,7 +648,92 @@ function ManualPaperTradePanel({
           </Table>
         </div>
       )}
-      <p className="small text-muted mb-1 fw-semibold">Open positions detail</p>
+      <div className="mt-4">
+        <p className="small text-muted mb-2 fw-semibold">Trade history (demo paper)</p>
+        {demoPaperTradesError ? (
+          <Alert variant="warning" className="py-2 small mb-2">
+            {demoPaperTradesError}
+          </Alert>
+        ) : null}
+        {demoPaperTradesLoading && demoPaperTrades.length === 0 ? (
+          <p className="small text-muted mb-0 py-2">
+            <Spinner animation="border" size="sm" className="me-2" role="status" />
+            Loading trade history…
+          </p>
+        ) : demoPaperTrades.length === 0 ? (
+          <p className="small text-muted mb-0 py-2 border rounded px-3 bg-body-tertiary">
+            No demo paper fills yet. Buys and sells from the table above appear here (newest first).
+          </p>
+        ) : (
+          <div
+            className="table-responsive border rounded shadow-sm"
+            style={{ maxHeight: 'min(380px, 45vh)', overflowY: 'auto' }}
+          >
+            <Table striped hover size="sm" className="mb-0 align-middle small">
+              <thead className="table-light">
+                <tr className="text-secondary text-nowrap">
+                  <th scope="col">Time</th>
+                  <th scope="col">Side</th>
+                  <th scope="col">Symbol</th>
+                  <th scope="col">Ex</th>
+                  <th scope="col" className="text-end">
+                    Contracts
+                  </th>
+                  <th scope="col" className="text-end">
+                    LTP
+                  </th>
+                  <th scope="col" className="text-end">
+                    Lot
+                  </th>
+                  <th scope="col" className="text-end">
+                    Cash Δ
+                  </th>
+                  <th scope="col" className="text-end">
+                    Wallet after
+                  </th>
+                  <th scope="col" className="text-end">
+                    Open long after
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {demoPaperTrades.map((row) => {
+                  const cf = Number(row.cashFlowInr)
+                  const cfClass =
+                    Number.isFinite(cf) && cf > 0 ? 'text-success' : Number.isFinite(cf) && cf < 0 ? 'text-danger' : ''
+                  const sideNorm = row.side?.trim().toLowerCase()
+                  return (
+                    <tr key={row.id}>
+                      <td className="text-nowrap">{formatLocalDateTime(row.executedAtUtc)}</td>
+                      <td>
+                        {sideNorm === 'buy' ? (
+                          <Badge bg="success">Buy</Badge>
+                        ) : sideNorm === 'sell' ? (
+                          <Badge bg="danger">Sell</Badge>
+                        ) : (
+                          <Badge bg="secondary">{row.side ?? '—'}</Badge>
+                        )}
+                      </td>
+                      <td className="font-monospace">{row.tradingsymbol}</td>
+                      <td className="small">{row.exchange}</td>
+                      <td className="text-end font-monospace">{row.contracts}</td>
+                      <td className="text-end font-monospace">{row.lastPrice}</td>
+                      <td className="text-end font-monospace">{row.lotSize}</td>
+                      <td className={`text-end font-monospace ${cfClass}`}>
+                        {Number.isFinite(cf) && cf > 0 ? '+' : ''}
+                        {formatInrRupee(cf)}
+                      </td>
+                      <td className="text-end font-monospace">{formatInrRupee(Number(row.walletBalanceAfter))}</td>
+                      <td className="text-end font-monospace">{row.openContractsAfter}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </Table>
+          </div>
+        )}
+      </div>
+      <p className="small text-muted mb-1 fw-semibold mt-4">Open positions detail</p>
       {demoPaperPositions.length > 0 ? (
         <div className="mt-1 small border rounded px-3 py-2 bg-body-tertiary">
           {demoPaperPositions.map((p, idx) => (
@@ -3501,6 +3611,7 @@ function CompactPriceChart({
   zoomVisibleBars,
   onZoomVisibleBarsChange,
   demoPaperBuyMarkers,
+  paperLastBuyPrice,
 }: {
   row: KiteInstrumentRow
   rangePreset: ChartRangePreset
@@ -3513,6 +3624,8 @@ function CompactPriceChart({
   onZoomVisibleBarsChange: (bars: number | null) => void
   /** OPEN demo BUY legs — vertical markers removed FIFO when sells execute. */
   demoPaperBuyMarkers?: readonly DemoPaperOpenBuyMarkerDto[]
+  /** Latest demo BUY fill for an open paper long — horizontal guide. */
+  paperLastBuyPrice?: number | null
 }) {
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(true)
@@ -3621,10 +3734,21 @@ function CompactPriceChart({
     })
   }, [paperBuyDataIndices, chartData, row.instrumentToken])
 
-  const rechartsYDomain = useMemo(
-    () => yDomainForOhlcAndVisibleMas(chartData, maLineVisibility),
-    [chartData, maLineVisibility],
-  )
+  const paperLastBuyReferenceLine =
+    paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice) ? (
+      <ReferenceLine
+        y={paperLastBuyPrice}
+        stroke="#f59e0b"
+        strokeWidth={1.5}
+        strokeDasharray="4 6"
+        label={{ value: 'Last buy', position: 'insideLeft', fill: '#f59e0b', fontSize: 9, fontWeight: 600 }}
+      />
+    ) : null
+
+  const rechartsYDomain = useMemo(() => {
+    const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
+    return extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
+  }, [chartData, maLineVisibility, paperLastBuyPrice])
 
   const onChartZoomIn = useCallback(() => {
     onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, series.length))
@@ -3747,6 +3871,7 @@ function CompactPriceChart({
                   maLineVisibility={maLineVisibility}
                   customEmaPeriod={customEmaApplied}
                   paperBuyDataIndices={paperBuyDataIndices}
+                  paperLastBuyPrice={paperLastBuyPrice ?? null}
                 />
               </div>
             ) : (
@@ -3779,6 +3904,7 @@ function CompactPriceChart({
                       <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
                       <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                       {paperBuyReferenceLines}
+                      {paperLastBuyReferenceLine}
                     </LineChart>
                   ) : (
                     <ComposedChart data={chartData} margin={CHART_MARGINS}>
@@ -3802,6 +3928,7 @@ function CompactPriceChart({
                       <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
                       <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                       {paperBuyReferenceLines}
+                      {paperLastBuyReferenceLine}
                     </ComposedChart>
                   )}
                 </ResponsiveContainer>
@@ -3980,6 +4107,7 @@ function FavoritesChartsGrid({
   automationPriceModels,
   zerodhaConnected,
   demoPaperOpenBuysByInstrumentToken,
+  demoPaperLastBuyPriceByInstrumentToken,
 }: {
   favorites: KiteInstrumentRow[]
   rangePreset: ChartRangePreset
@@ -4007,6 +4135,7 @@ function FavoritesChartsGrid({
   automationPriceModels: PriceDirectionModelsApiResponse | null
   zerodhaConnected: boolean
   demoPaperOpenBuysByInstrumentToken: Readonly<Record<string, DemoPaperOpenBuyMarkerDto[]>>
+  demoPaperLastBuyPriceByInstrumentToken: Readonly<Record<string, number>>
 }) {
   const favHistExtras = useMemo(() => historicalRangeQueryParams(rangePreset), [rangePreset])
   if (favorites.length === 0) return null
@@ -4104,6 +4233,7 @@ function FavoritesChartsGrid({
                   zoomVisibleBars={chartZoomByInstrumentToken[row.instrumentToken] ?? null}
                   onZoomVisibleBarsChange={(bars) => onInstrumentChartZoomChange(row.instrumentToken, bars)}
                   demoPaperBuyMarkers={demoPaperOpenBuysByInstrumentToken[row.instrumentToken]}
+                  paperLastBuyPrice={demoPaperLastBuyPriceByInstrumentToken[row.instrumentToken] ?? null}
                 />
                 <TrendAnalysisMultiPanel
                   instrumentToken={row.instrumentToken}
@@ -4152,6 +4282,7 @@ function InstrumentChartCard({
   trendAnalysisSelections,
   onTrendAnalysisSelectionsChange,
   demoPaperBuyMarkers,
+  paperLastBuyPrice,
 }: {
   selection: KiteInstrumentRow | null
   rangePreset: ChartRangePreset
@@ -4175,6 +4306,7 @@ function InstrumentChartCard({
   trendAnalysisSelections: ChartInterval[]
   onTrendAnalysisSelectionsChange: (next: ChartInterval[]) => void
   demoPaperBuyMarkers?: readonly DemoPaperOpenBuyMarkerDto[]
+  paperLastBuyPrice?: number | null
 }) {
   const browseHistExtras = useMemo(() => historicalRangeQueryParams(rangePreset), [rangePreset])
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
@@ -4301,9 +4433,11 @@ function InstrumentChartCard({
   }, [browsePaperBuyDataIndices, chartData, selection?.instrumentToken])
 
   const rechartsYDomain = useMemo(() => {
-    const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
-    return extendYDomainWithLivePrice(base, liveLastPrice)
-  }, [chartData, maLineVisibility, liveLastPrice])
+    let d = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
+    d = extendYDomainWithLivePrice(d, liveLastPrice)
+    d = extendYDomainWithLivePrice(d, paperLastBuyPrice)
+    return d
+  }, [chartData, maLineVisibility, liveLastPrice, paperLastBuyPrice])
 
   const liveLtpReferenceLine =
     liveLastPrice != null && Number.isFinite(liveLastPrice) ? (
@@ -4313,6 +4447,17 @@ function InstrumentChartCard({
         strokeWidth={1.65}
         strokeDasharray="6 7"
         label={{ value: 'LTP', position: 'insideRight', fill: '#38bdf8', fontSize: 10, fontWeight: 600 }}
+      />
+    ) : null
+
+  const paperLastBuyReferenceLine =
+    paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice) ? (
+      <ReferenceLine
+        y={paperLastBuyPrice}
+        stroke="#f59e0b"
+        strokeWidth={1.5}
+        strokeDasharray="4 6"
+        label={{ value: 'Last buy', position: 'insideLeft', fill: '#f59e0b', fontSize: 10, fontWeight: 600 }}
       />
     ) : null
 
@@ -4485,6 +4630,7 @@ function InstrumentChartCard({
                       customEmaPeriod={customEmaApplied}
                       livePrice={liveLastPrice ?? null}
                       paperBuyDataIndices={browsePaperBuyDataIndices}
+                      paperLastBuyPrice={paperLastBuyPrice ?? null}
                     />
                   ) : (
                     <div className="position-relative w-100 h-100">
@@ -4515,8 +4661,9 @@ function InstrumentChartCard({
                               />
                               <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                              {liveLtpReferenceLine}
                               {browsePaperBuyReferenceLines}
+                              {paperLastBuyReferenceLine}
+                              {liveLtpReferenceLine}
                             </LineChart>
                           ) : (
                             <ComposedChart data={chartData} margin={CHART_MARGINS}>
@@ -4541,8 +4688,9 @@ function InstrumentChartCard({
                               />
                               <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                              {liveLtpReferenceLine}
                               {browsePaperBuyReferenceLines}
+                              {paperLastBuyReferenceLine}
+                              {liveLtpReferenceLine}
                             </ComposedChart>
                           )}
                         </ResponsiveContainer>
@@ -4560,7 +4708,8 @@ function InstrumentChartCard({
               and an optional custom-period <strong>EMA</strong>. A cyan dashed <strong>LTP</strong> line tracks the streamed last
               price on candles, line, and bar views when subscribed; live ticks also update the in-progress{' '}
               <strong>candle</strong> in Candles view. Lime dashed verticals mark candles where OPEN demo{' '}
-              <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> contracts).
+              <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> contracts); an{' '}
+              <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold contracts.{' '}
               <strong>ML next-bar bias</strong> calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
               <span className="font-monospace">model</span> query (see{' '}
@@ -4790,6 +4939,9 @@ export function KiteInstrumentsPage() {
   const [demoPaperPositions, setDemoPaperPositions] = useState<DemoPaperPositionListItemDto[]>([])
   const [demoPaperPositionsLoading, setDemoPaperPositionsLoading] = useState(false)
   const [demoPaperPositionsError, setDemoPaperPositionsError] = useState<string | null>(null)
+  const [demoPaperTrades, setDemoPaperTrades] = useState<DemoPaperTradeHistoryRowDto[]>([])
+  const [demoPaperTradesLoading, setDemoPaperTradesLoading] = useState(false)
+  const [demoPaperTradesError, setDemoPaperTradesError] = useState<string | null>(null)
   const [demoPaperToken, setDemoPaperToken] = useState('')
   const [demoPaperContracts, setDemoPaperContracts] = useState('1')
   const [demoPaperTradeBusy, setDemoPaperTradeBusy] = useState<{
@@ -4806,10 +4958,34 @@ export function KiteInstrumentsPage() {
     return r
   }, [demoPaperPositions])
 
+  const demoPaperLastBuyPriceByInstrumentToken = useMemo(() => {
+    const r: Record<string, number> = {}
+    for (const p of demoPaperPositions) {
+      if (
+        p.openContracts > 0 &&
+        p.lastBuyPrice != null &&
+        typeof p.lastBuyPrice === 'number' &&
+        Number.isFinite(p.lastBuyPrice)
+      )
+        r[p.instrumentToken] = p.lastBuyPrice
+    }
+    return r
+  }, [demoPaperPositions])
+
   const browseDemoPaperOpenBuys = useMemo(
     () => (chartRow ? demoPaperOpenBuysByInstrumentToken[chartRow.instrumentToken] ?? [] : []),
     [chartRow, demoPaperOpenBuysByInstrumentToken],
   )
+  const browseDemoPaperLastBuyPrice = useMemo(
+    () => (chartRow ? demoPaperLastBuyPriceByInstrumentToken[chartRow.instrumentToken] ?? null : null),
+    [chartRow, demoPaperLastBuyPriceByInstrumentToken],
+  )
+  const manualTradePaperLastBuyPrice = useMemo(() => {
+    const t = demoPaperToken.trim()
+    if (!t) return null
+    const v = demoPaperLastBuyPriceByInstrumentToken[t]
+    return v != null && Number.isFinite(v) ? v : null
+  }, [demoPaperToken, demoPaperLastBuyPriceByInstrumentToken])
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
   const [automationRecentLoading, setAutomationRecentLoading] = useState(false)
   const [automationPriceModels, setAutomationPriceModels] = useState<PriceDirectionModelsApiResponse | null>(null)
@@ -5217,6 +5393,15 @@ export function KiteInstrumentsPage() {
           ? data.map((row) => ({
               ...row,
               openBuys: Array.isArray(row.openBuys) ? row.openBuys : [],
+              lastBuyPrice: (() => {
+                const v = row.lastBuyPrice
+                if (typeof v === 'number' && Number.isFinite(v)) return v
+                if (typeof v === 'string') {
+                  const n = Number.parseFloat(v)
+                  return Number.isFinite(n) ? n : null
+                }
+                return null
+              })(),
             }))
           : [],
       )
@@ -5225,6 +5410,22 @@ export function KiteInstrumentsPage() {
       setDemoPaperPositions([])
     } finally {
       setDemoPaperPositionsLoading(false)
+    }
+  }, [])
+
+  const loadDemoPaperTrades = useCallback(async () => {
+    try {
+      setDemoPaperTradesLoading(true)
+      setDemoPaperTradesError(null)
+      const { data } = await api.get<DemoPaperTradeHistoryRowDto[]>('/broker/kite/instruments/demo-paper-trades', {
+        params: { take: 500 },
+      })
+      setDemoPaperTrades(Array.isArray(data) ? data : [])
+    } catch (err) {
+      setDemoPaperTradesError(problemDetail(err))
+      setDemoPaperTrades([])
+    } finally {
+      setDemoPaperTradesLoading(false)
     }
   }, [])
 
@@ -5257,7 +5458,7 @@ export function KiteInstrumentsPage() {
         setDemoPaperTradeLast(
           `${side.toUpperCase()} ${data.contracts} × ${data.tradingsymbol} @ ${data.lastPrice.toFixed(4)} — cash ${formatInrRupee(data.cashFlowInr)} · wallet ${formatInrRupee(data.walletBalanceAfter)} · open ${data.openContractsAfter}`,
         )
-        await loadDemoPaperPositions()
+        await Promise.all([loadDemoPaperPositions(), loadDemoPaperTrades()])
         await loadDemoEodSummary()
       } catch (err) {
         setDemoPaperTradeError(problemDetail(err))
@@ -5265,7 +5466,7 @@ export function KiteInstrumentsPage() {
         setDemoPaperTradeBusy(null)
       }
     },
-    [demoPaperContracts, loadDemoPaperPositions, loadDemoEodSummary],
+    [demoPaperContracts, loadDemoPaperPositions, loadDemoPaperTrades, loadDemoEodSummary],
   )
 
   const loadDemoFullReport = useCallback(
@@ -5468,8 +5669,8 @@ export function KiteInstrumentsPage() {
       !isZerodha
     )
       return
-    void loadDemoPaperPositions()
-  }, [mainTab, chartPrefsHydrated, isZerodha, loadDemoPaperPositions])
+    void Promise.all([loadDemoPaperPositions(), loadDemoPaperTrades()])
+  }, [mainTab, chartPrefsHydrated, isZerodha, loadDemoPaperPositions, loadDemoPaperTrades])
 
   useEffect(() => {
     if (mainTab !== 'autoTrading' && mainTab !== 'manualTrade') return
@@ -6778,6 +6979,7 @@ export function KiteInstrumentsPage() {
                 tradingLocks={tradingLocks}
                 selectedInstrumentToken={demoPaperToken}
                 onSelectedInstrumentTokenChange={setDemoPaperToken}
+                paperLastBuyPrice={manualTradePaperLastBuyPrice}
               />
               <ManualPaperTradePanel
                 heading={<h2 className="h6 text-body mb-2">Manual paper trade</h2>}
@@ -6802,8 +7004,12 @@ export function KiteInstrumentsPage() {
                 demoPaperPositions={demoPaperPositions}
                 demoPaperPositionsLoading={demoPaperPositionsLoading}
                 demoPaperPositionsError={demoPaperPositionsError}
+                demoPaperTrades={demoPaperTrades}
+                demoPaperTradesLoading={demoPaperTradesLoading}
+                demoPaperTradesError={demoPaperTradesError}
                 executeDemoPaperTrade={executeDemoPaperTrade}
                 loadDemoPaperPositions={loadDemoPaperPositions}
+                loadDemoPaperTrades={loadDemoPaperTrades}
               />
             </div>
             ) : mainTab === 'autoTrading' ? (
@@ -6928,8 +7134,12 @@ export function KiteInstrumentsPage() {
                       demoPaperPositions={demoPaperPositions}
                       demoPaperPositionsLoading={demoPaperPositionsLoading}
                       demoPaperPositionsError={demoPaperPositionsError}
+                      demoPaperTrades={demoPaperTrades}
+                      demoPaperTradesLoading={demoPaperTradesLoading}
+                      demoPaperTradesError={demoPaperTradesError}
                       executeDemoPaperTrade={executeDemoPaperTrade}
                       loadDemoPaperPositions={loadDemoPaperPositions}
+                      loadDemoPaperTrades={loadDemoPaperTrades}
                     />
                   </div>
                   <div className="mt-3 pt-3 border-top border-secondary-subtle">
@@ -7846,6 +8056,7 @@ export function KiteInstrumentsPage() {
                   automationPriceModels={automationPriceModels}
                   zerodhaConnected={isZerodha}
                   demoPaperOpenBuysByInstrumentToken={demoPaperOpenBuysByInstrumentToken}
+                  demoPaperLastBuyPriceByInstrumentToken={demoPaperLastBuyPriceByInstrumentToken}
                 />
               </div>
             ) : mainTab === 'tradingLocks' ? (
@@ -7890,6 +8101,7 @@ export function KiteInstrumentsPage() {
                   automationPriceModels={automationPriceModels}
                   zerodhaConnected={isZerodha}
                   demoPaperOpenBuysByInstrumentToken={demoPaperOpenBuysByInstrumentToken}
+                  demoPaperLastBuyPriceByInstrumentToken={demoPaperLastBuyPriceByInstrumentToken}
                 />
               </div>
             ) : null}
@@ -7926,6 +8138,7 @@ export function KiteInstrumentsPage() {
                 trendAnalysisSelections={trendAnalysisSelections}
                 onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
                 demoPaperBuyMarkers={browseDemoPaperOpenBuys}
+                paperLastBuyPrice={browseDemoPaperLastBuyPrice}
               />
             ) : null}
           </Card.Body>
