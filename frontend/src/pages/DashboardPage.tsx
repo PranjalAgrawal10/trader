@@ -9,6 +9,7 @@ import {
 } from 'recharts'
 import { Card, Col, Row } from 'react-bootstrap'
 import { api } from '../api/client'
+import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import { Layout } from '../components/Layout'
 
 interface BotRow {
@@ -137,7 +138,8 @@ export function DashboardPage() {
             {trades.length === 0 ? (
               <p className="text-secondary small mb-0">No trades yet. Start a bot or ingest logs.</p>
             ) : hasRealizedPnl ? (
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartWithRightGutter>
+                <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={realizedPnlSeries}>
                   <XAxis dataKey="seq" stroke="#adb5bd" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
@@ -168,8 +170,10 @@ export function DashboardPage() {
                   />
                 </LineChart>
               </ResponsiveContainer>
+              </ChartWithRightGutter>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
+              <ChartWithRightGutter>
+                <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={priceSeries}>
                   <XAxis dataKey="i" stroke="#adb5bd" tick={{ fontSize: 11 }} />
                   <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
@@ -183,6 +187,7 @@ export function DashboardPage() {
                   <Line type="monotone" dataKey="price" stroke="#198754" dot={false} strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
+              </ChartWithRightGutter>
             )}
           </div>
           {!hasRealizedPnl && trades.length > 0 ? (

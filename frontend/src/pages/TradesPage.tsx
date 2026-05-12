@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 import { Card, Col, Row, Table } from 'react-bootstrap'
 import { api } from '../api/client'
+import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import { Layout } from '../components/Layout'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 
@@ -99,7 +100,8 @@ export function TradesPage() {
               <Card.Body className="pb-2">
                 <Card.Subtitle className="text-secondary small mb-2">Cumulative realized P&amp;L</Card.Subtitle>
                 <div style={{ height: '14rem' }}>
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ChartWithRightGutter>
+                    <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={pnlCharts.cumulativeSeries} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
                       <XAxis dataKey="seq" stroke="#adb5bd" tick={{ fontSize: 10 }} />
@@ -128,6 +130,7 @@ export function TradesPage() {
                       />
                     </LineChart>
                   </ResponsiveContainer>
+                  </ChartWithRightGutter>
                 </div>
               </Card.Body>
             </Card>
@@ -139,7 +142,8 @@ export function TradesPage() {
                   Realized P&amp;L per fill (sequence order)
                 </Card.Subtitle>
                 <div style={{ height: '14rem' }}>
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ChartWithRightGutter>
+                    <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={pnlCharts.perTradeBars} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
                       <XAxis dataKey="label" stroke="#adb5bd" tick={{ fontSize: 10 }} />
@@ -165,6 +169,7 @@ export function TradesPage() {
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
+                  </ChartWithRightGutter>
                 </div>
               </Card.Body>
             </Card>

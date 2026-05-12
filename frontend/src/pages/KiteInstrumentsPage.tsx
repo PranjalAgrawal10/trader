@@ -54,6 +54,7 @@ import { Layout } from '../components/Layout'
 import { ManualTradeScalperView } from '../components/ManualTradeScalperView'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { CandlestickChart } from '../components/CandlestickChart'
+import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import type { MarketTickBatchItem } from '../services/marketHub'
@@ -436,20 +437,31 @@ function ManualPaperTradePanel({
   walletBalanceInr: number
   isZerodha: boolean
   tradingLocks: KiteInstrumentRow[]
+  /** Row matching this token is subtly highlighted (e.g. same as scalper chart selection). */
   demoPaperToken: string
   setDemoPaperToken: (token: string) => void
   demoPaperContracts: string
   setDemoPaperContracts: (v: string) => void
-  demoPaperTradeBusy: 'buy' | 'sell' | null
+  demoPaperTradeBusy: { side: 'buy' | 'sell'; instrumentToken: string } | null
   demoPaperTradeError: string | null
   demoPaperTradeLast: string | null
   demoPaperPositions: DemoPaperPositionListItemDto[]
   demoPaperPositionsLoading: boolean
   demoPaperPositionsError: string | null
-  executeDemoPaperTrade: (side: 'buy' | 'sell') => void
+  executeDemoPaperTrade: (side: 'buy' | 'sell', instrumentToken: string) => void
   loadDemoPaperPositions: () => void
 }) {
   const idPrefix = useId()
+
+  const paperOpenByToken = useMemo(() => {
+    const m = new Map<string, DemoPaperPositionListItemDto>()
+    for (const p of demoPaperPositions) {
+      if (p.instrumentToken?.trim()) m.set(p.instrumentToken.trim(), p)
+    }
+    return m
+  }, [demoPaperPositions])
+
+  const tradingInFlight = demoPaperTradeBusy !== null
 
   return (
     <div>
@@ -480,31 +492,10 @@ function ManualPaperTradePanel({
           {demoPaperPositionsError}
         </Alert>
       ) : null}
-      <Row className="g-2 align-items-end flex-wrap">
-        <Col xs={12} md>
-          <Form.Group controlId={`${idPrefix}-paper-instrument`}>
-            <Form.Label className="small text-secondary mb-1">Locked instrument</Form.Label>
-            <Form.Select
-              size="sm"
-              value={demoPaperToken}
-              onChange={(e) => setDemoPaperToken(e.target.value)}
-              disabled={!isZerodha || tradingLocks.length === 0 || demoPaperTradeBusy !== null}
-            >
-              {tradingLocks.length === 0 ? (
-                <option value="">No locks — add on Locked tab</option>
-              ) : (
-                tradingLocks.map((r) => (
-                  <option key={r.instrumentToken} value={r.instrumentToken}>
-                    {r.tradingsymbol} ({r.exchange})
-                  </option>
-                ))
-              )}
-            </Form.Select>
-          </Form.Group>
-        </Col>
+      <Row className="g-2 align-items-end mb-3">
         <Col xs={6} sm={4} md={3}>
-          <Form.Group controlId={`${idPrefix}-paper-contracts`}>
-            <Form.Label className="small text-secondary mb-1">Contracts</Form.Label>
+          <Form.Group controlId={`${idPrefix}-paper-contracts`} className="mb-0">
+            <Form.Label className="small text-secondary mb-1">Contracts (each row)</Form.Label>
             <Form.Control
               size="sm"
               type="text"
@@ -512,52 +503,135 @@ function ManualPaperTradePanel({
               autoComplete="off"
               value={demoPaperContracts}
               onChange={(e) => setDemoPaperContracts(e.target.value)}
-              disabled={demoPaperTradeBusy !== null}
+              disabled={tradingInFlight}
+              aria-describedby={`${idPrefix}-contracts-help`}
             />
           </Form.Group>
         </Col>
-        <Col xs={12} sm="auto" className="d-flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="success"
-            size="sm"
-            disabled={!isZerodha || tradingLocks.length === 0 || demoPaperTradeBusy !== null}
-            onClick={() => void executeDemoPaperTrade('buy')}
-          >
-            {demoPaperTradeBusy === 'buy' ? '…' : 'Buy'}
-          </Button>
-          <Button
-            type="button"
-            variant="outline-danger"
-            size="sm"
-            disabled={!isZerodha || tradingLocks.length === 0 || demoPaperTradeBusy !== null}
-            onClick={() => void executeDemoPaperTrade('sell')}
-          >
-            {demoPaperTradeBusy === 'sell' ? '…' : 'Sell'}
-          </Button>
+        <Col xs={12} sm="auto" className="d-flex align-items-end pb-1">
           <Button
             type="button"
             variant="outline-secondary"
             size="sm"
-            disabled={demoPaperPositionsLoading}
+            disabled={demoPaperPositionsLoading || tradingInFlight}
             onClick={() => void loadDemoPaperPositions()}
           >
             {demoPaperPositionsLoading ? '…' : 'Refresh positions'}
           </Button>
         </Col>
       </Row>
+      <Form.Text id={`${idPrefix}-contracts-help`} className="text-muted d-block small mb-2">
+        One size for every <strong>Buy</strong>/<strong>Sell</strong>. Highlighted row matches the scalper symbol (click symbol to select).
+      </Form.Text>
+      {!isZerodha || tradingLocks.length === 0 ? (
+        <p className="small text-muted mb-0 py-3 border rounded px-3 bg-body-tertiary">
+          {tradingLocks.length === 0 ? (
+            <>
+              No locks — add instruments on <Link to="/instruments?tab=locked">Locked for trading</Link>.
+            </>
+          ) : (
+            'Connect Zerodha to trade.'
+          )}
+        </p>
+      ) : (
+        <div className="table-responsive border rounded shadow-sm mb-3">
+          <Table striped hover size="sm" className="mb-0 align-middle">
+            <thead className="table-light">
+              <tr className="small text-secondary">
+                <th scope="col">Symbol</th>
+                <th scope="col">Exch.</th>
+                <th scope="col">Type</th>
+                <th scope="col">Lot</th>
+                <th scope="col" className="text-end">
+                  Open long
+                </th>
+                <th scope="col" className="text-end text-nowrap">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {tradingLocks.map((r) => {
+                const t = r.instrumentToken.trim()
+                const pos = paperOpenByToken.get(t)
+                const openLong = pos?.openContracts ?? 0
+                const rowBusyBuy =
+                  demoPaperTradeBusy?.side === 'buy' && demoPaperTradeBusy?.instrumentToken === t
+                const rowBusySell =
+                  demoPaperTradeBusy?.side === 'sell' && demoPaperTradeBusy?.instrumentToken === t
+                const rowSelected = demoPaperToken.trim().length > 0 && demoPaperToken.trim() === t
+                return (
+                  <tr key={t} className={rowSelected ? 'table-primary' : undefined}>
+                    <td className="font-monospace">
+                      <button
+                        type="button"
+                        className={`btn btn-link btn-sm text-start text-decoration-none p-0 lh-sm ${
+                          rowSelected ? 'fw-bold text-primary' : 'text-body'
+                        }`}
+                        title="Use this lock for scalper + highlight"
+                        onClick={() => setDemoPaperToken(t)}
+                      >
+                        {r.tradingsymbol}
+                      </button>
+                    </td>
+                    <td className="small">{r.exchange}</td>
+                    <td className="small font-monospace text-secondary">{r.instrumentType?.trim() || '—'}</td>
+                    <td className="small font-monospace text-secondary">{r.lotSize != null ? r.lotSize : '—'}</td>
+                    <td className="text-end small font-monospace">{Number.isFinite(openLong) ? openLong : '—'}</td>
+                    <td className="text-end">
+                      <div className="d-inline-flex flex-wrap gap-1 justify-content-end">
+                        <Button
+                          type="button"
+                          variant="success"
+                          size="sm"
+                          className="py-0 px-2 text-nowrap"
+                          disabled={!isZerodha || tradingInFlight}
+                          aria-label={`Paper buy ${r.tradingsymbol}`}
+                          onClick={() => {
+                            setDemoPaperToken(t)
+                            void executeDemoPaperTrade('buy', t)
+                          }}
+                        >
+                          {rowBusyBuy ? '…' : 'Buy'}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline-danger"
+                          size="sm"
+                          className="py-0 px-2 text-nowrap"
+                          disabled={!isZerodha || tradingInFlight}
+                          aria-label={`Paper sell ${r.tradingsymbol}`}
+                          onClick={() => {
+                            setDemoPaperToken(t)
+                            void executeDemoPaperTrade('sell', t)
+                          }}
+                        >
+                          {rowBusySell ? '…' : 'Sell'}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </Table>
+        </div>
+      )}
+      <p className="small text-muted mb-1 fw-semibold">Open positions detail</p>
       {demoPaperPositions.length > 0 ? (
-        <div className="mt-2 small">
-          {demoPaperPositions.map((p) => (
-            <div key={p.instrumentToken} className="font-monospace">
-              {p.tradingsymbol} · open {p.openContracts} contract
-              {p.openContracts === 1 ? '' : 's'}
+        <div className="mt-1 small border rounded px-3 py-2 bg-body-tertiary">
+          {demoPaperPositions.map((p, idx) => (
+            <div
+              key={p.instrumentToken}
+              className={`font-monospace py-1 ${idx < demoPaperPositions.length - 1 ? 'border-bottom border-secondary-subtle' : ''}`}
+            >
+              {p.tradingsymbol} · open {p.openContracts} contract{p.openContracts === 1 ? '' : 's'}
               {p.lotSize != null ? ` · lot ${p.lotSize}` : ''}
             </div>
           ))}
         </div>
       ) : (
-        <p className="small text-muted mb-0 mt-2">No open paper longs.</p>
+        <p className="small text-muted mb-0">No open paper longs.</p>
       )}
     </div>
   )
@@ -2197,8 +2271,9 @@ function MlOutcomePieChart({
       }}
     >
       {/* Extra bottom space + horizontal margins avoid SVG clipping where slice labels/Legend used to collide with the view edge */}
-      <ResponsiveContainer width="100%" height="100%" debounce={50}>
-        <PieChart margin={{ top: 10, left: 12, right: 12, bottom: 44 }}>
+      <ChartWithRightGutter>
+        <ResponsiveContainer width="100%" height="100%" debounce={50}>
+          <PieChart margin={{ top: 10, left: 12, right: 12, bottom: 44 }}>
           <Pie
             data={pieData}
             dataKey="value"
@@ -2223,7 +2298,8 @@ function MlOutcomePieChart({
             wrapperStyle={{ fontSize: 12, paddingTop: 4, overflow: 'visible' }}
           />
         </PieChart>
-      </ResponsiveContainer>
+        </ResponsiveContainer>
+      </ChartWithRightGutter>
     </div>
   )
 }
@@ -2370,7 +2446,8 @@ function MlAutomationDirectionVotePie({
                   </span>
                 </div>
                 <div className="overflow-visible" style={{ height: ML_AUTOMATION_DIRECTION_VOTE_PIE_HEIGHT }}>
-                  <ResponsiveContainer width="100%" height="100%" debounce={50}>
+                  <ChartWithRightGutter>
+                    <ResponsiveContainer width="100%" height="100%" debounce={50}>
                     <PieChart margin={{ top: 10, left: 12, right: 12, bottom: 44 }}>
                       <Pie
                         data={pieData}
@@ -2395,6 +2472,7 @@ function MlAutomationDirectionVotePie({
                       />
                     </PieChart>
                   </ResponsiveContainer>
+                  </ChartWithRightGutter>
                 </div>
               </>
             )}
@@ -3640,6 +3718,7 @@ function CompactPriceChart({
               </div>
             ) : (
               <div className="position-relative w-100 h-100">
+                <ChartWithRightGutter>
                 <ResponsiveContainer width="100%" height="100%">
                   {graphType === 'line' ? (
                     <LineChart data={chartData} margin={CHART_MARGINS}>
@@ -3691,6 +3770,7 @@ function CompactPriceChart({
                     </ComposedChart>
                   )}
                 </ResponsiveContainer>
+                </ChartWithRightGutter>
                 <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} graphType={graphType} />
               </div>
             )}
@@ -4343,6 +4423,7 @@ function InstrumentChartCard({
                     />
                   ) : (
                     <div className="position-relative w-100 h-100">
+                        <ChartWithRightGutter>
                         <ResponsiveContainer width="100%" height="100%">
                           {graphType === 'line' ? (
                             <LineChart data={chartData} margin={CHART_MARGINS}>
@@ -4398,6 +4479,7 @@ function InstrumentChartCard({
                             </ComposedChart>
                           )}
                         </ResponsiveContainer>
+                        </ChartWithRightGutter>
                         <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} graphType={graphType} />
                     </div>
                   )}
@@ -4641,7 +4723,10 @@ export function KiteInstrumentsPage() {
   const [demoPaperPositionsError, setDemoPaperPositionsError] = useState<string | null>(null)
   const [demoPaperToken, setDemoPaperToken] = useState('')
   const [demoPaperContracts, setDemoPaperContracts] = useState('1')
-  const [demoPaperTradeBusy, setDemoPaperTradeBusy] = useState<'buy' | 'sell' | null>(null)
+  const [demoPaperTradeBusy, setDemoPaperTradeBusy] = useState<{
+    side: 'buy' | 'sell'
+    instrumentToken: string
+  } | null>(null)
   const [demoPaperTradeError, setDemoPaperTradeError] = useState<string | null>(null)
   const [demoPaperTradeLast, setDemoPaperTradeLast] = useState<string | null>(null)
   const [automationRecent, setAutomationRecent] = useState<MlAutomationRecentRow[]>([])
@@ -5056,28 +5141,30 @@ export function KiteInstrumentsPage() {
   }, [])
 
   const executeDemoPaperTrade = useCallback(
-    async (side: 'buy' | 'sell') => {
+    async (side: 'buy' | 'sell', instrumentToken: string) => {
       setDemoPaperTradeError(null)
       setDemoPaperTradeLast(null)
       const n = Number.parseInt(demoPaperContracts.trim(), 10)
+      const token = instrumentToken.trim()
+      if (!token) {
+        setDemoPaperTradeError('Pick a locked instrument.')
+        return
+      }
       if (!Number.isFinite(n) || n < 1) {
         setDemoPaperTradeError('Contracts must be a whole number ≥ 1.')
         return
       }
-      if (!demoPaperToken) {
-        setDemoPaperTradeError('Pick a locked instrument.')
-        return
-      }
-      setDemoPaperTradeBusy(side)
+      setDemoPaperTradeBusy({ side, instrumentToken: token })
       try {
         const { data } = await api.post<DemoPaperTradeResultDto>(
           '/broker/kite/instruments/demo-paper-trade',
           {
-            instrumentToken: demoPaperToken,
+            instrumentToken: token,
             side,
             contracts: n,
           },
         )
+        setDemoPaperToken(token)
         setDemoAutoTradeNotionalInr(data.walletBalanceAfter)
         setDemoPaperTradeLast(
           `${side.toUpperCase()} ${data.contracts} × ${data.tradingsymbol} @ ${data.lastPrice.toFixed(4)} — cash ${formatInrRupee(data.cashFlowInr)} · wallet ${formatInrRupee(data.walletBalanceAfter)} · open ${data.openContractsAfter}`,
@@ -5090,12 +5177,7 @@ export function KiteInstrumentsPage() {
         setDemoPaperTradeBusy(null)
       }
     },
-    [
-      demoPaperContracts,
-      demoPaperToken,
-      loadDemoPaperPositions,
-      loadDemoEodSummary,
-    ],
+    [demoPaperContracts, loadDemoPaperPositions, loadDemoEodSummary],
   )
 
   const loadDemoFullReport = useCallback(
@@ -6613,9 +6695,9 @@ export function KiteInstrumentsPage() {
                 heading={<h2 className="h6 text-body mb-2">Manual paper trade</h2>}
                 intro={
                   <p className="small text-secondary mb-0">
-                    At Kite last price × lot size from your lock. <strong>Buy</strong> debits the wallet;{' '}
-                    <strong>Sell</strong> credits the wallet and closes open long contracts. No broker orders. Add locks
-                    on <Link to="/instruments?tab=locked">Locked for trading</Link>.
+                    Each locked row: <strong>Buy</strong> debits the wallet, <strong>Sell</strong> credits and closes open longs
+                    (Kite LTP × saved lot). Use one <strong>Contracts</strong> value for every action. No broker orders.
+                    Add locks on <Link to="/instruments?tab=locked">Locked for trading</Link>.
                   </p>
                 }
                 showWalletLine
@@ -6740,7 +6822,7 @@ export function KiteInstrumentsPage() {
                       }
                       intro={
                         <p className="small text-secondary mb-2">
-                          Same flow as the <strong>Manual trade</strong> tab — wallet at Kite LTP × lock lot;{' '}
+                          Table of locks with row <strong>Buy</strong>/<strong>Sell</strong> — same as <strong>Manual trade</strong>.{' '}
                           <Link to="/instruments?tab=manual-trade">Open full tab</Link>.
                         </p>
                       }
@@ -6804,6 +6886,7 @@ export function KiteInstrumentsPage() {
                           Allocated legs — net P&amp;L (hypothetical)
                         </div>
                         <div style={{ height: 'min(14rem, 32vh)', minHeight: '11rem' }}>
+                          <ChartWithRightGutter>
                           <ResponsiveContainer width="100%" height="100%" debounce={50}>
                             <BarChart data={demoTodayLegsPnlChartRows} margin={{ top: 4, right: 8, left: 4, bottom: 4 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
@@ -6839,6 +6922,7 @@ export function KiteInstrumentsPage() {
                               </Bar>
                             </BarChart>
                           </ResponsiveContainer>
+                          </ChartWithRightGutter>
                         </div>
                       </div>
                     ) : null}
@@ -7259,7 +7343,8 @@ export function KiteInstrumentsPage() {
                                     className="border border-secondary-subtle rounded p-2 bg-body-tertiary"
                                     style={{ height: '14rem' }}
                                   >
-                                    <ResponsiveContainer width="100%" height="100%" debounce={50}>
+                                    <ChartWithRightGutter>
+                                      <ResponsiveContainer width="100%" height="100%" debounce={50}>
                                       <BarChart
                                         data={demoFullReportPnlChartRows}
                                         margin={{ top: 8, right: 8, left: 4, bottom: 4 }}
@@ -7299,6 +7384,7 @@ export function KiteInstrumentsPage() {
                                         </Bar>
                                       </BarChart>
                                     </ResponsiveContainer>
+                                    </ChartWithRightGutter>
                                   </div>
                                 </Col>
                                 <Col xs={12} lg={6}>
@@ -7307,6 +7393,7 @@ export function KiteInstrumentsPage() {
                                     className="border border-secondary-subtle rounded p-2 bg-body-tertiary"
                                     style={{ height: '14rem' }}
                                   >
+                                    <ChartWithRightGutter>
                                     <ResponsiveContainer width="100%" height="100%" debounce={50}>
                                       <LineChart
                                         data={demoFullReportPnlChartRows}
@@ -7340,6 +7427,7 @@ export function KiteInstrumentsPage() {
                                         />
                                       </LineChart>
                                     </ResponsiveContainer>
+                                    </ChartWithRightGutter>
                                   </div>
                                 </Col>
                               </Row>

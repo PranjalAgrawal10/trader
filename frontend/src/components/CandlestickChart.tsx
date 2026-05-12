@@ -1,4 +1,5 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { CHART_RIGHT_EDGE_GAP_FRACT } from '../constants/chartLayout'
 import type { ChartPointWithMaAndTrend } from '../utils/closeLinearTrend'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
@@ -145,7 +146,9 @@ export function CandlestickChart({
   const layout = useMemo(() => {
     if (data.length === 0 || w < 40 || h < 40) return null
 
-    const plotW = w - PAD.left - PAD.right
+    const rightGutterPx = w * CHART_RIGHT_EDGE_GAP_FRACT
+    const plotW = w - PAD.left - PAD.right - rightGutterPx
+    const plotRightX = PAD.left + plotW
     const plotH = h - PAD.top - PAD.bottom
     if (plotW < 10 || plotH < 10) return null
 
@@ -274,6 +277,7 @@ export function CandlestickChart({
       pathTrend,
       xTicks,
       plotBottomY,
+      plotRightX,
     }
   }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice])
 
@@ -303,7 +307,7 @@ export function CandlestickChart({
             <g key={tp}>
               <line
                 x1={PAD.left}
-                x2={w - PAD.right}
+                x2={layout.plotRightX}
                 y1={layout.yPrice(tp)}
                 y2={layout.yPrice(tp)}
                 stroke={CANDLE.grid}
@@ -437,7 +441,7 @@ export function CandlestickChart({
               <title>{`Live LTP ${formatChartLivePriceLabel(livePriceShown)}`}</title>
               <line
                 x1={PAD.left}
-                x2={w - PAD.right}
+                x2={layout.plotRightX}
                 y1={layout.yPrice(livePriceShown)}
                 y2={layout.yPrice(livePriceShown)}
                 stroke={LIVE_LTP_LINE}
@@ -446,7 +450,7 @@ export function CandlestickChart({
                 strokeLinecap="round"
               />
               <text
-                x={w - PAD.right - 4}
+                x={layout.plotRightX - 4}
                 y={layout.yPrice(livePriceShown) - 4}
                 fill={LIVE_LTP_LINE}
                 fontSize={10}
@@ -475,7 +479,7 @@ export function CandlestickChart({
           ) : null}
           <line
             x1={PAD.left}
-            x2={w - PAD.right}
+            x2={layout.plotRightX}
             y1={layout.plotBottomY}
             y2={layout.plotBottomY}
             stroke={CANDLE.grid}
@@ -528,7 +532,7 @@ export function CandlestickChart({
         <div
           className="position-absolute rounded border border-secondary py-1 px-2 shadow-sm"
           style={{
-            left: Math.min(Math.max(8, hover.tipX + 14), Math.max(8, w - 216)),
+            left: Math.min(Math.max(8, hover.tipX + 14), Math.max(8, layout.plotRightX - 24)),
             top: Math.max(8, hover.tipY - 8),
             maxWidth: 208,
             zIndex: 6,
