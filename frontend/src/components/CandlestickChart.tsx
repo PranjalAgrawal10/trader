@@ -13,8 +13,19 @@ import {
   SR_LINE_COLORS,
   SR_SWING_PERIOD,
 } from '../utils/movingAverages'
+import type { MlPredictionLogEntry } from '../utils/mlPredictionHistory'
+import { groupMlPredictionsByChartBarIndex, mlRefBarMarkersForVisibleChart } from '../utils/mlPredictionHistory'
 
-const PAD = { top: 6, right: 8, bottom: 34, left: 52 }
+const PAD = { top: 6, right: 8, left: 52 }
+
+/** Reserve space beneath time labels so price + volume both fit vertically. */
+const LABEL_BAND_PX = 24
+
+const VOL_PRICE_GAP_PX = 4
+
+/** Padding inside the volume histogram band (pixels). */
+const VOL_BAR_INSET_TOP = 4
+const VOL_BAR_INSET_BOTTOM = 2
 
 /** When zoomed to few bars, avoid stretching candles across the full plot — keep a max pitch and anchor the cluster to the right (latest on the right edge). */
 const MAX_CANDLE_SLOT_PX = 28
@@ -34,6 +45,13 @@ const LIVE_LTP_LINE = '#38bdf8'
 
 /** Latest demo paper BUY fill (when position open), distinct from live LTP. */
 const PAPER_LAST_BUY_LINE = '#f59e0b'
+
+/** Vertical markers for ML predictions at the reference candle (direction tint; dash = outcome). */
+const ML_REF = {
+  up: '#c084fc',
+  down: '#f472b6',
+  neutral: '#94a3b8',
+} as const
 
 function formatChartLivePriceLabel(p: number): string {
   if (!Number.isFinite(p)) return ''
@@ -133,6 +151,7 @@ export function CandlestickChart({
   livePrice = null,
   paperLastBuyPrice = null,
   paperBuyDataIndices = [],
+  mlPredictionEntries = [],
 }: {
   data: ChartPointWithMa[]
   maLineVisibility?: MaLineVisibility
@@ -144,6 +163,8 @@ export function CandlestickChart({
   paperLastBuyPrice?: number | null
   /** 0-based indices into <code>data</code>: vertical markers for OPEN demo paper buys (FIFO until sold). */
   paperBuyDataIndices?: readonly number[]
+  /** Classic + LightGBM price-direction rows; vertical markers at <code>refBarTime</code> matches. */
+  mlPredictionEntries?: readonly MlPredictionLogEntry[]
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
@@ -152,14 +173,48 @@ export function CandlestickChart({
     [data, maLineVisibility.showLinearCloseTrend],
   )
 
+  const mlMarkersOnChart = useMemo(
+    () => mlRefBarMarkersForVisibleChart(mlPredictionEntries, data),
+    [mlPredictionEntries, data],
+  )
+
+  const mlPredictionsByDataIndex = useMemo(
+    () => groupMlPredictionsByChartBarIndex(mlPredictionEntries, data),
+    [mlPredictionEntries, data],
+  )
+
   const layout = useMemo(() => {
     if (data.length === 0 || w < 40 || h < 40) return null
 
     const rightGutterPx = w * CHART_RIGHT_EDGE_GAP_FRACT
     const plotW = w - PAD.left - PAD.right - rightGutterPx
     const plotRightX = PAD.left + plotW
-    const plotH = h - PAD.top - PAD.bottom
-    if (plotW < 10 || plotH < 10) return null
+    const innerBottomY = h - LABEL_BAND_PX
+    if (plotW < 10 || innerBottomY < PAD.top + 70) return null
+
+    const MIN_PRICE_PANE_PX = 56
+    const MIN_VOL_PANE_PX = 28
+    const innerAvail = innerBottomY - PAD.top - VOL_PRICE_GAP_PX
+    let volPaneH = Math.max(
+      MIN_VOL_PANE_PX,
+      Math.min(88, Math.round(innerAvail * 0.195)),
+    )
+    let priceBottomY = innerBottomY - VOL_PRICE_GAP_PX - volPaneH
+    const priceTopY = PAD.top
+    let pricePlotH = priceBottomY - priceTopY
+    if (pricePlotH < MIN_PRICE_PANE_PX) {
+      volPaneH = Math.max(MIN_VOL_PANE_PX, innerAvail - VOL_PRICE_GAP_PX - MIN_PRICE_PANE_PX)
+      priceBottomY = innerBottomY - VOL_PRICE_GAP_PX - volPaneH
+      pricePlotH = priceBottomY - priceTopY
+    }
+    const volumeBottomY = innerBottomY
+    const volumeTopY = innerBottomY - volPaneH
+
+    let volMax = 0
+    for (const c of data) {
+      if (Number.isFinite(c.volume)) volMax = Math.max(volMax, c.volume)
+    }
+    volMax = Math.max(volMax, 1)
 
     let min = Infinity
     let max = -Infinity
@@ -235,7 +290,7 @@ export function CandlestickChart({
       max += pad
     }
 
-    const yPrice = (p: number) => PAD.top + ((max - p) / (max - min)) * plotH
+    const yPrice = (p: number) => priceTopY + ((max - p) / (max - min)) * pricePlotH
     const n = data.length
     const naturalSlotW = plotW / n
     let slotW = naturalSlotW
@@ -270,11 +325,16 @@ export function CandlestickChart({
       label: formatLocalDateTime(data[i].t),
     }))
 
-    const plotBottomY = PAD.top + plotH
+    const labelY = h - LABEL_BAND_PX + 13
 
     return {
       plotW,
-      plotH,
+      pricePlotH,
+      priceTopY,
+      priceBottomY,
+      volumeTopY,
+      volumeBottomY,
+      volMax,
       min,
       max,
       yPrice,
@@ -290,7 +350,7 @@ export function CandlestickChart({
       pathSrResistance,
       pathTrend,
       xTicks,
-      plotBottomY,
+      labelY,
       plotRightX,
     }
   }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice, paperLastBuyPrice])
@@ -320,7 +380,7 @@ export function CandlestickChart({
   return (
     <div ref={ref} className="w-100 h-100 position-relative">
       {layout ? (
-        <svg width={w} height={h} className="d-block" role="img" aria-label="OHLC candlestick chart with overlays and optional live last-price line">
+        <svg width={w} height={h} className="d-block" role="img" aria-label="OHLC candlestick chart with volume, overlays, and optional live last-price line">
           {yTicks.map((tp) => (
             <g key={tp}>
               <line
@@ -342,6 +402,43 @@ export function CandlestickChart({
               </text>
             </g>
           ))}
+
+          {data.map((c, i) => {
+            const cx = layout.clusterStartX + i * layout.slotW + layout.slotW / 2
+            const vn = Number.isFinite(c.volume) && c.volume >= 0 ? c.volume : 0
+            const vSpan =
+              layout.volumeBottomY - layout.volumeTopY - VOL_BAR_INSET_TOP - VOL_BAR_INSET_BOTTOM
+            const barFullH =
+              layout.volMax > 0 ? (vn / layout.volMax) * Math.max(vSpan, 1) : 0
+            const barH = Math.max(barFullH, vn > 0 ? 1.5 : 0)
+            const barTop =
+              vn > 0
+                ? layout.volumeBottomY - VOL_BAR_INSET_BOTTOM - barH
+                : layout.volumeBottomY - VOL_BAR_INSET_BOTTOM
+            const barW = Math.min(Math.max(1.5, layout.slotW * 0.54), 12)
+            const bullish = c.close >= c.open
+
+            return (
+              <rect
+                key={`vol-${c.t}-${c.idx}`}
+                x={cx - barW / 2}
+                y={barTop}
+                width={barW}
+                height={Math.max(barH, 0)}
+                fill={
+                  vn > 0
+                    ? bullish
+                      ? 'rgba(34, 197, 94, 0.68)'
+                      : 'rgba(239, 68, 68, 0.68)'
+                    : 'transparent'
+                }
+                stroke="transparent"
+                style={{ pointerEvents: 'none' }}
+              >
+                <title>{`Vol ${vn.toLocaleString()}`}</title>
+              </rect>
+            )
+          })}
 
           {data.map((c, i) => {
             const cx = layout.clusterStartX + i * layout.slotW + layout.slotW / 2
@@ -454,6 +551,45 @@ export function CandlestickChart({
               style={{ pointerEvents: 'none' }}
             />
           ) : null}
+          {mlMarkersOnChart.length > 0 && layout
+            ? mlMarkersOnChart.map((slot, k) => {
+                const idx = slot.dataIndex
+                if (idx < 0 || idx >= data.length) return null
+                const newest = [...slot.entries].sort(
+                  (a, b) => Date.parse(b.predictedAt) - Date.parse(a.predictedAt),
+                )[0]
+                const cx = layout.clusterStartX + idx * layout.slotW + layout.slotW / 2
+                const stroke =
+                  newest.direction === 'up'
+                    ? ML_REF.up
+                    : newest.direction === 'down'
+                      ? ML_REF.down
+                      : ML_REF.neutral
+                const dash =
+                  newest.outcome === 'pending' ? '6 5' : newest.outcome === 'wrong' ? '3 4' : undefined
+                const tip = slot.entries
+                  .map(
+                    (e) =>
+                      `${e.direction.toUpperCase()} ${e.confidence}% · ${e.outcome} · ${e.modelId} · ${formatLocalDateTime(e.predictedAt)}`,
+                  )
+                  .join('\n')
+                return (
+                  <g key={`ml-ref-${slot.rechartsX}-${k}`} style={{ pointerEvents: 'none' }}>
+                    <title>{`ML ref bar (${String(slot.entries.length)} prediction(s))\n${tip}`}</title>
+                    <line
+                      x1={cx}
+                      x2={cx}
+                      y1={layout.priceTopY}
+                      y2={layout.volumeBottomY}
+                      stroke={stroke}
+                      strokeWidth={2.35}
+                      strokeDasharray={dash}
+                      opacity={0.92}
+                    />
+                  </g>
+                )
+              })
+            : null}
           {paperBuyDataIndices.length > 0
             ? paperBuyDataIndices.map((di, k) => {
                 if (!layout || di < 0 || di >= data.length) return null
@@ -464,8 +600,8 @@ export function CandlestickChart({
                     <line
                       x1={cx}
                       x2={cx}
-                      y1={PAD.top}
-                      y2={layout.plotBottomY}
+                      y1={layout.priceTopY}
+                      y2={layout.volumeBottomY}
                       stroke="#84cc16"
                       strokeWidth={1.35}
                       strokeDasharray="5 5"
@@ -539,8 +675,8 @@ export function CandlestickChart({
             <line
               x1={layout.clusterStartX + hover.idx * layout.slotW + layout.slotW / 2}
               x2={layout.clusterStartX + hover.idx * layout.slotW + layout.slotW / 2}
-              y1={PAD.top}
-              y2={layout.plotBottomY}
+              y1={layout.priceTopY}
+              y2={layout.volumeBottomY}
               stroke="rgba(248, 249, 250, 0.35)"
               strokeWidth={1}
               pointerEvents="none"
@@ -549,17 +685,26 @@ export function CandlestickChart({
           <line
             x1={PAD.left}
             x2={layout.plotRightX}
-            y1={layout.plotBottomY}
-            y2={layout.plotBottomY}
+            y1={layout.priceBottomY}
+            y2={layout.priceBottomY}
             stroke={CANDLE.grid}
             strokeWidth={1}
             pointerEvents="none"
           />
+          <text
+            x={4}
+            y={layout.volumeTopY + 10}
+            fill={CANDLE.text}
+            fontSize={9}
+            style={{ userSelect: 'none' }}
+          >
+            Vol
+          </text>
           {layout.xTicks.map((xt) => (
             <text
               key={`xt-${xt.i}-${xt.label}`}
               x={xt.cx}
-              y={layout.plotBottomY + 14}
+              y={layout.labelY}
               fill={CANDLE.text}
               fontSize={9}
               textAnchor="middle"
@@ -570,9 +715,9 @@ export function CandlestickChart({
           ))}
           <rect
             x={PAD.left}
-            y={PAD.top}
+            y={layout.priceTopY}
             width={layout.plotW}
-            height={layout.plotH}
+            height={layout.volumeBottomY - layout.priceTopY}
             fill="transparent"
             style={{ cursor: 'crosshair' }}
             onMouseMove={(e) => {
@@ -659,6 +804,35 @@ export function CandlestickChart({
                     Trend LR {Number(trendSeries[hover.idx].trendLine).toFixed(4)}
                   </div>
                 ) : null}
+                {(() => {
+                  const preds = mlPredictionsByDataIndex.get(hover.idx)
+                  if (!preds?.length) return null
+                  const sorted = [...preds].sort(
+                    (a, b) => Date.parse(b.predictedAt) - Date.parse(a.predictedAt),
+                  )
+                  return (
+                    <div className="mt-2 pt-1 border-top border-secondary border-opacity-50">
+                      <div className="text-white-50 small mb-1">ML predictions (ref bar)</div>
+                      {sorted.map((e) => (
+                        <div key={e.id} className="font-monospace" style={{ fontSize: '0.68rem', lineHeight: 1.4 }}>
+                          <span
+                            className={
+                              e.direction === 'up'
+                                ? 'text-success'
+                                : e.direction === 'down'
+                                  ? 'text-danger'
+                                  : 'text-secondary'
+                            }
+                          >
+                            {e.direction.toUpperCase()}
+                          </span>{' '}
+                          {e.confidence}% · {e.outcome} ·{' '}
+                          <span className="text-secondary">{e.modelId}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
               </>
             )
           })()}
@@ -688,6 +862,9 @@ export function CandlestickChart({
             if (maLineVisibility.showSupportResistance) {
               items.push({ key: 'srs', label: `S${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.support })
               items.push({ key: 'srr', label: `R${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.resistance })
+            }
+            if (mlPredictionEntries.length > 0) {
+              items.push({ key: 'mlref', label: 'ML ref', color: ML_REF.up })
             }
             return items.map((item, i) => (
               <Fragment key={item.key}>

@@ -155,6 +155,45 @@ function barTimesMatch(chartT: string, entryRefT: string): boolean {
   return !Number.isNaN(a) && !Number.isNaN(b) && a === b
 }
 
+/** Group prediction rows by the candle index whose open time matches <code>refBarTime</code> in the visible series. */
+export function groupMlPredictionsByChartBarIndex(
+  entries: readonly MlPredictionLogEntry[],
+  chartData: readonly { t: string }[],
+): Map<number, MlPredictionLogEntry[]> {
+  const m = new Map<number, MlPredictionLogEntry[]>()
+  for (const e of entries) {
+    const i = chartData.findIndex((p) => barTimesMatch(p.t, e.refBarTime))
+    if (i < 0) continue
+    const cur = m.get(i)
+    if (cur) cur.push(e)
+    else m.set(i, [e])
+  }
+  return m
+}
+
+export type MlRefBarChartMarker = {
+  dataIndex: number
+  /** <code>ChartPointWithMa.idx</code> for Recharts X when the same window is used. */
+  rechartsX: number
+  entries: readonly MlPredictionLogEntry[]
+}
+
+/** Markers for every chart bar that has at least one ML prediction (classic + LightGBM rows). */
+export function mlRefBarMarkersForVisibleChart(
+  entries: readonly MlPredictionLogEntry[],
+  chartData: readonly ChartPointWithMa[],
+): MlRefBarChartMarker[] {
+  const grouped = groupMlPredictionsByChartBarIndex(entries, chartData)
+  const out: MlRefBarChartMarker[] = []
+  for (const [di, list] of grouped) {
+    const pt = chartData[di]
+    if (!pt) continue
+    out.push({ dataIndex: di, rechartsX: pt.idx, entries: list })
+  }
+  out.sort((a, b) => a.rechartsX - b.rechartsX)
+  return out
+}
+
 /** Compare predicted next-bar direction vs following candle close vs ref close. */
 export function resolveMlEntry(entry: MlPredictionLogEntry, series: ChartPointWithMa[]): MlPredictionLogEntry {
   if (entry.outcome !== 'pending') return entry
