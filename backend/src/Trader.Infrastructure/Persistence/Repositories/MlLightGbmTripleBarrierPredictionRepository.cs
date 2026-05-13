@@ -103,13 +103,16 @@ public sealed class MlLightGbmTripleBarrierPredictionRepository : IMlLightGbmTri
             join f in _db.KiteFavoriteInstruments.AsNoTracking()
                 on new { p.UserId, Token = p.InstrumentToken } equals new { f.UserId, Token = f.InstrumentToken } into fav
             from f in fav.DefaultIfEmpty()
+            join lk in _db.KiteTradingLockInstruments.AsNoTracking()
+                on new { p.UserId, Token = p.InstrumentToken } equals new { lk.UserId, Token = lk.InstrumentToken } into lkJoin
+            from lk in lkJoin.DefaultIfEmpty()
             orderby p.PredictedAtUtc descending
             select new MlAutomationPredictionListItemDto(
                 p.Id,
                 p.PredictedAtUtc,
                 p.InstrumentToken,
-                f == null ? null : f.Tradingsymbol,
-                f == null ? null : f.Exchange,
+                f != null ? f.Tradingsymbol : lk != null ? lk.Tradingsymbol : null,
+                f != null ? f.Exchange : lk != null ? lk.Exchange : null,
                 p.Interval,
                 p.RefBarTimeUtc,
                 p.RefClose,

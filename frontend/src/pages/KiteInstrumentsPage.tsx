@@ -4928,13 +4928,18 @@ export function KiteInstrumentsPage() {
 
   const tradingLockKeySet = useMemo(() => new Set(tradingLocks.map(favoriteRowKey)), [tradingLocks])
 
+  /** Favorites + trading locks keyed by instrument token — used when automation rows omit symbol (e.g. MCX crude). */
   const favoriteByInstrumentToken = useMemo(() => {
     const m = new Map<string, KiteInstrumentRow>()
     for (const row of favorites) {
       if (row.instrumentToken) m.set(row.instrumentToken, row)
     }
+    for (const row of tradingLocks) {
+      const t = row.instrumentToken?.trim()
+      if (t && !m.has(t)) m.set(t, row)
+    }
     return m
-  }, [favorites])
+  }, [favorites, tradingLocks])
 
   const toggleFavorite = useCallback(
     async (r: KiteInstrumentRow) => {
