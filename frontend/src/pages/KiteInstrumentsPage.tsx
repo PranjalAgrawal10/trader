@@ -54,6 +54,7 @@ import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { InstrumentPriceChart } from '../components/InstrumentPriceChart'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
+import { useChartPanPointerHandlers } from '../hooks/useChartPanPointerHandlers'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import type { MarketTickBatchItem } from '../services/marketHub'
 import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
@@ -61,6 +62,7 @@ import type { ChartPointOhlc, ChartIntervalKey, LiveTickVolumeAccumulator } from
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
   CHART_ZOOM_MIN_BARS,
+  clampChartPanOffsetBars,
   sliceChartForZoom,
   zoomInBarCount,
   zoomOutBarCount,
@@ -1598,7 +1600,7 @@ function ChartZoomControls({
       </ButtonGroup>
       {zoomed ? (
         <span className="small text-muted" style={{ fontSize: compact ? '0.7rem' : undefined }}>
-          {visibleBarCount} / {totalBars} bars
+          {visibleBarCount} / {totalBars} bars · drag chart to pan
         </span>
       ) : null}
       {refreshBtn}
@@ -3448,6 +3450,7 @@ function CompactPriceChart({
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
   const [mlPredictionOverlayEntries, setMlPredictionOverlayEntries] = useState<readonly MlPredictionLogEntry[]>([])
+  const [chartPanOffsetBars, setChartPanOffsetBars] = useState(0)
   const fetchCtxRef = useRef<{
     token: string | null
     interval: ChartInterval | null
@@ -3547,7 +3550,35 @@ function CompactPriceChart({
     [tickMergedSeries, customEmaApplied],
   )
 
-  const chartData = useMemo(() => sliceChartForZoom(seriesWithCustom, zoomVisibleBars), [seriesWithCustom, zoomVisibleBars])
+  useEffect(() => {
+    setChartPanOffsetBars(0)
+  }, [zoomVisibleBars, row.instrumentToken])
+
+  useEffect(() => {
+    setChartPanOffsetBars((p) =>
+      clampChartPanOffsetBars(p, seriesWithCustom.length, zoomVisibleBars),
+    )
+  }, [seriesWithCustom.length, zoomVisibleBars])
+
+  const chartPanEnabled =
+    zoomVisibleBars != null &&
+    seriesWithCustom.length > zoomVisibleBars &&
+    seriesWithCustom.length > 1
+
+  const { panPointerProps } = useChartPanPointerHandlers({
+    enabled: chartPanEnabled,
+    totalBars: seriesWithCustom.length,
+    visibleBarCount: zoomVisibleBars,
+    panOffsetBars: chartPanOffsetBars,
+    setPanOffsetBars: setChartPanOffsetBars,
+  })
+
+  const { style: chartPanPointerStyle, ...chartPanPointerHandlers } = panPointerProps
+
+  const chartData = useMemo(
+    () => sliceChartForZoom(seriesWithCustom, zoomVisibleBars, chartPanOffsetBars),
+    [seriesWithCustom, zoomVisibleBars, chartPanOffsetBars],
+  )
 
   const paperBuyDataIndices = useMemo(
     () =>
@@ -3704,7 +3735,9 @@ function CompactPriceChart({
               height: fullscreenActive ? '100%' : heightPx,
               flex: fullscreenActive ? '1 1 auto' : undefined,
               minHeight: fullscreenActive ? 0 : undefined,
+              ...chartPanPointerStyle,
             }}
+            {...chartPanPointerHandlers}
           >
             <InstrumentPriceChart
               graphType={graphType}
@@ -4104,6 +4137,7 @@ function InstrumentChartCard({
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
   const [mlPredictionOverlayEntries, setMlPredictionOverlayEntries] = useState<readonly MlPredictionLogEntry[]>([])
+  const [chartPanOffsetBars, setChartPanOffsetBars] = useState(0)
   const chartFetchCtxRef = useRef<{
     token: string | null
     interval: ChartInterval | null
@@ -4206,12 +4240,40 @@ function InstrumentChartCard({
   )
 
   useEffect(() => {
+    setChartPanOffsetBars(0)
+  }, [zoomVisibleBars, selection?.instrumentToken])
+
+  useEffect(() => {
+    setChartPanOffsetBars((p) =>
+      clampChartPanOffsetBars(p, displayWithMa.length, zoomVisibleBars),
+    )
+  }, [displayWithMa.length, zoomVisibleBars])
+
+  useEffect(() => {
     if (zoomVisibleBars != null && displayWithMa.length > 0 && zoomVisibleBars > displayWithMa.length) {
       onZoomVisibleBarsChange(null)
     }
   }, [displayWithMa.length, zoomVisibleBars, onZoomVisibleBarsChange])
 
-  const chartData = useMemo(() => sliceChartForZoom(displayWithMa, zoomVisibleBars), [displayWithMa, zoomVisibleBars])
+  const chartPanEnabled =
+    zoomVisibleBars != null &&
+    displayWithMa.length > zoomVisibleBars &&
+    displayWithMa.length > 1
+
+  const { panPointerProps: browsePanPointerProps } = useChartPanPointerHandlers({
+    enabled: chartPanEnabled,
+    totalBars: displayWithMa.length,
+    visibleBarCount: zoomVisibleBars,
+    panOffsetBars: chartPanOffsetBars,
+    setPanOffsetBars: setChartPanOffsetBars,
+  })
+
+  const { style: browseChartPanPointerStyle, ...browseChartPanPointerHandlers } = browsePanPointerProps
+
+  const chartData = useMemo(
+    () => sliceChartForZoom(displayWithMa, zoomVisibleBars, chartPanOffsetBars),
+    [displayWithMa, zoomVisibleBars, chartPanOffsetBars],
+  )
 
   const browsePaperBuyDataIndices = useMemo(
     () =>
@@ -4427,7 +4489,9 @@ function InstrumentChartCard({
                     height: fullscreenActive ? '100%' : '18rem',
                     flex: fullscreenActive ? '1 1 auto' : undefined,
                     minHeight: fullscreenActive ? 0 : undefined,
+                    ...browseChartPanPointerStyle,
                   }}
+                  {...browseChartPanPointerHandlers}
                 >
                   <InstrumentPriceChart
                     graphType={graphType}

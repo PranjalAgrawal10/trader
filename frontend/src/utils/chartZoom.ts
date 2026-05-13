@@ -6,12 +6,39 @@ export const CHART_ZOOM_MIN_BARS = 1
 const ZOOM_IN_RATIO = 0.55
 const ZOOM_OUT_RATIO = 1 / ZOOM_IN_RATIO
 
-export function sliceChartForZoom<T extends ChartPointOhlc>(points: T[], visibleBarCount: number | null): T[] {
+/** How far the zoom window can slide left (into older bars). {@link sliceChartForZoom} clamps {@link panOffsetBars} to this range. */
+export function maxChartPanOffsetBars(totalBars: number, visibleBarCount: number | null): number {
+  if (totalBars <= 0 || visibleBarCount == null || totalBars <= visibleBarCount) return 0
+  return totalBars - visibleBarCount
+}
+
+export function clampChartPanOffsetBars(
+  panOffsetBars: number,
+  totalBars: number,
+  visibleBarCount: number | null,
+): number {
+  const m = maxChartPanOffsetBars(totalBars, visibleBarCount)
+  return Math.min(Math.max(0, panOffsetBars), m)
+}
+
+/**
+ * When zoomed, shows a sliding window of {@link visibleBarCount} bars. {@link panOffsetBars} moves the window left
+ * (older): 0 = anchored to the latest bar; max = oldest possible window.
+ */
+export function sliceChartForZoom<T extends ChartPointOhlc>(
+  points: T[],
+  visibleBarCount: number | null,
+  panOffsetBars = 0,
+): T[] {
   if (points.length === 0) return points
-  const slice =
-    visibleBarCount == null || points.length <= visibleBarCount
-      ? points
-      : points.slice(-visibleBarCount)
+  const total = points.length
+  if (visibleBarCount == null || total <= visibleBarCount) {
+    return points.map((p, i) => ({ ...p, idx: i + 1 }))
+  }
+  const pan = clampChartPanOffsetBars(panOffsetBars, total, visibleBarCount)
+  const end = total - pan
+  const start = end - visibleBarCount
+  const slice = points.slice(Math.max(0, start), end)
   return slice.map((p, i) => ({ ...p, idx: i + 1 }))
 }
 
