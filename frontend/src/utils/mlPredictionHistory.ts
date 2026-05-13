@@ -171,29 +171,6 @@ export function groupMlPredictionsByChartBarIndex(
   return m
 }
 
-export type MlRefBarChartMarker = {
-  dataIndex: number
-  /** <code>ChartPointWithMa.idx</code> for Recharts X when the same window is used. */
-  rechartsX: number
-  entries: readonly MlPredictionLogEntry[]
-}
-
-/** Markers for every chart bar that has at least one ML prediction (classic + LightGBM rows). */
-export function mlRefBarMarkersForVisibleChart(
-  entries: readonly MlPredictionLogEntry[],
-  chartData: readonly ChartPointWithMa[],
-): MlRefBarChartMarker[] {
-  const grouped = groupMlPredictionsByChartBarIndex(entries, chartData)
-  const out: MlRefBarChartMarker[] = []
-  for (const [di, list] of grouped) {
-    const pt = chartData[di]
-    if (!pt) continue
-    out.push({ dataIndex: di, rechartsX: pt.idx, entries: list })
-  }
-  out.sort((a, b) => a.rechartsX - b.rechartsX)
-  return out
-}
-
 /**
  * Predictions whose <strong>next bar</strong> is the candle at <paramref name="sliceIndex"/>
  * (resolved <c>nextBarTime</c> match), plus <strong>pending</strong> rows whose ref bar is the previous candle
@@ -240,14 +217,19 @@ export function mapMlPredictionsPerTargetBar(
   return m
 }
 
-/** On-chart label: only next-bar directions, e.g. <c>(up, down, neutral)</c>. Stable order by <c>modelId</c>. */
-export function formatMlTargetBarRibbon(entries: readonly MlPredictionLogEntry[]): string | null {
-  if (entries.length === 0) return null
-  const sorted = [...entries].sort((a, b) => {
+/** Same ordering as {@link formatMlTargetBarRibbon}: <code>modelId</code> then <code>predictedAt</code>. */
+export function sortMlRibbonEntries(entries: readonly MlPredictionLogEntry[]): MlPredictionLogEntry[] {
+  return [...entries].sort((a, b) => {
     const c = a.modelId.localeCompare(b.modelId, undefined, { sensitivity: 'base' })
     if (c !== 0) return c
     return a.predictedAt.localeCompare(b.predictedAt)
   })
+}
+
+/** Plain-text on-chart / accessibility label: next-bar directions only, e.g. <c>(up, down, neutral)</c>. */
+export function formatMlTargetBarRibbon(entries: readonly MlPredictionLogEntry[]): string | null {
+  if (entries.length === 0) return null
+  const sorted = sortMlRibbonEntries(entries)
   return `(${sorted.map((e) => e.direction).join(', ')})`
 }
 

@@ -55,6 +55,7 @@ import { Layout } from '../components/Layout'
 import { ManualTradeScalperView } from '../components/ManualTradeScalperView'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { CandlestickChart } from '../components/CandlestickChart'
+import { MlDirectionRibbonSvg } from '../components/MlDirectionRibbon'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
@@ -70,12 +71,10 @@ import {
 } from '../utils/chartZoom'
 import {
   appendMlPrediction,
-  formatMlTargetBarRibbon,
   historiesEqual,
   historyItemsFromApi,
   loadMlHistory,
   mapMlPredictionsPerTargetBar,
-  mlRefBarMarkersForVisibleChart,
   ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID,
   resolveMlHistory,
   saveMlHistory,
@@ -1808,27 +1807,11 @@ function MlTargetBarPredictionLabelList({
     ({ x, y, index }: { x?: number; y?: number; index?: number }) => {
       if (typeof index !== 'number' || x == null || y == null) return null
       const preds = labelMap.get(index)
-      const text = preds ? formatMlTargetBarRibbon(preds) : null
-      if (!text || !preds?.length) return null
-      return (
-        <text
-          x={x}
-          y={y - 10}
-          fill="#cbd5e1"
-          textAnchor="middle"
-          fontSize={8}
-          fontWeight={600}
-          fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, monospace"
-          style={{
-            pointerEvents: 'none',
-            filter:
-              'drop-shadow(1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(-1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(0 1px 0 rgb(33 37 41 / 90%))',
-          }}
-        >
-          <title>{text}</title>
-          {text}
-        </text>
-      )
+      if (!preds?.length) return null
+      const iconPx = 9
+      const fh = Math.round(iconPx + 6)
+      const yTop = y - 10 - fh
+      return <MlDirectionRibbonSvg cx={x} yTop={yTop} entries={preds} iconPx={iconPx} />
     },
     [labelMap],
   )
@@ -3853,34 +3836,6 @@ function CompactPriceChart({
     })
   }, [paperBuyDataIndices, chartData, row.instrumentToken])
 
-  const mlPredictionReferenceLines = useMemo(() => {
-    if (mlPredictionOverlayEntries.length === 0) return null
-    const markers = mlRefBarMarkersForVisibleChart(mlPredictionOverlayEntries, chartData)
-    return markers.map((m, seg) => {
-      const newest = [...m.entries].sort(
-        (a, b) => Date.parse(b.predictedAt) - Date.parse(a.predictedAt),
-      )[0]
-      const stroke =
-        newest.direction === 'up'
-          ? '#c084fc'
-          : newest.direction === 'down'
-            ? '#f472b6'
-            : '#94a3b8'
-      const strokeDasharray =
-        newest.outcome === 'pending' ? '6 5' : newest.outcome === 'wrong' ? '3 4' : undefined
-      return (
-        <ReferenceLine
-          key={`ml-pred-${row.instrumentToken}-${m.rechartsX}-${seg}`}
-          x={m.rechartsX}
-          stroke={stroke}
-          strokeWidth={2.25}
-          strokeDasharray={strokeDasharray}
-          opacity={0.92}
-        />
-      )
-    })
-  }, [mlPredictionOverlayEntries, chartData, row.instrumentToken])
-
   const paperLastBuyReferenceLine =
     paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice) ? (
       <ReferenceLine
@@ -4062,7 +4017,6 @@ function CompactPriceChart({
                               </Line>
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                               {paperBuyReferenceLines}
-                              {mlPredictionReferenceLines}
                               {paperLastBuyReferenceLine}
                             </LineChart>
                           ) : (
@@ -4092,7 +4046,6 @@ function CompactPriceChart({
                               </Bar>
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                               {paperBuyReferenceLines}
-                              {mlPredictionReferenceLines}
                               {paperLastBuyReferenceLine}
                             </ComposedChart>
                           )}
@@ -4606,35 +4559,6 @@ function InstrumentChartCard({
     })
   }, [browsePaperBuyDataIndices, chartData, selection?.instrumentToken])
 
-  const browseMlPredictionReferenceLines = useMemo(() => {
-    if (mlPredictionOverlayEntries.length === 0) return null
-    const markers = mlRefBarMarkersForVisibleChart(mlPredictionOverlayEntries, chartData)
-    const tok = selection?.instrumentToken ?? 'na'
-    return markers.map((m, seg) => {
-      const newest = [...m.entries].sort(
-        (a, b) => Date.parse(b.predictedAt) - Date.parse(a.predictedAt),
-      )[0]
-      const stroke =
-        newest.direction === 'up'
-          ? '#c084fc'
-          : newest.direction === 'down'
-            ? '#f472b6'
-            : '#94a3b8'
-      const strokeDasharray =
-        newest.outcome === 'pending' ? '6 5' : newest.outcome === 'wrong' ? '3 4' : undefined
-      return (
-        <ReferenceLine
-          key={`ml-pred-${tok}-${m.rechartsX}-${seg}`}
-          x={m.rechartsX}
-          stroke={stroke}
-          strokeWidth={2.25}
-          strokeDasharray={strokeDasharray}
-          opacity={0.92}
-        />
-      )
-    })
-  }, [mlPredictionOverlayEntries, chartData, selection?.instrumentToken])
-
   const rechartsYDomain = useMemo(() => {
     let d = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     d = extendYDomainWithLivePrice(d, liveLastPrice)
@@ -4875,7 +4799,6 @@ function InstrumentChartCard({
                                     </Line>
                                     <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                                     {browsePaperBuyReferenceLines}
-                                    {browseMlPredictionReferenceLines}
                                     {paperLastBuyReferenceLine}
                                     {liveLtpReferenceLine}
                                   </LineChart>
@@ -4908,7 +4831,6 @@ function InstrumentChartCard({
                                     </Bar>
                                     <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                                     {browsePaperBuyReferenceLines}
-                                    {browseMlPredictionReferenceLines}
                                     {paperLastBuyReferenceLine}
                                     {liveLtpReferenceLine}
                                   </ComposedChart>
@@ -4936,9 +4858,9 @@ function InstrumentChartCard({
               <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> lots); an{' '}
               <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold lots.{' '}
               <strong>ML next-bar bias</strong>{' '}
-              shows as <span className="font-monospace text-body-secondary">(up, up, down)</span> tuples above bars—the listed directions are the next-interval calls from each model for{' '}
-              <em>that candle&apos;s interval</em>; tinted verticals mark each prediction&apos;s{' '}
-              <strong>ref bar</strong>. Hover a candle or use the <strong>ML history</strong> panel for full rows. Calls{' '}
+              shows above bars as parentheses with Font Awesome arrows—green for <strong>up</strong> and red for <strong>down</strong>
+              —one icon per model’s next-interval call for <em>that candle&apos;s interval</em>. Hover a candle or use the{' '}
+              <strong>ML history</strong> panel for full rows. Calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
               <span className="font-monospace">model</span> query (see{' '}
               <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.

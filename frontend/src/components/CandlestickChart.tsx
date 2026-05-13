@@ -13,13 +13,9 @@ import {
   SR_LINE_COLORS,
   SR_SWING_PERIOD,
 } from '../utils/movingAverages'
+import { MlDirectionRibbonHtml, MlDirectionRibbonSvg } from './MlDirectionRibbon'
 import type { MlPredictionLogEntry } from '../utils/mlPredictionHistory'
-import {
-  formatMlTargetBarRibbon,
-  groupMlPredictionsByChartBarIndex,
-  mapMlPredictionsPerTargetBar,
-  mlRefBarMarkersForVisibleChart,
-} from '../utils/mlPredictionHistory'
+import { groupMlPredictionsByChartBarIndex, mapMlPredictionsPerTargetBar } from '../utils/mlPredictionHistory'
 
 const PAD = { top: 6, right: 8, left: 52 }
 
@@ -50,13 +46,6 @@ const LIVE_LTP_LINE = '#38bdf8'
 
 /** Latest demo paper BUY fill (when position open), distinct from live LTP. */
 const PAPER_LAST_BUY_LINE = '#f59e0b'
-
-/** Vertical markers for ML predictions at the reference candle (direction tint; dash = outcome). */
-const ML_REF = {
-  up: '#c084fc',
-  down: '#f472b6',
-  neutral: '#94a3b8',
-} as const
 
 function formatChartLivePriceLabel(p: number): string {
   if (!Number.isFinite(p)) return ''
@@ -168,7 +157,7 @@ export function CandlestickChart({
   paperLastBuyPrice?: number | null
   /** 0-based indices into <code>data</code>: vertical markers for OPEN demo paper buys (FIFO until sold). */
   paperBuyDataIndices?: readonly number[]
-  /** Classic + LightGBM price-direction rows; vertical markers at <code>refBarTime</code> matches. */
+  /** Classic + LightGBM price-direction rows; ribbons above bars where predictions target that interval. */
   mlPredictionEntries?: readonly MlPredictionLogEntry[]
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
@@ -176,11 +165,6 @@ export function CandlestickChart({
   const trendSeries = useMemo(
     () => (maLineVisibility.showLinearCloseTrend ? attachLinearTrendToChartPoints(data) : null),
     [data, maLineVisibility.showLinearCloseTrend],
-  )
-
-  const mlMarkersOnChart = useMemo(
-    () => mlRefBarMarkersForVisibleChart(mlPredictionEntries, data),
-    [mlPredictionEntries, data],
   )
 
   const mlPredictionsByDataIndex = useMemo(
@@ -566,68 +550,19 @@ export function CandlestickChart({
             ? data.map((c, i) => {
                 const preds = mlTargetBySliceIndex.get(i)
                 if (!preds?.length) return null
-                const ribbon = formatMlTargetBarRibbon(preds)
-                if (!ribbon) return null
                 const cx = layout.clusterStartX + i * layout.slotW + layout.slotW / 2
                 const yHi = layout.yPrice(c.high)
                 const yy = Math.max(layout.priceTopY + 7, yHi - 10)
-                const fill = '#cbd5e1'
-
+                const iconPx = Math.min(12, Math.max(8, layout.slotW * 0.38))
+                const fh = Math.round(iconPx + 6)
                 return (
-                  <g key={`ml-tgt-${c.t}-${c.idx}`} style={{ pointerEvents: 'none' }}>
-                    <title>{ribbon}</title>
-                    <text
-                      x={cx}
-                      y={yy}
-                      textAnchor="middle"
-                      dominantBaseline="auto"
-                      fill={fill}
-                      fontSize={Math.min(9, Math.max(6, layout.slotW * 0.35))}
-                      fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, monospace"
-                      fontWeight={600}
-                      style={{
-                        userSelect: 'none',
-                        filter:
-                          'drop-shadow(1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(-1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(0 1px 0 rgb(33 37 41 / 90%))',
-                      }}
-                    >
-                      {ribbon}
-                    </text>
-                  </g>
-                )
-              })
-            : null}
-          {mlMarkersOnChart.length > 0 && layout
-            ? mlMarkersOnChart.map((slot, k) => {
-                const idx = slot.dataIndex
-                if (idx < 0 || idx >= data.length) return null
-                const newest = [...slot.entries].sort(
-                  (a, b) => Date.parse(b.predictedAt) - Date.parse(a.predictedAt),
-                )[0]
-                const cx = layout.clusterStartX + idx * layout.slotW + layout.slotW / 2
-                const stroke =
-                  newest.direction === 'up'
-                    ? ML_REF.up
-                    : newest.direction === 'down'
-                      ? ML_REF.down
-                      : ML_REF.neutral
-                const dash =
-                  newest.outcome === 'pending' ? '6 5' : newest.outcome === 'wrong' ? '3 4' : undefined
-                const ribbon = formatMlTargetBarRibbon(slot.entries)
-                return (
-                  <g key={`ml-ref-${slot.rechartsX}-${k}`} style={{ pointerEvents: 'none' }}>
-                    <title>{ribbon ?? ''}</title>
-                    <line
-                      x1={cx}
-                      x2={cx}
-                      y1={layout.priceTopY}
-                      y2={layout.volumeBottomY}
-                      stroke={stroke}
-                      strokeWidth={2.35}
-                      strokeDasharray={dash}
-                      opacity={0.92}
-                    />
-                  </g>
+                  <MlDirectionRibbonSvg
+                    key={`ml-tgt-${c.t}-${c.idx}`}
+                    cx={cx}
+                    yTop={yy - fh}
+                    entries={preds}
+                    iconPx={iconPx}
+                  />
                 )
               })
             : null}
@@ -848,13 +783,16 @@ export function CandlestickChart({
                 {(() => {
                   const refPreds = mlPredictionsByDataIndex.get(hover.idx)
                   const tgtPreds = mlTargetBySliceIndex.get(hover.idx)
-                  const refFmt = refPreds?.length ? formatMlTargetBarRibbon(refPreds) : null
-                  const tgtFmt = tgtPreds?.length ? formatMlTargetBarRibbon(tgtPreds) : null
-                  if (!refFmt && !tgtFmt) return null
+                  if ((!refPreds || refPreds.length === 0) && (!tgtPreds || tgtPreds.length === 0))
+                    return null
                   return (
-                    <div className="mt-2 pt-1 border-top border-secondary border-opacity-50 font-monospace text-secondary">
-                      {refFmt ? <div style={{ fontSize: '0.72rem' }}>{refFmt}</div> : null}
-                      {tgtFmt ? <div style={{ fontSize: '0.72rem' }}>{tgtFmt}</div> : null}
+                    <div className="mt-2 pt-1 border-top border-secondary border-opacity-50 d-flex flex-column gap-1 align-items-start">
+                      {refPreds && refPreds.length > 0 ? (
+                        <MlDirectionRibbonHtml entries={refPreds} iconPx={11} />
+                      ) : null}
+                      {tgtPreds && tgtPreds.length > 0 ? (
+                        <MlDirectionRibbonHtml entries={tgtPreds} iconPx={11} />
+                      ) : null}
                     </div>
                   )
                 })()}
@@ -887,9 +825,6 @@ export function CandlestickChart({
             if (maLineVisibility.showSupportResistance) {
               items.push({ key: 'srs', label: `S${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.support })
               items.push({ key: 'srr', label: `R${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.resistance })
-            }
-            if (mlPredictionEntries.length > 0) {
-              items.push({ key: 'mlref', label: 'ML ref', color: ML_REF.up })
             }
             return items.map((item, i) => (
               <Fragment key={item.key}>
