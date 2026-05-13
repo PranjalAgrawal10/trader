@@ -7,6 +7,18 @@ export const CHART_RIGHT_EDGE_GAP_FRACT = 0.05
 /** Max horizontal spacing per OHLC candle when clustering (zoomed views). */
 export const CHART_CANDLE_MAX_SLOT_PX = 28
 
+/**
+ * TradingView LW `timeScale.minBarSpacing`: lower bound on bar spacing (zooming out cannot pack candles tighter than this).
+ * Keeps bodies/gaps readable; must be less than {@link CHART_LW_MAX_BAR_SPACING_PX}.
+ */
+export const CHART_LW_MIN_BAR_SPACING_PX = 3
+
+/**
+ * TradingView LW `timeScale.maxBarSpacing`: upper bound on bar spacing (zooming in cannot exceed this).
+ * Avoids a few giant candles; use `0`-style “unlimited” only if you omit this from chart options.
+ */
+export const CHART_LW_MAX_BAR_SPACING_PX = 48
+
 /** Default number of newest candles shown initially (LW pan reveals the rest locally; pan left triggers older fetch). */
 export const CHART_DEFAULT_VISIBLE_BARS = 24
 

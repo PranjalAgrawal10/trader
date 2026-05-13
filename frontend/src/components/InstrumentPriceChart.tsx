@@ -29,6 +29,8 @@ import type { UTCTimestamp } from 'lightweight-charts'
 import {
   CHART_DEFAULT_VISIBLE_BARS,
   CHART_LOAD_OLDER_VISIBLE_THRESHOLD,
+  CHART_LW_MAX_BAR_SPACING_PX,
+  CHART_LW_MIN_BAR_SPACING_PX,
 } from '../constants/chartLayout'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 import type { ChartPointWithMaAndTrend } from '../utils/closeLinearTrend'
@@ -208,6 +210,8 @@ function lwChartOptions(bg: string, showScales: boolean) {
       borderVisible: showScales,
       timeVisible: true,
       secondsVisible: false,
+      minBarSpacing: CHART_LW_MIN_BAR_SPACING_PX,
+      maxBarSpacing: CHART_LW_MAX_BAR_SPACING_PX,
     },
     crosshair: {
       mode: CrosshairMode.MagnetOHLC,
