@@ -134,7 +134,7 @@ const ML_MARKER_COL = {
   neutral: '#f59e0b',
 } as const
 
-const ML_MARKER_SIZE = 0.85
+const ML_MARKER_SIZE = 0.25
 
 /** Stack markers vertically in price space so every model prediction stays visible above the candle. */
 function mlMarkerStackHigh(bar: ChartPointWithMa, stackIndex: number): number {
