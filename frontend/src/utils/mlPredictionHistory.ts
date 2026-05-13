@@ -240,14 +240,15 @@ export function mapMlPredictionsPerTargetBar(
   return m
 }
 
-/** Short on-chart caption (newest row first; <c>+n</c> when multiple models). */
+/** On-chart label: only next-bar directions, e.g. <c>(up, down, neutral)</c>. Stable order by <c>modelId</c>. */
 export function formatMlTargetBarRibbon(entries: readonly MlPredictionLogEntry[]): string | null {
   if (entries.length === 0) return null
-  const sorted = sortByPredictedAtNewestFirst([...entries])
-  const p = sorted[0]
-  const arrow = p.direction === 'up' ? '\u2191' : p.direction === 'down' ? '\u2193' : '\u00b7'
-  const extra = sorted.length > 1 ? `+${sorted.length - 1}` : ''
-  return `${arrow}${p.confidence}%${extra}`
+  const sorted = [...entries].sort((a, b) => {
+    const c = a.modelId.localeCompare(b.modelId, undefined, { sensitivity: 'base' })
+    if (c !== 0) return c
+    return a.predictedAt.localeCompare(b.predictedAt)
+  })
+  return `(${sorted.map((e) => e.direction).join(', ')})`
 }
 
 /** Compare predicted next-bar direction vs following candle close vs ref close. */

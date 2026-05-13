@@ -571,32 +571,20 @@ export function CandlestickChart({
                 const cx = layout.clusterStartX + i * layout.slotW + layout.slotW / 2
                 const yHi = layout.yPrice(c.high)
                 const yy = Math.max(layout.priceTopY + 7, yHi - 10)
-                const primary = preds[0]
-                const fill =
-                  primary.direction === 'up'
-                    ? '#bbf7d0'
-                    : primary.direction === 'down'
-                      ? '#fecaca'
-                      : '#cbd5e1'
-                const detail = preds
-                  .map(
-                    (e) =>
-                      `${e.direction.toUpperCase()} ${e.confidence}% · ${e.outcome} · ${e.modelId}`,
-                  )
-                  .join('\n')
+                const fill = '#cbd5e1'
 
                 return (
                   <g key={`ml-tgt-${c.t}-${c.idx}`} style={{ pointerEvents: 'none' }}>
-                    <title>{`ML targeting this bar\n${detail}`}</title>
+                    <title>{ribbon}</title>
                     <text
                       x={cx}
                       y={yy}
                       textAnchor="middle"
                       dominantBaseline="auto"
                       fill={fill}
-                      fontSize={Math.min(10, Math.max(7, layout.slotW * 0.45))}
+                      fontSize={Math.min(9, Math.max(6, layout.slotW * 0.35))}
                       fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, monospace"
-                      fontWeight={700}
+                      fontWeight={600}
                       style={{
                         userSelect: 'none',
                         filter:
@@ -625,15 +613,10 @@ export function CandlestickChart({
                       : ML_REF.neutral
                 const dash =
                   newest.outcome === 'pending' ? '6 5' : newest.outcome === 'wrong' ? '3 4' : undefined
-                const tip = slot.entries
-                  .map(
-                    (e) =>
-                      `${e.direction.toUpperCase()} ${e.confidence}% · ${e.outcome} · ${e.modelId} · ${formatLocalDateTime(e.predictedAt)}`,
-                  )
-                  .join('\n')
+                const ribbon = formatMlTargetBarRibbon(slot.entries)
                 return (
                   <g key={`ml-ref-${slot.rechartsX}-${k}`} style={{ pointerEvents: 'none' }}>
-                    <title>{`ML ref bar (${String(slot.entries.length)} prediction(s))\n${tip}`}</title>
+                    <title>{ribbon ?? ''}</title>
                     <line
                       x1={cx}
                       x2={cx}
@@ -863,57 +846,15 @@ export function CandlestickChart({
                   </div>
                 ) : null}
                 {(() => {
-                  const preds = mlPredictionsByDataIndex.get(hover.idx)
-                  if (!preds?.length) return null
-                  const sorted = [...preds].sort(
-                    (a, b) => Date.parse(b.predictedAt) - Date.parse(a.predictedAt),
-                  )
+                  const refPreds = mlPredictionsByDataIndex.get(hover.idx)
+                  const tgtPreds = mlTargetBySliceIndex.get(hover.idx)
+                  const refFmt = refPreds?.length ? formatMlTargetBarRibbon(refPreds) : null
+                  const tgtFmt = tgtPreds?.length ? formatMlTargetBarRibbon(tgtPreds) : null
+                  if (!refFmt && !tgtFmt) return null
                   return (
-                    <div className="mt-2 pt-1 border-top border-secondary border-opacity-50">
-                      <div className="text-white-50 small mb-1">ML predictions (ref bar)</div>
-                      {sorted.map((e) => (
-                        <div key={e.id} className="font-monospace" style={{ fontSize: '0.68rem', lineHeight: 1.4 }}>
-                          <span
-                            className={
-                              e.direction === 'up'
-                                ? 'text-success'
-                                : e.direction === 'down'
-                                  ? 'text-danger'
-                                  : 'text-secondary'
-                            }
-                          >
-                            {e.direction.toUpperCase()}
-                          </span>{' '}
-                          {e.confidence}% · {e.outcome} ·{' '}
-                          <span className="text-secondary">{e.modelId}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )
-                })()}
-                {(() => {
-                  const targetPreds = mlTargetBySliceIndex.get(hover.idx)
-                  if (!targetPreds?.length) return null
-                  return (
-                    <div className="mt-2 pt-1 border-top border-secondary border-opacity-50">
-                      <div className="text-white-50 small mb-1">ML targeting this candle</div>
-                      {targetPreds.map((e) => (
-                        <div key={e.id} className="font-monospace" style={{ fontSize: '0.68rem', lineHeight: 1.4 }}>
-                          <span
-                            className={
-                              e.direction === 'up'
-                                ? 'text-success'
-                                : e.direction === 'down'
-                                  ? 'text-danger'
-                                  : 'text-secondary'
-                            }
-                          >
-                            {e.direction.toUpperCase()}
-                          </span>{' '}
-                          {e.confidence}% · {e.outcome} ·{' '}
-                          <span className="text-secondary">{e.modelId}</span>
-                        </div>
-                      ))}
+                    <div className="mt-2 pt-1 border-top border-secondary border-opacity-50 font-monospace text-secondary">
+                      {refFmt ? <div style={{ fontSize: '0.72rem' }}>{refFmt}</div> : null}
+                      {tgtFmt ? <div style={{ fontSize: '0.72rem' }}>{tgtFmt}</div> : null}
                     </div>
                   )
                 })()}

@@ -1810,20 +1810,14 @@ function MlTargetBarPredictionLabelList({
       const preds = labelMap.get(index)
       const text = preds ? formatMlTargetBarRibbon(preds) : null
       if (!text || !preds?.length) return null
-      const p0 = preds[0]
-      const fill =
-        p0.direction === 'up' ? '#bbf7d0' : p0.direction === 'down' ? '#fecaca' : '#cbd5e1'
-      const detail = preds
-        .map((e) => `${e.direction.toUpperCase()} ${e.confidence}% · ${e.outcome} · ${e.modelId}`)
-        .join('\n')
       return (
         <text
           x={x}
           y={y - 10}
-          fill={fill}
+          fill="#cbd5e1"
           textAnchor="middle"
-          fontSize={9}
-          fontWeight={700}
+          fontSize={8}
+          fontWeight={600}
           fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, monospace"
           style={{
             pointerEvents: 'none',
@@ -1831,7 +1825,7 @@ function MlTargetBarPredictionLabelList({
               'drop-shadow(1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(-1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(0 1px 0 rgb(33 37 41 / 90%))',
           }}
         >
-          <title>{`ML targeting this bar\n${detail}`}</title>
+          <title>{text}</title>
           {text}
         </text>
       )
@@ -4942,9 +4936,9 @@ function InstrumentChartCard({
               <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> lots); an{' '}
               <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold lots.{' '}
               <strong>ML next-bar bias</strong>{' '}
-              <span className="font-monospace text-body-secondary">↑72%</span>-style ribbons above bars show which prediction applies{' '}
-              <em>to each candle&apos;s interval</em> (multiple models append <strong>+n</strong>); tinted verticals mark each prediction&apos;s{' '}
-              <strong>ref bar</strong>; hover a candle or use the <strong>ML history</strong> panel for full rows. Calls{' '}
+              shows as <span className="font-monospace text-body-secondary">(up, up, down)</span> tuples above bars—the listed directions are the next-interval calls from each model for{' '}
+              <em>that candle&apos;s interval</em>; tinted verticals mark each prediction&apos;s{' '}
+              <strong>ref bar</strong>. Hover a candle or use the <strong>ML history</strong> panel for full rows. Calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
               <span className="font-monospace">model</span> query (see{' '}
               <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.
