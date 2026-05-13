@@ -31,6 +31,7 @@ import {
   CHART_LOAD_OLDER_VISIBLE_THRESHOLD,
 } from '../constants/chartLayout'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
+import type { ChartPointWithMaAndTrend } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import {
   barTimesUtc,
@@ -127,11 +128,11 @@ function coerceLwNum(x: unknown): number | null {
   return null
 }
 
-/** LW markers above candles — aligns with ribbon up/down hues; amber when models disagree (tie). */
+/** Chart markers + hover badges: green / red / yellow (neutral). */
 const ML_MARKER_COL = {
   up: '#22c55e',
   down: '#dc2626',
-  neutral: '#f59e0b',
+  neutral: '#eab308',
 } as const
 
 const ML_MARKER_SIZE = 0.2
@@ -160,17 +161,25 @@ function mlHorizontalDirectionsText(entries: readonly MlPredictionLogEntry[]): s
   return glyphs.join(ML_MARKER_TEXT_JOINER)
 }
 
-const ML_HOVER_DETAIL_MAX_CHARS = 180
-
-function truncateForHover(text: string): string {
-  if (text.length <= ML_HOVER_DETAIL_MAX_CHARS) return text
-  return `${text.slice(0, ML_HOVER_DETAIL_MAX_CHARS - 1)}…`
+function formatLwHoverPrice(price: number): string {
+  const a = Math.abs(price)
+  const digits = a >= 100 ? 2 : 4
+  return price.toLocaleString(undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
 }
 
-function mlPredictionOutcomeAbbrev(o: MlPredictionLogEntry['outcome']): string {
-  if (o === 'correct') return '✓ ok'
-  if (o === 'wrong') return '✗ miss'
-  return '… pend'
+function mlHoverBadgeStyle(direction: MlPredictionLogEntry['direction']): { backgroundColor: string; color: string } {
+  if (direction === 'up') return { backgroundColor: ML_MARKER_COL.up, color: '#fff' }
+  if (direction === 'down') return { backgroundColor: ML_MARKER_COL.down, color: '#fff' }
+  return { backgroundColor: ML_MARKER_COL.neutral, color: '#0f172a' }
+}
+
+function mlDirectionGlyph(direction: MlPredictionLogEntry['direction']): string {
+  if (direction === 'up') return '↑'
+  if (direction === 'down') return '↓'
+  return '◇'
 }
 
 function lwChartOptions(bg: string, showScales: boolean) {
@@ -357,6 +366,105 @@ function InstrumentChartCornerLegend({
   )
 }
 
+/** Crosshair readout: ML as colored glyphs only (no textual summary); enabled overlays listed with legend colors. */
+function ChartCrosshairFlyout({
+  hover,
+  bar,
+  graphType,
+  maLineVisibility,
+  customEmaPeriod,
+  trendSeries,
+}: {
+  hover: { x: number; y: number; barIndex: number; mlEntries: readonly MlPredictionLogEntry[] }
+  bar: ChartPointWithMa | undefined
+  graphType: InstrumentPriceChartGraphType
+  maLineVisibility: MaLineVisibility
+  customEmaPeriod: number | null
+  trendSeries: ChartPointWithMaAndTrend[] | null
+}) {
+  const rows: { key: string; color: string; text: string }[] = []
+
+  const pushNum = (key: string, color: string, label: string, v: number | null | undefined) => {
+    if (v != null && Number.isFinite(v)) rows.push({ key, color, text: `${label} ${formatLwHoverPrice(v)}` })
+  }
+
+  if (bar) {
+    if (maLineVisibility.showSma20) pushNum('sma20', MA_LINE_COLORS.sma20, `SMA${MA_SMA_PERIOD}`, bar.sma20)
+    if (maLineVisibility.showEma9) pushNum('ema9', MA_LINE_COLORS.ema9, `EMA${MA_EMA_FAST_PERIOD}`, bar.ema9)
+    if (maLineVisibility.showEma21) pushNum('ema21', MA_LINE_COLORS.ema21, `EMA${MA_EMA_SLOW_PERIOD}`, bar.ema21)
+    if (maLineVisibility.showCustomEma && customEmaPeriod != null && customEmaPeriod >= 2) {
+      pushNum('emac', MA_LINE_COLORS.emaCustom, `EMA${customEmaPeriod}`, bar.emaCustom)
+    }
+    if (maLineVisibility.showSupportResistance) {
+      pushNum('srs', SR_LINE_COLORS.support, `S${SR_SWING_PERIOD}`, bar.srSupport)
+      pushNum('srr', SR_LINE_COLORS.resistance, `R${SR_SWING_PERIOD}`, bar.srResistance)
+    }
+  }
+
+  const trendOk =
+    trendSeries &&
+    hover.barIndex >= 0 &&
+    hover.barIndex < trendSeries.length &&
+    maLineVisibility.showLinearCloseTrend &&
+    (graphType === 'candlestick' || graphType === 'line')
+  if (trendOk) {
+    const tVal = trendSeries[hover.barIndex]?.trendLine
+    pushNum('tlr', LINEAR_CLOSE_TREND_COLOR, 'Trend LR', tVal ?? undefined)
+  }
+
+  const hasMl = hover.mlEntries.length > 0
+  if (!hasMl && rows.length === 0) return null
+
+  return (
+    <div
+      className="rounded border shadow-sm bg-body overflow-hidden border-secondary"
+      style={{
+        pointerEvents: 'none',
+        position: 'absolute',
+        left: hover.x + 12,
+        top: hover.y + 12,
+        zIndex: 5,
+        maxWidth: 220,
+        padding: '6px 8px',
+      }}
+    >
+      {hasMl ? (
+        <div className="d-flex flex-wrap gap-1 align-items-center mb-1">
+          {hover.mlEntries.map((e) => (
+            <span
+              key={e.id}
+              className="rounded d-inline-flex align-items-center justify-content-center lh-1"
+              style={{
+                ...mlHoverBadgeStyle(e.direction),
+                minWidth: 18,
+                minHeight: 18,
+                padding: '0 4px',
+                fontSize: '0.7rem',
+                fontWeight: 700,
+              }}
+            >
+              {mlDirectionGlyph(e.direction)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {rows.length > 0 ? (
+        <div className={hasMl ? 'border-secondary border-top pt-1' : undefined}>
+          {rows.map((r) => (
+            <div
+              key={r.key}
+              className="text-nowrap"
+              style={{ color: r.color, fontSize: '0.62rem', lineHeight: 1.38 }}
+            >
+              {r.text}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function InstrumentPriceChart({
   graphType,
   data,
@@ -405,16 +513,17 @@ export function InstrumentPriceChart({
 
   const maKeysMemo = useMemo(() => lwMaSeriesKeys(maLineVisibility, customEmaPeriod), [customEmaPeriod, maLineVisibility])
 
-  const mlCrosshairHoverRef = useRef<{
+  const crosshairBarHoverRef = useRef<{
     x: number
     y: number
-    entriesKey: string
+    stateKey: string
   } | null>(null)
 
-  const [mlCrosshairHover, setMlCrosshairHover] = useState<{
+  const [crosshairBarHover, setCrosshairBarHover] = useState<{
     x: number
     y: number
-    entries: MlPredictionLogEntry[]
+    barIndex: number
+    mlEntries: MlPredictionLogEntry[]
   } | null>(null)
 
   const trendSeries = useMemo(() => {
@@ -430,11 +539,11 @@ export function InstrumentPriceChart({
     mlPerTargetBarRef.current = mapMlPredictionsPerTargetBar(mlPredictionEntries, data)
     dataLenRef.current = data.length
 
-    const applyMlHoverFromCrosshair = (param: MouseEventParams<Time>) => {
+    const applyCrosshairFlyoutFromMove = (param: MouseEventParams<Time>) => {
       if (!param.point) {
-        if (mlCrosshairHoverRef.current !== null) {
-          mlCrosshairHoverRef.current = null
-          setMlCrosshairHover(null)
+        if (crosshairBarHoverRef.current !== null) {
+          crosshairBarHoverRef.current = null
+          setCrosshairBarHover(null)
         }
         return
       }
@@ -442,31 +551,20 @@ export function InstrumentPriceChart({
       const liRaw = param.logical
       const li = typeof liRaw === 'number' ? Math.round(liRaw) : NaN
       if (!Number.isFinite(li) || li < 0 || li >= n) {
-        if (mlCrosshairHoverRef.current !== null) {
-          mlCrosshairHoverRef.current = null
-          setMlCrosshairHover(null)
+        if (crosshairBarHoverRef.current !== null) {
+          crosshairBarHoverRef.current = null
+          setCrosshairBarHover(null)
         }
         return
       }
       const raw = mlPerTargetBarRef.current.get(li)
-      if (!raw?.length) {
-        if (mlCrosshairHoverRef.current !== null) {
-          mlCrosshairHoverRef.current = null
-          setMlCrosshairHover(null)
-        }
-        return
-      }
-      const entries = sortMlRibbonEntries(raw)
-      const entriesKey = entries.map((e) => e.id).join('|')
-      const next = {
-        x: param.point!.x,
-        y: param.point!.y,
-        entriesKey,
-      }
-      const prev = mlCrosshairHoverRef.current
-      if (prev && prev.entriesKey === entriesKey && prev.x === next.x && prev.y === next.y) return
-      mlCrosshairHoverRef.current = next
-      setMlCrosshairHover({ x: next.x, y: next.y, entries })
+      const mlEntries = raw?.length ? sortMlRibbonEntries(raw) : []
+      const stateKey = `${li}:${mlEntries.map((e) => e.id).join('|')}`
+      const next = { x: param.point!.x, y: param.point!.y, stateKey }
+      const prev = crosshairBarHoverRef.current
+      if (prev && prev.stateKey === next.stateKey && prev.x === next.x && prev.y === next.y) return
+      crosshairBarHoverRef.current = next
+      setCrosshairBarHover({ x: next.x, y: next.y, barIndex: li, mlEntries })
     }
 
     if (!el || data.length === 0) {
@@ -475,8 +573,8 @@ export function InstrumentPriceChart({
       lastVpFirstBarTRef.current = undefined
       disposeInternals(stRef.current)
       stRef.current = null
-      mlCrosshairHoverRef.current = null
-      setMlCrosshairHover(null)
+      crosshairBarHoverRef.current = null
+      setCrosshairBarHover(null)
       return
     }
 
@@ -577,10 +675,10 @@ export function InstrumentPriceChart({
       /* noop */
     }
     stAlive.unsubscribeCrosshairMove = undefined
-    stAlive.chart.subscribeCrosshairMove(applyMlHoverFromCrosshair)
+    stAlive.chart.subscribeCrosshairMove(applyCrosshairFlyoutFromMove)
     stAlive.unsubscribeCrosshairMove = () => {
       try {
-        stAlive.chart.unsubscribeCrosshairMove(applyMlHoverFromCrosshair)
+        stAlive.chart.unsubscribeCrosshairMove(applyCrosshairFlyoutFromMove)
       } catch {
         /* noop */
       }
@@ -651,42 +749,15 @@ export function InstrumentPriceChart({
             <div className="d-flex align-items-center justify-content-center text-secondary small h-100">No candles.</div>
           ) : null}
         </div>
-        {mlCrosshairHover != null ? (
-          <div
-            className="rounded border shadow-sm bg-body text-secondary overflow-auto border-secondary"
-            style={{
-              pointerEvents: 'none',
-              position: 'absolute',
-              left: mlCrosshairHover.x + 12,
-              top: mlCrosshairHover.y + 12,
-              zIndex: 5,
-              maxWidth: 288,
-              maxHeight: 220,
-              fontSize: '0.625rem',
-              lineHeight: 1.35,
-              padding: '6px 8px',
-            }}
-          >
-            {mlCrosshairHover.entries.map((e) => (
-              <div key={e.id} className="mb-1 text-start" style={{ marginBottom: 4 }}>
-                <span className="text-body fw-semibold me-1">
-                  {e.direction === 'up' ? '↑' : e.direction === 'down' ? '↓' : '◇'}
-                </span>
-                <span className="text-body">{e.modelId}</span>
-                <span className="text-muted mx-1">·</span>
-                <span>{e.confidence.toFixed(1)}%</span>
-                <span className="text-muted mx-1">·</span>
-                <span className="text-muted">{mlPredictionOutcomeAbbrev(e.outcome)}</span>
-                <span className="text-muted mx-1">·</span>
-                <span className="font-monospace text-muted">{formatLocalDateTime(e.predictedAt)}</span>
-                {e.detail ? (
-                  <div className="text-muted fst-italic mt-1" style={{ wordBreak: 'break-word', fontSize: '0.58rem' }}>
-                    {truncateForHover(e.detail)}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
+        {crosshairBarHover != null ? (
+          <ChartCrosshairFlyout
+            hover={crosshairBarHover}
+            bar={data[crosshairBarHover.barIndex]}
+            graphType={graphType}
+            maLineVisibility={maLineVisibility}
+            customEmaPeriod={customEmaPeriod}
+            trendSeries={trendSeries}
+          />
         ) : null}
       </div>
       <InstrumentChartCornerLegend
