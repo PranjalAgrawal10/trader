@@ -62,7 +62,7 @@ import type { ChartPointOhlc, ChartIntervalKey, LiveTickVolumeAccumulator } from
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
   CHART_ZOOM_MIN_BARS,
-  clampChartPanOffsetBars,
+  clampChartPanAllowNewerGhost,
   sliceChartForZoom,
   zoomInBarCount,
   zoomOutBarCount,
@@ -3556,7 +3556,7 @@ function CompactPriceChart({
 
   useEffect(() => {
     setChartPanOffsetBars((p) =>
-      clampChartPanOffsetBars(p, seriesWithCustom.length, zoomVisibleBars),
+      clampChartPanAllowNewerGhost(p, seriesWithCustom.length, zoomVisibleBars),
     )
   }, [seriesWithCustom.length, zoomVisibleBars])
 
@@ -3569,6 +3569,7 @@ function CompactPriceChart({
     enabled: chartPanEnabled,
     totalBars: seriesWithCustom.length,
     visibleBarCount: zoomVisibleBars,
+    maxNewerGhostBars: zoomVisibleBars ?? 0,
     panOffsetBars: chartPanOffsetBars,
     setPanOffsetBars: setChartPanOffsetBars,
   })
@@ -3756,6 +3757,7 @@ function CompactPriceChart({
                 </>
               }
               density="compact"
+              newerGhostBars={Math.max(0, -chartPanOffsetBars)}
             />
           </div>
         </div>
@@ -4245,7 +4247,7 @@ function InstrumentChartCard({
 
   useEffect(() => {
     setChartPanOffsetBars((p) =>
-      clampChartPanOffsetBars(p, displayWithMa.length, zoomVisibleBars),
+      clampChartPanAllowNewerGhost(p, displayWithMa.length, zoomVisibleBars),
     )
   }, [displayWithMa.length, zoomVisibleBars])
 
@@ -4264,6 +4266,7 @@ function InstrumentChartCard({
     enabled: chartPanEnabled,
     totalBars: displayWithMa.length,
     visibleBarCount: zoomVisibleBars,
+    maxNewerGhostBars: zoomVisibleBars ?? 0,
     panOffsetBars: chartPanOffsetBars,
     setPanOffsetBars: setChartPanOffsetBars,
   })
@@ -4511,6 +4514,7 @@ function InstrumentChartCard({
                       </>
                     }
                     density="comfortable"
+                    newerGhostBars={Math.max(0, -chartPanOffsetBars)}
                   />
                 </div>
               </div>

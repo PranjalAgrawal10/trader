@@ -146,6 +146,7 @@ export function CandlestickChart({
   paperLastBuyPrice = null,
   paperBuyDataIndices = [],
   mlPredictionEntries = [],
+  newerGhostSlots = 0,
 }: {
   data: ChartPointWithMa[]
   maLineVisibility?: MaLineVisibility
@@ -159,6 +160,8 @@ export function CandlestickChart({
   paperBuyDataIndices?: readonly number[]
   /** Classic + LightGBM price-direction rows; ribbons above bars where predictions target that interval. */
   mlPredictionEntries?: readonly MlPredictionLogEntry[]
+  /** Empty candle slots on the right (pan “past” newest while zoomed). */
+  newerGhostSlots?: number
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
@@ -286,17 +289,24 @@ export function CandlestickChart({
 
     const yPrice = (p: number) => priceTopY + ((max - p) / (max - min)) * pricePlotH
     const n = data.length
-    const naturalSlotW = plotW / n
+
+    const ghostSlots = Math.max(0, Math.min(512, Math.floor(newerGhostSlots)))
+    const slotGuess = n > 0 ? Math.min(plotW / n, MAX_CANDLE_SLOT_PX) : MAX_CANDLE_SLOT_PX
+    const ghostReservePx =
+      ghostSlots > 0 && n > 0 ? Math.min(Math.max(0, plotW - 40), ghostSlots * slotGuess) : 0
+    const candlePlotW = Math.max(32, plotW - ghostReservePx)
+
+    const naturalSlotW = candlePlotW / n
     let slotW = naturalSlotW
     let clusterStartX = PAD.left
     if (naturalSlotW > MAX_CANDLE_SLOT_PX) {
       slotW = MAX_CANDLE_SLOT_PX
       const clusterW = n * slotW
-      if (clusterW > plotW) {
-        slotW = naturalSlotW
+      if (clusterW > candlePlotW) {
+        slotW = candlePlotW / n
         clusterStartX = PAD.left
       } else {
-        clusterStartX = PAD.left + (plotW - clusterW) / 2
+        clusterStartX = PAD.left + (candlePlotW - clusterW) / 2
       }
     }
     const bodyW = Math.min(Math.max(1, slotW * 0.65), 14)
@@ -349,7 +359,7 @@ export function CandlestickChart({
       labelY,
       plotRightX,
     }
-  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice, paperLastBuyPrice])
+  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice, paperLastBuyPrice, newerGhostSlots])
 
   const yTicks = useMemo(() => {
     if (!layout) return []

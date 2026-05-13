@@ -5,12 +5,11 @@ import {
   useRef,
   useState,
 } from 'react'
-import { clampChartPanOffsetBars, maxChartPanOffsetBars } from '../utils/chartZoom'
+import { maxChartPanOffsetBars } from '../utils/chartZoom'
 
-/** Past clamped zoom pan range, scrub drag into elastic px (smooth “keep dragging” past newest/oldest bar). */
+/** Beyond hard pan limits, scrub into elastic px. */
 const RUBBER_STRENGTH = 0.55
 const RUBBER_CORE_PX = 240
-/** Continued pull adds √ tail so motion never hits a brick wall below a sane screen cap. */
 const RUBBER_SOFT_CAP_PX = 960
 
 const RELEASE_TRANSITION = 'transform 0.22s cubic-bezier(0.22, 1, 0.36, 1)'
@@ -39,18 +38,19 @@ function rubberPxFromExcessBars(excessBars: number, pxPerBar: number): number {
 }
 
 /**
- * Horizontal drag-to-pan when the series is zoomed to a window smaller than the full download.
- * Drag right → older bars; drag left → newer bars.
- * Past the newest or oldest bar, scrubbing applies a rubber-band translate so drag never feels blocked.
+ * Horizontal drag-to-pan when zoomed smaller than full history.
+ * Drag right → older bars; drag left → newer bars, down to −visibleCount (ghost “future”), then rubber beyond that.
  */
 export function useChartPanPointerHandlers(options: {
   enabled: boolean
   totalBars: number
   visibleBarCount: number | null
+  /** Max negative pan (whole-window “newer” slack), usually `visibleBarCount` when zoomed. */
+  maxNewerGhostBars: number
   panOffsetBars: number
-  setPanOffsetBars: (value: number) => void
+  setPanOffsetBars: (value: number | ((prev: number) => number)) => void
 }): UseChartPanPointerHandlersResult {
-  const { enabled, totalBars, visibleBarCount, panOffsetBars, setPanOffsetBars } = options
+  const { enabled, totalBars, visibleBarCount, maxNewerGhostBars, panOffsetBars, setPanOffsetBars } = options
   const [dragging, setDragging] = useState(false)
   const [rubberTranslateX, setRubberTranslateX] = useState(0)
   const sessionRef = useRef<{ pointerStartX: number; panAtStart: number } | null>(null)
@@ -87,20 +87,21 @@ export function useChartPanPointerHandlers(options: {
       const dx = e.clientX - sessionRef.current.pointerStartX
       const rawPan = sessionRef.current.panAtStart + dx / pxPerBar
       const maxP = maxChartPanOffsetBars(totalBars, visibleBarCount)
+      const minP = enabled && maxNewerGhostBars > 0 ? -maxNewerGhostBars : 0
+
+      let nextPan = Math.round(rawPan)
+      if (nextPan > maxP) nextPan = maxP
+      if (nextPan < minP) nextPan = minP
 
       let excessBars = 0
-      if (rawPan < 0) {
-        excessBars = rawPan
-      } else if (maxP >= 0 && rawPan > maxP) {
-        excessBars = rawPan - maxP
-      }
+      if (rawPan < minP) excessBars = rawPan - minP
+      else if (rawPan > maxP) excessBars = rawPan - maxP
 
-      const nextPan = clampChartPanOffsetBars(Math.round(rawPan), totalBars, visibleBarCount)
       setPanOffsetBars(nextPan)
       setRubberTranslateX(rubberPxFromExcessBars(excessBars, pxPerBar))
       e.preventDefault()
     },
-    [enabled, totalBars, visibleBarCount, setPanOffsetBars],
+    [enabled, totalBars, visibleBarCount, maxNewerGhostBars, setPanOffsetBars],
   )
 
   const onPointerUp = useCallback(

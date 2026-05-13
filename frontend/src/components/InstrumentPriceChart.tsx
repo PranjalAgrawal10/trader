@@ -54,6 +54,8 @@ export type InstrumentPriceChartProps = {
   /** Compact = favorite tiles; comfortable = Browse detail defaults. */
   density?: InstrumentChartDensity
   showVolume?: boolean
+  /** Recharts candles: empty slots past newest when dragging “newer” while zoomed. */
+  newerGhostBars?: number
 }
 
 /** SMA / EMA / S&R overlays — same styling as CandlestickChart. */
@@ -360,8 +362,10 @@ export function InstrumentPriceChart({
   referenceLines = null,
   density = 'compact',
   showVolume = true,
+  newerGhostBars = 0,
 }: InstrumentPriceChartProps) {
-  const centeredXDomain = useMemo(() => xAxisDomainCenterLatest(data), [data])
+  const ghost = Math.max(0, Math.floor(newerGhostBars))
+  const centeredXDomain = useMemo(() => xAxisDomainCenterLatest(data, ghost), [data, ghost])
 
   if (graphType === 'candlestick') {
     return (
@@ -374,6 +378,7 @@ export function InstrumentPriceChart({
           paperLastBuyPrice={paperLastBuyPrice}
           paperBuyDataIndices={paperBuyDataIndices}
           mlPredictionEntries={mlPredictionEntries}
+          newerGhostSlots={ghost}
         />
       </div>
     )
