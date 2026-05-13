@@ -1808,8 +1808,8 @@ function MlTargetBarPredictionLabelList({
       if (typeof index !== 'number' || x == null || y == null) return null
       const preds = labelMap.get(index)
       if (!preds?.length) return null
-      const iconPx = 9
-      const fh = Math.round(iconPx + 6)
+      const iconPx = 7
+      const fh = Math.round(iconPx + 5)
       const yTop = y - 10 - fh
       return <MlDirectionRibbonSvg cx={x} yTop={yTop} entries={preds} iconPx={iconPx} />
     },
@@ -4858,7 +4858,7 @@ function InstrumentChartCard({
               <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> lots); an{' '}
               <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold lots.{' '}
               <strong>ML next-bar bias</strong>{' '}
-              shows above bars as parentheses with Font Awesome arrows—green for <strong>up</strong> and red for <strong>down</strong>
+              shows above bars as a compact row of Font Awesome arrows—green for <strong>up</strong> and red for <strong>down</strong>
               —one icon per model’s next-interval call for <em>that candle&apos;s interval</em>. Hover a candle or use the{' '}
               <strong>ML history</strong> panel for full rows. Calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}

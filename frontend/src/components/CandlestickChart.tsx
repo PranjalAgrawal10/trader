@@ -553,8 +553,8 @@ export function CandlestickChart({
                 const cx = layout.clusterStartX + i * layout.slotW + layout.slotW / 2
                 const yHi = layout.yPrice(c.high)
                 const yy = Math.max(layout.priceTopY + 7, yHi - 10)
-                const iconPx = Math.min(12, Math.max(8, layout.slotW * 0.38))
-                const fh = Math.round(iconPx + 6)
+                const iconPx = Math.min(8, Math.max(5.5, layout.slotW * 0.26))
+                const fh = Math.round(iconPx + 5)
                 return (
                   <MlDirectionRibbonSvg
                     key={`ml-tgt-${c.t}-${c.idx}`}
@@ -788,10 +788,10 @@ export function CandlestickChart({
                   return (
                     <div className="mt-2 pt-1 border-top border-secondary border-opacity-50 d-flex flex-column gap-1 align-items-start">
                       {refPreds && refPreds.length > 0 ? (
-                        <MlDirectionRibbonHtml entries={refPreds} iconPx={11} />
+                        <MlDirectionRibbonHtml entries={refPreds} iconPx={8} />
                       ) : null}
                       {tgtPreds && tgtPreds.length > 0 ? (
-                        <MlDirectionRibbonHtml entries={tgtPreds} iconPx={11} />
+                        <MlDirectionRibbonHtml entries={tgtPreds} iconPx={8} />
                       ) : null}
                     </div>
                   )
