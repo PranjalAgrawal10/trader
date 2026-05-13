@@ -32,7 +32,7 @@ type SvgRibbonProps = {
   iconPx?: number
 }
 
-/** Compact next-bar direction icons inside an SVG (<code>foreignObject</code>) for candlesticks and Recharts. */
+/** Compact next-bar direction icons inside an SVG (<code>foreignObject</code>) over OHLC strips (Lightweight Charts). */
 export function MlDirectionRibbonSvg({ entries, cx, yTop, iconPx = 7 }: SvgRibbonProps) {
   const sorted = sortMlRibbonEntries(entries)
   if (sorted.length === 0) return null

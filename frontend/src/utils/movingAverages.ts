@@ -20,7 +20,7 @@ export type ChartPointWithMa = ChartPointOhlc & {
   srResistance: number | null
 }
 
-/** Stroke colors aligned across Recharts and SVG candlestick. */
+/** Stroke colors aligned across instrument OHLC charts (Lightweight Charts). */
 export const MA_LINE_COLORS = {
   sma20: '#fbbf24',
   ema9: '#a78bfa',
@@ -88,7 +88,7 @@ export function computeEma(values: readonly number[], period: number): (number |
   return out
 }
 
-/** Min/max for Recharts Y axis so MA lines stay visible with OHLC (line / bar / candle data). */
+/** Min/max price scale range so MA lines stay visible with OHLC (line / bar / candle data). */
 export function yDomainForOhlcAndVisibleMas(
   data: ChartPointWithMa[],
   visibility: MaLineVisibility,

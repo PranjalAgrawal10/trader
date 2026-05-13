@@ -1,22 +1,34 @@
-import { Fragment, useCallback, useMemo, type ReactNode } from 'react'
+/**
+ * Zerodha-style OHLC chart using TradingView Lightweight Charts™ v5+
+ * @see https://tradingview.github.io/lightweight-charts/
+ */
+import { Fragment, useLayoutEffect, useMemo, useRef } from 'react'
+import type { IChartApi, IPriceLine, ISeriesApi, SeriesMarker, Time } from 'lightweight-charts'
 import {
-  Bar,
-  BarChart,
-  Cell,
-  ComposedChart,
-  LabelList,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
-import { CandlestickChart } from './CandlestickChart'
-import { ChartWithRightGutter } from './ChartWithRightGutter'
-import { MlDirectionRibbonSvg } from './MlDirectionRibbon'
+  BarSeries,
+  CandlestickSeries,
+  ColorType,
+  createChart,
+  createSeriesMarkers,
+  CrosshairMode,
+  HistogramSeries,
+  LineSeries,
+  LineStyle,
+  LineType,
+} from 'lightweight-charts'
+import type { UTCTimestamp } from 'lightweight-charts'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
+import {
+  barTimesUtc,
+  lwBarsFromBars,
+  lwCloseLine,
+  lwCandlesFromBars,
+  lwMaSeriesKeys,
+  lwSingleValueSkipNull,
+  lwTrendLine,
+  lwVolumesFromBars,
+} from '../utils/lightweightInstrumentData'
 import type { MlPredictionLogEntry } from '../utils/mlPredictionHistory'
 import { mapMlPredictionsPerTargetBar } from '../utils/mlPredictionHistory'
 import type { ChartPointWithMa, MaLineVisibility } from '../utils/movingAverages'
@@ -29,13 +41,8 @@ import {
   SR_LINE_COLORS,
   SR_SWING_PERIOD,
 } from '../utils/movingAverages'
-import { xAxisDomainCenterLatest } from '../utils/chartZoom'
-
-/** Recharts margins for OHLC-derived line/bar (matches legacy Kite layout). */
-const RECHARTS_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
 export type InstrumentPriceChartGraphType = 'line' | 'bar' | 'candlestick'
-
 export type InstrumentChartDensity = 'compact' | 'comfortable'
 
 export type InstrumentPriceChartProps = {
@@ -47,99 +54,174 @@ export type InstrumentPriceChartProps = {
   paperLastBuyPrice?: number | null
   paperBuyDataIndices?: readonly number[]
   mlPredictionEntries?: readonly MlPredictionLogEntry[]
-  /** Recharts Y domain; ignored for candles. */
   rechartsYDomain?: [number | string, number | string] | undefined
-  /** Reference lines rendered inside LineChart/ComposedChart (paper buy verticals, LTP, Last buy …). */
-  referenceLines?: ReactNode
-  /** Compact = favorite tiles; comfortable = Browse detail defaults. */
   density?: InstrumentChartDensity
   showVolume?: boolean
-  /** Recharts candles: empty slots past newest when dragging “newer” while zoomed. */
   newerGhostBars?: number
-  /** 1 = fit auto price bounds; &lt; 1 narrows Y range around midpoint (candles + line/bar). */
-  priceVerticalZoomScale?: number
 }
 
-/** SMA / EMA / S&R overlays — same styling as CandlestickChart. */
-function MovingAverageOverlays({
-  visibility,
-  customEmaLinePeriod,
-}: {
-  visibility: MaLineVisibility
-  customEmaLinePeriod: number | null
-}) {
-  return (
-    <>
-      {visibility.showSma20 ? (
-        <Line
-          type="monotone"
-          dataKey="sma20"
-          stroke={MA_LINE_COLORS.sma20}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`SMA ${MA_SMA_PERIOD}`}
-        />
-      ) : null}
-      {visibility.showEma9 ? (
-        <Line
-          type="monotone"
-          dataKey="ema9"
-          stroke={MA_LINE_COLORS.ema9}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`EMA ${MA_EMA_FAST_PERIOD}`}
-        />
-      ) : null}
-      {visibility.showEma21 ? (
-        <Line
-          type="monotone"
-          dataKey="ema21"
-          stroke={MA_LINE_COLORS.ema21}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`EMA ${MA_EMA_SLOW_PERIOD}`}
-        />
-      ) : null}
-      {visibility.showCustomEma && customEmaLinePeriod != null && customEmaLinePeriod >= 2 ? (
-        <Line
-          type="monotone"
-          dataKey="emaCustom"
-          stroke={MA_LINE_COLORS.emaCustom}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`EMA ${customEmaLinePeriod}`}
-        />
-      ) : null}
-      {visibility.showSupportResistance ? (
-        <Line
-          type="monotone"
-          dataKey="srSupport"
-          stroke={SR_LINE_COLORS.support}
-          dot={false}
-          strokeWidth={1.25}
-          connectNulls
-          strokeDasharray="4 3"
-          name={`Support (${SR_SWING_PERIOD})`}
-        />
-      ) : null}
-      {visibility.showSupportResistance ? (
-        <Line
-          type="monotone"
-          dataKey="srResistance"
-          stroke={SR_LINE_COLORS.resistance}
-          dot={false}
-          strokeWidth={1.25}
-          connectNulls
-          strokeDasharray="4 3"
-          name={`Resistance (${SR_SWING_PERIOD})`}
-        />
-      ) : null}
-    </>
-  )
+type MainKind = 'candlestick' | 'bar' | 'line'
+
+type Internals = {
+  chart: IChartApi
+  mainKind: MainKind
+  main: ISeriesApi<'Candlestick'> | ISeriesApi<'Bar'> | ISeriesApi<'Line'>
+  histogram: ISeriesApi<'Histogram'> | null
+  markers: ReturnType<typeof createSeriesMarkers<Time>>
+  trendLine: ISeriesApi<'Line'> | null
+  maSeries: Partial<Record<string, ISeriesApi<'Line'>>>
+  priceLines: IPriceLine[]
+}
+
+const LIVE_LTP = '#38bdf8'
+const PAPER_BUY_LINE = '#f59e0b'
+
+function coerceFixedLwRange(dom: [unknown, unknown] | undefined): { from: number; to: number } | null {
+  if (!dom || dom.length !== 2) return null
+  const lo = coerceLwNum(dom[0])
+  const hi = coerceLwNum(dom[1])
+  if (lo == null || hi == null || lo >= hi) return null
+  return { from: lo, to: hi }
+}
+
+function coerceLwNum(x: unknown): number | null {
+  if (typeof x === 'number' && Number.isFinite(x)) return x
+  if (typeof x === 'string') {
+    const slug = x.toLowerCase().trim()
+    if (slug === '' || slug === 'auto' || slug.includes('datamin') || slug.includes('datamax')) return null
+    const n = Number(x)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+function mlDominantMarkerShape(entries: readonly MlPredictionLogEntry[]): 'arrowUp' | 'arrowDown' | 'square' {
+  let up = 0
+  let down = 0
+  for (const e of entries) {
+    if (e.direction === 'up') up++
+    else if (e.direction === 'down') down++
+  }
+  if (up > down) return 'arrowUp'
+  if (down > up) return 'arrowDown'
+  return 'square'
+}
+
+function lwChartOptions(bg: string) {
+  return {
+    attributionLogo: false,
+    autoSize: true,
+    grid: {
+      vertLines: { color: 'rgba(173,181,189,0.18)', style: LineStyle.Dotted },
+      horzLines: { color: 'rgba(173,181,189,0.22)', style: LineStyle.LargeDashed },
+    },
+    layout: {
+      background: { type: ColorType.Solid, color: bg },
+      textColor: '#adb5bd',
+      fontSize: 11,
+    },
+    rightPriceScale: {
+      borderColor: 'rgba(173,181,189,0.35)',
+      scaleMargins: { top: 0.06, bottom: 0.2 },
+    },
+    timeScale: {
+      borderColor: 'rgba(173,181,189,0.35)',
+      timeVisible: true,
+      secondsVisible: false,
+    },
+    crosshair: { mode: CrosshairMode.MagnetOHLC },
+  }
+}
+
+function graphToMainKind(g: InstrumentPriceChartGraphType): MainKind {
+  if (g === 'line') return 'line'
+  if (g === 'bar') return 'bar'
+  return 'candlestick'
+}
+
+function addMain(chart: IChartApi, kind: MainKind, barCountEstimate: number): Internals['main'] {
+  if (kind === 'line')
+    return chart.addSeries(LineSeries, {
+      color: '#0d6efd',
+      lineWidth: 2,
+      lineType: LineType.Simple,
+      lastValueVisible: true,
+      priceLineVisible: false,
+    })
+
+  if (kind === 'bar')
+    return chart.addSeries(BarSeries, {
+      thinBars: barCountEstimate > 260,
+      upColor: 'rgba(13,110,253,0.92)',
+      downColor: 'rgba(13,110,253,0.55)',
+    })
+
+  return chart.addSeries(CandlestickSeries, {
+    upColor: '#22c55e',
+    downColor: '#ef4444',
+    borderUpColor: '#15803d',
+    borderDownColor: '#b91c1c',
+    wickUpColor: '#15803d',
+    wickDownColor: '#b91c1c',
+  })
+}
+
+function disposeInternals(st: Internals | null) {
+  if (!st) return
+  clearPriceLines(st)
+  try {
+    st.markers.detach()
+  } catch {
+    /* noop */
+  }
+  try {
+    st.chart.remove()
+  } catch {
+    /* noop */
+  }
+}
+
+function rebuildMainSeries(chart: IChartApi, st: Internals, want: MainKind, barEstimate: number) {
+  clearPriceLines(st)
+  try {
+    st.markers.detach()
+  } catch {
+    /* noop */
+  }
+  chart.removeSeries(st.main)
+  for (const s of Object.values(st.maSeries)) {
+    removeSeriesQuiet(chart, s)
+  }
+  st.maSeries = {}
+  removeSeriesQuiet(chart, st.trendLine)
+  st.trendLine = null
+
+  const main = addMain(chart, want, barEstimate)
+  const markers = createSeriesMarkers(main, [])
+  st.main = main
+  st.markers = markers
+  st.mainKind = want
+}
+
+function removeSeriesQuiet(chart: IChartApi, s: ISeriesApi<any> | null) {
+  if (!s) return
+  try {
+    chart.removeSeries(s)
+  } catch {
+    /* noop */
+  }
+}
+
+function clearPriceLines(st: Internals) {
+  if (st.priceLines.length === 0) return
+  for (const pl of st.priceLines) {
+    try {
+      st.main.removePriceLine(pl)
+    } catch {
+      /* noop */
+    }
+  }
+  st.priceLines = []
 }
 
 function InstrumentChartCornerLegend({
@@ -152,7 +234,10 @@ function InstrumentChartCornerLegend({
   graphType: InstrumentPriceChartGraphType
 }) {
   const items: { key: string; label: string; color: string }[] = []
-  if (graphType === 'candlestick' && visibility.showLinearCloseTrend) {
+  if (
+    visibility.showLinearCloseTrend &&
+    (graphType === 'candlestick' || graphType === 'line')
+  ) {
     items.push({ key: 'tlr', label: 'Trend LR', color: LINEAR_CLOSE_TREND_COLOR })
   }
   if (visibility.showSma20) items.push({ key: 'sma', label: `SMA${MA_SMA_PERIOD}`, color: MA_LINE_COLORS.sma20 })
@@ -185,172 +270,6 @@ function InstrumentChartCornerLegend({
   )
 }
 
-function InstrumentVolumeHistogram({
-  chartData,
-  compact,
-  centeredXDomain,
-}: {
-  chartData: ChartPointWithMa[]
-  compact?: boolean
-  centeredXDomain?: [number, number]
-}) {
-  if (chartData.length === 0) return null
-
-  const paneH = compact ? 46 : 54
-  const maxBarSize = compact ? 20 : 34
-  const yTickFs = compact ? 8 : 9
-  const yAxisWidth = compact ? 32 : 37
-
-  return (
-    <div
-      style={{ height: paneH }}
-      className="flex-shrink-0 border-top border-secondary border-opacity-25"
-    >
-      <ResponsiveContainer width="100%" height="100%" debounce={50}>
-        <BarChart data={chartData} margin={{ ...RECHARTS_MARGINS, top: 3, bottom: 1 }}>
-          <XAxis
-            dataKey="idx"
-            type={centeredXDomain ? 'number' : undefined}
-            domain={centeredXDomain ?? ['auto', 'auto']}
-            allowDataOverflow={Boolean(centeredXDomain)}
-            stroke="#adb5bd"
-            hide
-          />
-          <YAxis stroke="#adb5bd" tick={{ fontSize: yTickFs }} width={yAxisWidth} domain={[0, 'auto']} />
-          <Tooltip
-            cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-            formatter={(value: number) => [
-              typeof value === 'number' ? value.toLocaleString() : String(value),
-              'Volume',
-            ]}
-            labelFormatter={() => ''}
-            contentStyle={{
-              background: '#212529',
-              border: '1px solid #495057',
-              borderRadius: 6,
-              fontSize: 11,
-            }}
-          />
-          <Bar dataKey="volume" maxBarSize={maxBarSize} radius={[2, 2, 0, 0]} isAnimationActive={false}>
-            {chartData.map((e) => (
-              <Cell
-                key={`vol-cell-${e.idx}`}
-                fill={e.close >= e.open ? 'rgba(34, 197, 94, 0.62)' : 'rgba(239, 68, 68, 0.62)'}
-              />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-function MlTargetBarPredictionLabelList({
-  chartData,
-  mlEntries,
-}: {
-  chartData: ChartPointWithMa[]
-  mlEntries: readonly MlPredictionLogEntry[]
-}) {
-  const labelMap = useMemo(() => mapMlPredictionsPerTargetBar(mlEntries, chartData), [mlEntries, chartData])
-  const LabelContent = useCallback(
-    ({ x, y, index }: { x?: number; y?: number; index?: number }) => {
-      if (typeof index !== 'number' || x == null || y == null) return null
-      const preds = labelMap.get(index)
-      if (!preds?.length) return null
-      const iconPx = 7
-      const fh = Math.round(iconPx + 5)
-      const yTop = y - 10 - fh
-      return <MlDirectionRibbonSvg cx={x} yTop={yTop} entries={preds} iconPx={iconPx} />
-    },
-    [labelMap],
-  )
-
-  if (mlEntries.length === 0) return null
-
-  return (
-    <LabelList
-      dataKey="close"
-      position="top"
-      offset={14}
-      style={{ pointerEvents: 'none' }}
-      content={LabelContent}
-    />
-  )
-}
-
-function InstrumentChartTooltipContent({
-  active,
-  payload,
-  maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
-  customEmaLinePeriod = null,
-}: {
-  active?: boolean
-  payload?: readonly { payload?: ChartPointWithMa & { trendLine?: number | null } }[]
-  maLineVisibility?: MaLineVisibility
-  customEmaLinePeriod?: number | null
-}) {
-  if (!active || !payload?.length) return null
-  const p = payload[0].payload
-  if (!p) return null
-  return (
-    <div
-      className="rounded border border-secondary p-2 small"
-      style={{ background: '#212529', color: '#f8f9fa' }}
-    >
-      <div>{formatLocalDateTime(p.t)}</div>
-      <div className="font-monospace mt-1">
-        O {p.open} · H {p.high} · L {p.low} · C {p.close}
-      </div>
-      <div className="text-secondary small">
-        Vol{' '}
-        {Number.isFinite(Number(p.volume)) ? Number(p.volume).toLocaleString() : '—'}
-      </div>
-      {maLineVisibility.showSma20 && p.sma20 != null ? (
-        <div className="font-monospace mt-1" style={{ color: MA_LINE_COLORS.sma20 }}>
-          SMA{MA_SMA_PERIOD} {p.sma20.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showEma9 && p.ema9 != null ? (
-        <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema9 }}>
-          EMA{MA_EMA_FAST_PERIOD} {p.ema9.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showEma21 && p.ema21 != null ? (
-        <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema21 }}>
-          EMA{MA_EMA_SLOW_PERIOD} {p.ema21.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showCustomEma &&
-      customEmaLinePeriod != null &&
-      customEmaLinePeriod >= 2 &&
-      p.emaCustom != null ? (
-        <div className="font-monospace" style={{ color: MA_LINE_COLORS.emaCustom }}>
-          EMA{customEmaLinePeriod} {p.emaCustom.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showSupportResistance && p.srSupport != null ? (
-        <div className="font-monospace mt-1" style={{ color: SR_LINE_COLORS.support }}>
-          Sup{SR_SWING_PERIOD} {p.srSupport.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showSupportResistance && p.srResistance != null ? (
-        <div className="font-monospace" style={{ color: SR_LINE_COLORS.resistance }}>
-          Res{SR_SWING_PERIOD} {p.srResistance.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showLinearCloseTrend && p.trendLine != null && Number.isFinite(p.trendLine) ? (
-        <div className="font-monospace mt-1" style={{ color: LINEAR_CLOSE_TREND_COLOR }}>
-          Trend LR {Number(p.trendLine).toFixed(4)}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/**
- * Single entry point for Zerodha-style OHLC charts: Candlestick SVG, or Recharts line/bar (+ volume strip + ML labels).
- */
 export function InstrumentPriceChart({
   graphType,
   data,
@@ -361,126 +280,147 @@ export function InstrumentPriceChart({
   paperBuyDataIndices = [],
   mlPredictionEntries = [],
   rechartsYDomain,
-  referenceLines = null,
   density = 'compact',
   showVolume = true,
   newerGhostBars = 0,
-  priceVerticalZoomScale = 1,
 }: InstrumentPriceChartProps) {
-  const ghost = Math.max(0, Math.floor(newerGhostBars))
-  const centeredXDomain = useMemo(() => xAxisDomainCenterLatest(data, ghost), [data, ghost])
-
-  if (graphType === 'candlestick') {
-    return (
-      <div className="w-100 h-100">
-        <CandlestickChart
-          data={data}
-          maLineVisibility={maLineVisibility}
-          customEmaPeriod={customEmaPeriod}
-          livePrice={livePrice}
-          paperLastBuyPrice={paperLastBuyPrice}
-          paperBuyDataIndices={paperBuyDataIndices}
-          mlPredictionEntries={mlPredictionEntries}
-          newerGhostSlots={ghost}
-          verticalPriceZoomScale={priceVerticalZoomScale}
-        />
-      </div>
-    )
-  }
-
-  const xTickFs = density === 'compact' ? 9 : 10
-  const yAxisW = density === 'compact' ? 48 : 56
-  const barMaxSize = density === 'compact' ? 32 : 48
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const stRef = useRef<Internals | null>(null)
   const compactVol = density === 'compact'
+  const ghost = Math.max(0, Math.floor(newerGhostBars))
 
-  const lineChartData =
-    maLineVisibility.showLinearCloseTrend
-      ? attachLinearTrendToChartPoints(data)
-      : data
+  const times = useMemo(() => barTimesUtc(data, ghost), [data, ghost])
+  const fixedY = useMemo(() => coerceFixedLwRange(rechartsYDomain), [rechartsYDomain])
+
+  const bgMemo = typeof window !== 'undefined'
+    ? window.getComputedStyle(document.documentElement).getPropertyValue('--bs-body-bg').trim() || '#0d1117'
+    : '#0d1117'
+
+  const maKeysMemo = useMemo(() => lwMaSeriesKeys(maLineVisibility, customEmaPeriod), [customEmaPeriod, maLineVisibility])
+
+  const trendSeries = useMemo(() => {
+    if (
+      !maLineVisibility.showLinearCloseTrend ||
+      (graphType !== 'candlestick' && graphType !== 'line')
+    )
+      return null
+    return attachLinearTrendToChartPoints(data)
+  }, [data, graphType, maLineVisibility.showLinearCloseTrend])
+  useLayoutEffect(() => {
+    const el = hostRef.current
+    if (!el || data.length === 0) {
+      disposeInternals(stRef.current)
+      stRef.current = null
+      return
+    }
+
+    const wantMain = graphToMainKind(graphType)
+
+    let st = stRef.current
+    if (!st?.chart) {
+      disposeInternals(st)
+      const chart = createChart(el, lwChartOptions(bgMemo))
+      const histogram = showVolume
+        ? chart.addSeries(HistogramSeries, {
+            priceFormat: { type: 'volume' },
+            priceScaleId: '',
+          })
+        : null
+      histogram?.priceScale().applyOptions({
+        scaleMargins: {
+          top: compactVol ? 0.74 : 0.68,
+          bottom: 0,
+        },
+      })
+
+      const main = addMain(chart, wantMain, data.length + ghost)
+      const markers = createSeriesMarkers(main, [])
+      st = {
+        chart,
+        mainKind: wantMain,
+        main,
+        histogram,
+        markers,
+        trendLine: null,
+        maSeries: {},
+        priceLines: [],
+      }
+      stRef.current = st
+      chart.applyOptions({
+        localization: {
+          timeFormatter: (t: Time) => lwTimeFmt(t),
+          priceFormatter: (price: number) => {
+            const a = Math.abs(price)
+            const digits = a >= 100 ? 2 : 4
+            return price.toLocaleString(undefined, {
+              minimumFractionDigits: digits,
+              maximumFractionDigits: digits,
+            })
+          },
+        },
+      })
+    }
+
+    /* ensure histogram visibility / margins */
+    const stAlive = stRef.current!
+    if (wantMain !== stAlive.mainKind) rebuildMainSeries(stAlive.chart, stAlive, wantMain, data.length + ghost)
+    showVolumeApplied(stAlive, showVolume, compactVol)
+
+    /* === DATA & overlays === */
+    syncSeriesData(stAlive, {
+      graphType,
+      data,
+      times,
+      ghost,
+      maKeysMemo,
+      maLineVisibility,
+      customEmaPeriod,
+      trendSeries,
+      fixedY,
+      livePrice,
+      paperLastBuyPrice,
+      mlPredictionEntries,
+      paperBuyDataIndices,
+    })
+
+    stAlive.chart.timeScale().fitContent()
+
+    return () => undefined
+    // intentionally drive off props that affect LW content
+  }, [
+    bgMemo,
+    compactVol,
+    customEmaPeriod,
+    data,
+    density,
+    fixedY,
+    ghost,
+    graphType,
+    livePrice,
+    maKeysMemo,
+    maLineVisibility,
+    mlPredictionEntries,
+    newerGhostBars,
+    paperBuyDataIndices,
+    paperLastBuyPrice,
+    showVolume,
+    times,
+    trendSeries,
+  ])
+
+  useLayoutEffect(() => {
+    return () => {
+      disposeInternals(stRef.current)
+      stRef.current = null
+    }
+  }, [])
 
   return (
     <div className="position-relative w-100 h-100 d-flex flex-column">
-      <div className="flex-grow-1 d-flex flex-column" style={{ minHeight: 0 }}>
-        <ChartWithRightGutter>
-          <div className="d-flex flex-column w-100 h-100" style={{ minHeight: 0 }}>
-            <div className="flex-grow-1 w-100" style={{ minHeight: 0 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                {graphType === 'line' ? (
-                  <LineChart data={lineChartData} margin={RECHARTS_MARGINS}>
-                    <XAxis
-                      dataKey="idx"
-                      type="number"
-                      domain={centeredXDomain ?? ['dataMin', 'dataMax']}
-                      allowDataOverflow
-                      stroke="#adb5bd"
-                      tick={{ fontSize: xTickFs }}
-                      hide
-                    />
-                    <YAxis
-                      stroke="#adb5bd"
-                      tick={{ fontSize: xTickFs + 1 }}
-                      domain={rechartsYDomain ?? ['auto', 'auto']}
-                      width={yAxisW}
-                    />
-                    <Tooltip
-                      content={(props) => (
-                        <InstrumentChartTooltipContent
-                          active={props.active}
-                          payload={
-                            props.payload as readonly {
-                              payload?: ChartPointWithMa & { trendLine?: number | null }
-                            }[] | undefined
-                          }
-                          maLineVisibility={maLineVisibility}
-                          customEmaLinePeriod={customEmaPeriod}
-                        />
-                      )}
-                    />
-                    <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close">
-                      <MlTargetBarPredictionLabelList chartData={data} mlEntries={mlPredictionEntries} />
-                    </Line>
-                    <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaPeriod} />
-                    {referenceLines}
-                  </LineChart>
-                ) : (
-                  <ComposedChart data={data} margin={RECHARTS_MARGINS}>
-                    <XAxis
-                      dataKey="idx"
-                      type="number"
-                      domain={centeredXDomain ?? ['dataMin', 'dataMax']}
-                      allowDataOverflow
-                      stroke="#adb5bd"
-                      tick={{ fontSize: xTickFs }}
-                      hide
-                    />
-                    <YAxis
-                      stroke="#adb5bd"
-                      tick={{ fontSize: xTickFs + 1 }}
-                      domain={rechartsYDomain ?? ['auto', 'auto']}
-                      width={yAxisW}
-                    />
-                    <Tooltip
-                      content={(props) => (
-                        <InstrumentChartTooltipContent
-                          active={props.active}
-                          payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                          maLineVisibility={maLineVisibility}
-                          customEmaLinePeriod={customEmaPeriod}
-                        />
-                      )}
-                    />
-                    <Bar dataKey="close" fill="#0d6efd" maxBarSize={barMaxSize} radius={[2, 2, 0, 0]} name="Close">
-                      <MlTargetBarPredictionLabelList chartData={data} mlEntries={mlPredictionEntries} />
-                    </Bar>
-                    <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaPeriod} />
-                    {referenceLines}
-                  </ComposedChart>
-                )}
-              </ResponsiveContainer>
-            </div>
-            {showVolume ? <InstrumentVolumeHistogram chartData={data} compact={compactVol} centeredXDomain={centeredXDomain} /> : null}
-          </div>
-        </ChartWithRightGutter>
+      <div className="flex-grow-1" style={{ minHeight: 0 }} ref={hostRef}>
+        {data.length === 0 ? (
+          <div className="d-flex align-items-center justify-content-center text-secondary small h-100">No candles.</div>
+        ) : null}
       </div>
       <InstrumentChartCornerLegend
         visibility={maLineVisibility}
@@ -489,4 +429,206 @@ export function InstrumentPriceChart({
       />
     </div>
   )
+}
+
+function lwTimeFmt(t: Time): string {
+  try {
+    if (typeof t === 'number') return formatLocalDateTime(new Date((t as number) * 1000).toISOString())
+    if (typeof t === 'object' && t != null && 'year' in t) {
+      const bd = t as { year: number; month: number; day: number }
+      const iso = `${bd.year}-${String(bd.month).padStart(2, '0')}-${String(bd.day).padStart(2, '0')}T12:00:00.000Z`
+      return formatLocalDateTime(new Date(iso).toISOString())
+    }
+    if (typeof t === 'string') return formatLocalDateTime(new Date(`${t}T12:00:00.000Z`).toISOString())
+  } catch {
+    /* noop */
+  }
+  return String(t)
+}
+
+function showVolumeApplied(st: Internals, show: boolean, compact: boolean) {
+  if (!st.histogram && show && st.chart) {
+    const histogram = st.chart.addSeries(HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+    })
+    histogram.priceScale().applyOptions({
+      scaleMargins: {
+        top: compact ? 0.74 : 0.68,
+        bottom: 0,
+      },
+    })
+    st.histogram = histogram
+  }
+
+  if (st.histogram) {
+    if (!show)
+      try {
+        st.chart.removeSeries(st.histogram)
+        st.histogram = null
+      } catch {
+        st.histogram = null
+      }
+    else {
+      st.histogram.applyOptions({ visible: true })
+      st.histogram.priceScale().applyOptions({
+        scaleMargins: {
+          top: compact ? 0.74 : 0.68,
+          bottom: 0,
+        },
+      })
+    }
+  }
+}
+
+type SyncPack = {
+  graphType: InstrumentPriceChartGraphType
+  data: ChartPointWithMa[]
+  times: UTCTimestamp[]
+  ghost: number
+  maKeysMemo: Partial<Record<'sma20' | 'ema9' | 'ema21' | 'emaCustom' | 'srSupport' | 'srResistance', true>>
+  maLineVisibility: MaLineVisibility
+  customEmaPeriod: number | null
+  trendSeries: ReturnType<typeof attachLinearTrendToChartPoints> | null
+  fixedY: { from: number; to: number } | null
+  livePrice?: number | null
+  paperLastBuyPrice?: number | null
+  mlPredictionEntries: readonly MlPredictionLogEntry[]
+  paperBuyDataIndices: readonly number[]
+}
+
+function syncSeriesData(st: Internals, p: SyncPack) {
+  clearPriceLines(st)
+
+  purgeMaOverlay(st)
+
+  const candles = lwCandlesFromBars(p.data, p.times)
+  const bars = lwBarsFromBars(p.data, p.times)
+  const vol = lwVolumesFromBars(p.data, p.times)
+
+  if (st.mainKind === 'candlestick') {
+    ;(st.main as ISeriesApi<'Candlestick'>).setData(candles)
+  } else if (st.mainKind === 'bar') {
+    ;(st.main as ISeriesApi<'Bar'>).setData(bars)
+  } else {
+    ;(st.main as ISeriesApi<'Line'>).setData(lwCloseLine(p.data, p.times))
+  }
+
+  st.histogram?.setData(vol)
+
+  const chart = st.chart
+
+  if (p.maKeysMemo.sma20) attachMa(chart, st, `sma20`, 'sma20', MA_LINE_COLORS.sma20, {}, p.data, p.times)
+  if (p.maKeysMemo.ema9) attachMa(chart, st, `ema9`, 'ema9', MA_LINE_COLORS.ema9, {}, p.data, p.times)
+  if (p.maKeysMemo.ema21) attachMa(chart, st, `ema21`, 'ema21', MA_LINE_COLORS.ema21, {}, p.data, p.times)
+
+  if (p.maKeysMemo.emaCustom) {
+    attachMa(chart, st, `cus`, `emaCustom`, MA_LINE_COLORS.emaCustom, {}, p.data, p.times)
+  }
+
+  if (p.maKeysMemo.srSupport) {
+    attachMa(chart, st, `su`, 'srSupport', SR_LINE_COLORS.support, { lineStyle: LineStyle.Dashed }, p.data, p.times)
+    attachMa(chart, st, `re`, 'srResistance', SR_LINE_COLORS.resistance, { lineStyle: LineStyle.Dashed }, p.data, p.times)
+  }
+
+  removeSeriesQuiet(chart, st.trendLine)
+  st.trendLine = null
+  if (p.maLineVisibility.showLinearCloseTrend && p.trendSeries && st.mainKind !== 'bar') {
+    const trendLine = chart.addSeries(LineSeries, {
+      color: LINEAR_CLOSE_TREND_COLOR,
+      lineWidth: 2,
+      lineStyle: LineStyle.LargeDashed,
+      lastValueVisible: false,
+      priceLineVisible: false,
+    })
+    trendLine.setData(lwTrendLine(p.trendSeries, p.times))
+    st.trendLine = trendLine
+  }
+
+  const ps = st.main.priceScale()
+  if (p.fixedY) {
+    ps.setAutoScale(false)
+    ps.setVisibleRange({ from: p.fixedY.from, to: p.fixedY.to })
+  } else {
+    ps.setAutoScale(true)
+  }
+
+  const markersArr: SeriesMarker<Time>[] = []
+  const tgt = mapMlPredictionsPerTargetBar(p.mlPredictionEntries, p.data)
+  for (let i = 0; i < p.data.length; i++) {
+    const preds = tgt.get(i)
+    if (!preds?.length) continue
+    markersArr.push({
+      time: p.times[i],
+      position: 'aboveBar',
+      shape: mlDominantMarkerShape(preds),
+      color: '#94a3b8',
+    })
+  }
+
+  for (const idx of p.paperBuyDataIndices) {
+    if (!Number.isFinite(idx) || idx < 0 || idx >= p.data.length) continue
+    markersArr.push({
+      time: p.times[idx],
+      position: 'belowBar',
+      color: '#84cc16',
+      shape: 'circle',
+    })
+  }
+  st.markers.setMarkers(markersArr)
+
+  if (typeof p.livePrice === 'number' && Number.isFinite(p.livePrice))
+    st.priceLines.push(
+      st.main.createPriceLine({
+        price: p.livePrice,
+        color: LIVE_LTP,
+        lineWidth: 2,
+        lineStyle: LineStyle.LargeDashed,
+        axisLabelVisible: true,
+        title: 'LTP',
+      }),
+    )
+  if (typeof p.paperLastBuyPrice === 'number' && Number.isFinite(p.paperLastBuyPrice))
+    st.priceLines.push(
+      st.main.createPriceLine({
+        price: p.paperLastBuyPrice,
+        color: PAPER_BUY_LINE,
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: 'Last buy',
+      }),
+    )
+}
+
+function purgeMaOverlay(st: Internals) {
+  for (const series of Object.values(st.maSeries)) {
+    removeSeriesQuiet(st.chart, series)
+  }
+  st.maSeries = {}
+}
+
+function attachMa(
+  chart: IChartApi,
+  st: Internals,
+  uiKey: string,
+  ptKey:
+    | keyof Pick<
+        ChartPointWithMa,
+        'sma20' | 'ema9' | 'ema21' | 'emaCustom' | 'srSupport' | 'srResistance'
+      >,
+  color: string,
+  extras: Partial<Parameters<ISeriesApi<'Line'>['applyOptions']>[0]>,
+  rows: ChartPointWithMa[],
+  times: UTCTimestamp[],
+) {
+  const line = chart.addSeries(LineSeries, {
+    priceLineVisible: false,
+    lastValueVisible: false,
+    color,
+    lineWidth: 1,
+    ...extras,
+  })
+  line.setData(lwSingleValueSkipNull(rows, times, ptKey) as Parameters<ISeriesApi<'Line'>['setData']>[0])
+  st.maSeries[uiKey] = line
 }

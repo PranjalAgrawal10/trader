@@ -1,15 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import { Card, Col, Row } from 'react-bootstrap'
 import { api } from '../api/client'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
+import { LwTimeLine } from '../components/LwMiscCharts'
 import { Layout } from '../components/Layout'
 
 interface BotRow {
@@ -60,30 +53,40 @@ export function DashboardPage() {
     }
   }, [])
 
-  const realizedPnlSeries = useMemo(() => {
-    const sorted = [...trades].sort(
-      (a, b) => new Date(a.executedAt).getTime() - new Date(b.executedAt).getTime(),
-    )
-    let cumulative = 0
-    return sorted.map((t, idx) => {
-      const leg =
-        t.realizedPnl != null && Number.isFinite(Number(t.realizedPnl)) ? Number(t.realizedPnl) : null
-      if (leg != null) cumulative += leg
-      return {
-        seq: idx + 1,
-        cumulativeRealizedPnl: cumulative,
-        tradeRealizedPnl: leg,
-        executedAt: t.executedAt,
-        symbol: t.symbol,
-      }
-    })
-  }, [trades])
-
   const hasRealizedPnl = trades.some(
     (t) => t.realizedPnl != null && Number.isFinite(Number(t.realizedPnl)),
   )
 
-  const priceSeries = [...trades].reverse().map((x, i) => ({ i: i + 1, price: Number(x.price) }))
+  const lwCumulativePoints = useMemo(() => {
+    const out: { timeMs: number; value: number }[] = []
+    let lastTs = 0
+    let carry = 0
+    const sorted = [...trades].sort(
+      (a, b) => new Date(a.executedAt).getTime() - new Date(b.executedAt).getTime(),
+    )
+    for (const t of sorted) {
+      const ts = Math.max(lastTs + 1, new Date(t.executedAt).getTime())
+      lastTs = ts
+      const leg =
+        t.realizedPnl != null && Number.isFinite(Number(t.realizedPnl)) ? Number(t.realizedPnl) : null
+      if (leg != null) carry += leg
+      out.push({ timeMs: ts, value: carry })
+    }
+    return out
+  }, [trades])
+
+  const lwPricePoints = useMemo(() => {
+    const sorted = [...trades].sort(
+      (a, b) => new Date(a.executedAt).getTime() - new Date(b.executedAt).getTime(),
+    )
+    let lastTs = 0
+    return sorted.map((t) => {
+      const raw = new Date(t.executedAt).getTime()
+      const ts = raw <= lastTs ? lastTs + 1 : raw
+      lastTs = ts
+      return { timeMs: ts, value: Number(t.price) }
+    })
+  }, [trades])
 
   const isRunning = (s: BotRow['status']) =>
     s === 2 || s === 'Running' || s === 'running'
@@ -139,54 +142,11 @@ export function DashboardPage() {
               <p className="text-secondary small mb-0">No trades yet. Start a bot or ingest logs.</p>
             ) : hasRealizedPnl ? (
               <ChartWithRightGutter>
-                <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={realizedPnlSeries}>
-                  <XAxis dataKey="seq" stroke="#adb5bd" tick={{ fontSize: 11 }} />
-                  <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
-                  <Tooltip
-                    formatter={(value: number, name: string) =>
-                      name === 'cumulativeRealizedPnl'
-                        ? [new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value), 'Cumulative']
-                        : [value, name]
-                    }
-                    labelFormatter={(_, payload) => {
-                      const p = payload?.[0]?.payload as { executedAt?: string; symbol?: string } | undefined
-                      if (!p?.executedAt) return ''
-                      const sym = p.symbol ? `${p.symbol} · ` : ''
-                      return `${sym}${new Date(p.executedAt).toLocaleString()}`
-                    }}
-                    contentStyle={{
-                      background: '#212529',
-                      border: '1px solid #495057',
-                      borderRadius: 8,
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="cumulativeRealizedPnl"
-                    stroke="#fd7e14"
-                    dot={false}
-                    strokeWidth={2}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+                <LwTimeLine points={lwCumulativePoints} heightPx={256} stroke="#fd7e14" zeroBaseline />
               </ChartWithRightGutter>
             ) : (
               <ChartWithRightGutter>
-                <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={priceSeries}>
-                  <XAxis dataKey="i" stroke="#adb5bd" tick={{ fontSize: 11 }} />
-                  <YAxis stroke="#adb5bd" tick={{ fontSize: 11 }} domain={['auto', 'auto']} />
-                  <Tooltip
-                    contentStyle={{
-                      background: '#212529',
-                      border: '1px solid #495057',
-                      borderRadius: 8,
-                    }}
-                  />
-                  <Line type="monotone" dataKey="price" stroke="#198754" dot={false} strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
+                <LwTimeLine points={lwPricePoints} heightPx={256} stroke="#198754" />
               </ChartWithRightGutter>
             )}
           </div>

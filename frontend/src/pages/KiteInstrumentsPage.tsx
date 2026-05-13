@@ -25,22 +25,7 @@ import {
   Table,
   ToggleButton,
 } from 'react-bootstrap'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  Pie,
-  PieChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import {
@@ -59,6 +44,8 @@ import { ManualTradeScalperView } from '../components/ManualTradeScalperView'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { InstrumentPriceChart } from '../components/InstrumentPriceChart'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
+import type { LwSyntheticBarRow } from '../components/LwMiscCharts'
+import { LwSyntheticHistogram, LwTimeLine } from '../components/LwMiscCharts'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useChartPanPointerHandlers } from '../hooks/useChartPanPointerHandlers'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
@@ -3346,34 +3333,6 @@ function CompactPriceChart({
     [demoPaperBuyMarkers, chartData, interval],
   )
 
-  const paperBuyReferenceLines = useMemo(() => {
-    return paperBuyDataIndices.map((di, seg) => {
-      const rowPt = chartData[di]
-      if (!rowPt) return null
-      return (
-        <ReferenceLine
-          key={`demo-pbuy-${row.instrumentToken}-${seg}-${rowPt.t}`}
-          x={rowPt.idx}
-          stroke="#84cc16"
-          strokeWidth={1.35}
-          strokeDasharray="5 5"
-          opacity={0.92}
-        />
-      )
-    })
-  }, [paperBuyDataIndices, chartData, row.instrumentToken])
-
-  const paperLastBuyReferenceLine =
-    paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice) ? (
-      <ReferenceLine
-        y={paperLastBuyPrice}
-        stroke="#f59e0b"
-        strokeWidth={1.5}
-        strokeDasharray="4 6"
-        label={{ value: 'Last buy', position: 'insideLeft', fill: '#f59e0b', fontSize: 9, fontWeight: 600 }}
-      />
-    ) : null
-
   const rechartsYDomain = useMemo(() => {
     const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     let d = extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
@@ -3534,15 +3493,8 @@ function CompactPriceChart({
               paperBuyDataIndices={paperBuyDataIndices}
               mlPredictionEntries={mlPredictionOverlayEntries}
               rechartsYDomain={rechartsYDomain ?? undefined}
-              referenceLines={
-                <>
-                  {paperBuyReferenceLines}
-                  {paperLastBuyReferenceLine}
-                </>
-              }
               density="compact"
               newerGhostBars={Math.max(0, -chartPanOffsetBars)}
-              priceVerticalZoomScale={priceVerticalZoomScale}
             />
           </div>
         </div>
@@ -4085,52 +4037,12 @@ function InstrumentChartCard({
     [demoPaperBuyMarkers, chartData, interval],
   )
 
-  const browsePaperBuyReferenceLines = useMemo(() => {
-    const tok = selection?.instrumentToken ?? 'na'
-    return browsePaperBuyDataIndices.map((di, seg) => {
-      const rowPt = chartData[di]
-      if (!rowPt) return null
-      return (
-        <ReferenceLine
-          key={`demo-pbuy-${tok}-${seg}-${rowPt.t}`}
-          x={rowPt.idx}
-          stroke="#84cc16"
-          strokeWidth={1.35}
-          strokeDasharray="5 5"
-          opacity={0.92}
-        />
-      )
-    })
-  }, [browsePaperBuyDataIndices, chartData, selection?.instrumentToken])
-
   const rechartsYDomain = useMemo(() => {
     let d = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     d = extendYDomainWithLivePrice(d, liveLastPrice)
     d = extendYDomainWithLivePrice(d, paperLastBuyPrice)
     return applyVerticalPriceZoomToDomain(d ?? undefined, priceVerticalZoomScale) ?? d
   }, [chartData, maLineVisibility, liveLastPrice, paperLastBuyPrice, priceVerticalZoomScale])
-
-  const liveLtpReferenceLine =
-    liveLastPrice != null && Number.isFinite(liveLastPrice) ? (
-      <ReferenceLine
-        y={liveLastPrice}
-        stroke="#38bdf8"
-        strokeWidth={1.65}
-        strokeDasharray="6 7"
-        label={{ value: 'LTP', position: 'insideRight', fill: '#38bdf8', fontSize: 10, fontWeight: 600 }}
-      />
-    ) : null
-
-  const paperLastBuyReferenceLine =
-    paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice) ? (
-      <ReferenceLine
-        y={paperLastBuyPrice}
-        stroke="#f59e0b"
-        strokeWidth={1.5}
-        strokeDasharray="4 6"
-        label={{ value: 'Last buy', position: 'insideLeft', fill: '#f59e0b', fontSize: 10, fontWeight: 600 }}
-      />
-    ) : null
 
   const onChartZoomIn = useCallback(() => {
     onChartZoomStoredChange(zoomInChartZoomStored(chartZoomStored, displayWithMa.length))
@@ -4326,16 +4238,8 @@ function InstrumentChartCard({
                     paperBuyDataIndices={browsePaperBuyDataIndices}
                     mlPredictionEntries={mlPredictionOverlayEntries}
                     rechartsYDomain={rechartsYDomain ?? undefined}
-                    referenceLines={
-                      <>
-                        {browsePaperBuyReferenceLines}
-                        {paperLastBuyReferenceLine}
-                        {liveLtpReferenceLine}
-                      </>
-                    }
                     density="comfortable"
                     newerGhostBars={Math.max(0, -chartPanOffsetBars)}
-                    priceVerticalZoomScale={priceVerticalZoomScale}
                   />
                 </div>
               </div>
@@ -5190,6 +5094,25 @@ export function KiteInstrumentsPage() {
     })
   }, [demoFullReport?.dailySummaries])
 
+  const demoFullReportPnlLwHistogram = useMemo((): LwSyntheticBarRow[] => {
+    return demoFullReportPnlChartRows.map((r) => ({
+      key: r.reportDate,
+      label: r.dayLabel,
+      value: r.netPnl,
+      color: r.netPnl >= 0 ? '#198754' : '#dc3545',
+    }))
+  }, [demoFullReportPnlChartRows])
+
+  const demoFullReportPnlLwCumulativePoints = useMemo(() => {
+    let lastTs = 0
+    return demoFullReportPnlChartRows.map((r) => {
+      const base = Date.parse(`${r.reportDate}T12:00:00.000Z`)
+      const timeMs = Math.max(lastTs + 1, Number.isFinite(base) ? base : 0)
+      lastTs = timeMs
+      return { timeMs, value: r.cumulativeNet }
+    })
+  }, [demoFullReportPnlChartRows])
+
   const demoTodayLegsPnlChartRows = useMemo(() => {
     const legs = demoTodayLegs?.legs ?? []
     const allocated = legs.filter((l) => l.status === 'allocated')
@@ -5208,6 +5131,15 @@ export function KiteInstrumentsPage() {
       }
     })
   }, [demoTodayLegs?.legs])
+
+  const demoTodayLegsLwBars = useMemo((): LwSyntheticBarRow[] => {
+    return demoTodayLegsPnlChartRows.map((r) => ({
+      key: r.key,
+      label: r.symbolLabel,
+      value: r.netPnl,
+      color: r.netPnl >= 0 ? '#198754' : '#dc3545',
+    }))
+  }, [demoTodayLegsPnlChartRows])
 
   const persistDemoAutoTrade = useCallback(
     async (nextEnabled: boolean, nextStrategy: string) => {
@@ -6863,41 +6795,7 @@ export function KiteInstrumentsPage() {
                         </div>
                         <div style={{ height: 'min(14rem, 32vh)', minHeight: '11rem' }}>
                           <ChartWithRightGutter>
-                          <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                            <BarChart data={demoTodayLegsPnlChartRows} margin={{ top: 4, right: 8, left: 4, bottom: 4 }}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
-                              <XAxis
-                                dataKey="symbolLabel"
-                                stroke="#adb5bd"
-                                tick={{ fontSize: 9 }}
-                                interval={0}
-                                angle={demoTodayLegsPnlChartRows.length > 6 ? -28 : 0}
-                                textAnchor={demoTodayLegsPnlChartRows.length > 6 ? 'end' : 'middle'}
-                                height={demoTodayLegsPnlChartRows.length > 6 ? 52 : 28}
-                              />
-                              <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={52} />
-                              <Tooltip
-                                formatter={(value: number) => formatInrRupee(value)}
-                                labelFormatter={(_, payload) =>
-                                  payload?.[0]?.payload?.symbolFull != null
-                                    ? String(payload[0].payload.symbolFull)
-                                    : ''
-                                }
-                                contentStyle={{
-                                  background: '#212529',
-                                  border: '1px solid #495057',
-                                  borderRadius: 8,
-                                  fontSize: 12,
-                                }}
-                              />
-                              <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
-                              <Bar dataKey="netPnl" name="Net" maxBarSize={36} radius={[2, 2, 0, 0]}>
-                                {demoTodayLegsPnlChartRows.map((r) => (
-                                  <Cell key={r.key} fill={r.netPnl >= 0 ? '#198754' : '#dc3545'} />
-                                ))}
-                              </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
+                            <LwSyntheticHistogram rows={demoTodayLegsLwBars} heightPx={224} />
                           </ChartWithRightGutter>
                         </div>
                       </div>
@@ -7320,46 +7218,7 @@ export function KiteInstrumentsPage() {
                                     style={{ height: '14rem' }}
                                   >
                                     <ChartWithRightGutter>
-                                      <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                                      <BarChart
-                                        data={demoFullReportPnlChartRows}
-                                        margin={{ top: 8, right: 8, left: 4, bottom: 4 }}
-                                      >
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
-                                        <XAxis dataKey="dayLabel" stroke="#adb5bd" tick={{ fontSize: 10 }} />
-                                        <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={52} />
-                                        <Tooltip
-                                          formatter={(value: number, name: string) => [
-                                            formatInrRupee(value),
-                                            name === 'netPnl'
-                                              ? 'Net'
-                                              : name === 'grossPnl'
-                                                ? 'Gross'
-                                                : 'Fees',
-                                          ]}
-                                          labelFormatter={(_, payload) =>
-                                            payload?.[0]?.payload?.reportDate != null
-                                              ? String(payload[0].payload.reportDate)
-                                              : ''
-                                          }
-                                          contentStyle={{
-                                            background: '#212529',
-                                            border: '1px solid #495057',
-                                            borderRadius: 8,
-                                            fontSize: 12,
-                                          }}
-                                        />
-                                        <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
-                                        <Bar dataKey="netPnl" name="netPnl" maxBarSize={40} radius={[2, 2, 0, 0]}>
-                                          {demoFullReportPnlChartRows.map((r) => (
-                                            <Cell
-                                              key={r.reportDate}
-                                              fill={r.netPnl >= 0 ? '#198754' : '#dc3545'}
-                                            />
-                                          ))}
-                                        </Bar>
-                                      </BarChart>
-                                    </ResponsiveContainer>
+                                      <LwSyntheticHistogram rows={demoFullReportPnlLwHistogram} heightPx={208} />
                                     </ChartWithRightGutter>
                                   </div>
                                 </Col>
@@ -7370,39 +7229,13 @@ export function KiteInstrumentsPage() {
                                     style={{ height: '14rem' }}
                                   >
                                     <ChartWithRightGutter>
-                                    <ResponsiveContainer width="100%" height="100%" debounce={50}>
-                                      <LineChart
-                                        data={demoFullReportPnlChartRows}
-                                        margin={{ top: 8, right: 8, left: 4, bottom: 4 }}
-                                      >
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
-                                        <XAxis dataKey="dayLabel" stroke="#adb5bd" tick={{ fontSize: 10 }} />
-                                        <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={52} />
-                                        <Tooltip
-                                          formatter={(value: number) => formatInrRupee(value)}
-                                          labelFormatter={(_, payload) =>
-                                            payload?.[0]?.payload?.reportDate != null
-                                              ? String(payload[0].payload.reportDate)
-                                              : ''
-                                          }
-                                          contentStyle={{
-                                            background: '#212529',
-                                            border: '1px solid #495057',
-                                            borderRadius: 8,
-                                            fontSize: 12,
-                                          }}
-                                        />
-                                        <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
-                                        <Line
-                                          type="monotone"
-                                          dataKey="cumulativeNet"
-                                          name="Cumulative net"
-                                          stroke="#0dcaf0"
-                                          dot={{ r: 3, fill: '#0dcaf0' }}
-                                          strokeWidth={2}
-                                        />
-                                      </LineChart>
-                                    </ResponsiveContainer>
+                                      <LwTimeLine
+                                        points={demoFullReportPnlLwCumulativePoints}
+                                        heightPx={208}
+                                        stroke="#0dcaf0"
+                                        dots
+                                        zeroBaseline
+                                      />
                                     </ChartWithRightGutter>
                                   </div>
                                 </Col>

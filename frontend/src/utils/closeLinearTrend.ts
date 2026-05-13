@@ -85,7 +85,7 @@ export function attachLinearTrendToChartPoints(points: ChartPointWithMa[]): Char
   return points.map((p, i) => ({ ...p, trendLine: trend[i] }))
 }
 
-/** Y-domain for Recharts including each bar's `trendLine` value (same padding rule as OHLC+MAs). */
+/** Y-domain including each bar's `trendLine` value (same padding rule as OHLC+MAs); fed into fixed price-scale range. */
 export function yDomainForTrendRecharts(
   data: readonly ChartPointWithMaAndTrend[],
   visibility: MaLineVisibility,

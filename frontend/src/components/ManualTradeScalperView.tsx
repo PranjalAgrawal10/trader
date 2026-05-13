@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Badge, Card, Col, Form, Row, Spinner } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
-import { ReferenceLine } from 'recharts'
 import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
 import { CHART_FULLSCREEN_META_WRAP_CLASS, CHART_FULLSCREEN_META_WRAP_STYLE } from '../constants/chartLayout'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
@@ -255,34 +254,6 @@ export function ManualTradeScalperView({
     [demoPaperBuyMarkers, chartData, interval],
   )
 
-  const paperBuyReferenceLines = useMemo(() => {
-    return paperBuyDataIndices.map((di, seg) => {
-      const rowPt = chartData[di]
-      if (!rowPt || !selected) return null
-      return (
-        <ReferenceLine
-          key={`demo-pbuy-${selected.instrumentToken}-${seg}-${rowPt.t}`}
-          x={rowPt.idx}
-          stroke="#84cc16"
-          strokeWidth={1.35}
-          strokeDasharray="5 5"
-          opacity={0.92}
-        />
-      )
-    })
-  }, [paperBuyDataIndices, chartData, selected])
-
-  const paperLastBuyReferenceLine =
-    paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice) ? (
-      <ReferenceLine
-        y={paperLastBuyPrice}
-        stroke="#f59e0b"
-        strokeWidth={1.5}
-        strokeDasharray="4 6"
-        label={{ value: 'Last buy', position: 'insideLeft', fill: '#f59e0b', fontSize: 9, fontWeight: 600 }}
-      />
-    ) : null
-
   const rechartsYDomain = useMemo(() => {
     const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     let d = extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
@@ -521,15 +492,8 @@ export function ManualTradeScalperView({
                 paperBuyDataIndices={paperBuyDataIndices}
                 mlPredictionEntries={mlPredictionEntries}
                 rechartsYDomain={rechartsYDomain ?? undefined}
-                referenceLines={
-                  <>
-                    {paperBuyReferenceLines}
-                    {paperLastBuyReferenceLine}
-                  </>
-                }
                 density="compact"
                 newerGhostBars={Math.max(0, -chartPanOffsetBars)}
-                priceVerticalZoomScale={priceVerticalZoomScale}
               />
             </div>
           </div>

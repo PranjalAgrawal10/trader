@@ -213,6 +213,8 @@ See `frontend/.env.example`. Only variables prefixed with `VITE_` are exposed to
 
 The SPA uses **React Bootstrap** (components) and **Bootstrap 5** (CSS). `index.html` defaults **`data-bs-theme="dark"`**; on load **`main.tsx`** applies the saved **Profile → Appearance** choice (light / dark / system) from **`localStorage`** (`**trader-theme-preference**`) so the whole app, including **login**, matches the user’s mode.
 
+Time-series OHLC dashboards (instrument strips, cumulative/fill **P&amp;L** curves, histogram-style bars such as trades and demo reports) render with **[TradingView Lightweight Charts™](https://tradingview.github.io/lightweight-charts/)** via **`npm` dependency `lightweight-charts`**; **pie** summaries (direction vote and per-engine outcomes on **Auto predictions**) remain on **Recharts**.
+
 Example layout for production: see **[Deploy to DigitalOcean App Platform](#deploy-to-digitalocean-app-platform)** and **`.do/app.yaml`**.
 
 ## Deploy to DigitalOcean App Platform

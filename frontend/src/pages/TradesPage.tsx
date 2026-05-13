@@ -1,30 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import { Card, Col, Row, Table } from 'react-bootstrap'
 import { api } from '../api/client'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
+import type { LwSyntheticBarRow } from '../components/LwMiscCharts'
+import { LwSyntheticHistogram, LwTimeLine } from '../components/LwMiscCharts'
 import { Layout } from '../components/Layout'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
-
-function formatInr(amount: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount)
-}
 
 interface TradeRow {
   id: string
@@ -48,32 +29,36 @@ export function TradesPage() {
       .catch(() => setError('Failed to load trades.'))
   }, [])
 
-  const pnlCharts = useMemo(() => {
+  const lwTradeCharts = useMemo(() => {
     const sorted = [...rows].sort(
       (a, b) => new Date(a.executedAt).getTime() - new Date(b.executedAt).getTime(),
     )
     let cumulative = 0
-    const cumulativeSeries = sorted.map((t, idx) => {
+    let lastTs = 0
+    const cumulativePoints: { timeMs: number; value: number }[] = []
+    for (const t of sorted) {
+      const base = new Date(t.executedAt).getTime()
+      const timeMs = Math.max(lastTs + 1, base)
+      lastTs = timeMs
       const leg =
         t.realizedPnl != null && Number.isFinite(Number(t.realizedPnl)) ? Number(t.realizedPnl) : null
       if (leg != null) cumulative += leg
-      return {
-        seq: idx + 1,
-        cumulativeRealizedPnl: cumulative,
-        tradeRealizedPnl: leg,
-        executedAt: t.executedAt,
-        symbol: t.symbol,
-      }
-    })
-    const perTradeBars = sorted
+      cumulativePoints.push({ timeMs, value: cumulative })
+    }
+    const perTradeBars: LwSyntheticBarRow[] = sorted
       .map((t, idx) => ({
         key: t.id,
         label: `${idx + 1}`,
-        symbol: t.symbol,
         net: t.realizedPnl != null && Number.isFinite(Number(t.realizedPnl)) ? Number(t.realizedPnl) : null,
       }))
       .filter((x): x is typeof x & { net: number } => x.net != null)
-    return { cumulativeSeries, perTradeBars }
+      .map((r) => ({
+        key: r.key,
+        label: r.label,
+        value: r.net,
+        color: r.net >= 0 ? '#198754' : '#dc3545',
+      }))
+    return { cumulativePoints, perTradeBars }
   }, [rows])
 
   const hasRealizedPnl = rows.some(
@@ -101,35 +86,7 @@ export function TradesPage() {
                 <Card.Subtitle className="text-secondary small mb-2">Cumulative realized P&amp;L</Card.Subtitle>
                 <div style={{ height: '14rem' }}>
                   <ChartWithRightGutter>
-                    <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={pnlCharts.cumulativeSeries} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
-                      <XAxis dataKey="seq" stroke="#adb5bd" tick={{ fontSize: 10 }} />
-                      <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={48} />
-                      <Tooltip
-                        formatter={(value: number) => formatInr(value)}
-                        labelFormatter={(_, payload) => {
-                          const p = payload?.[0]?.payload as { executedAt?: string; symbol?: string } | undefined
-                          if (!p?.executedAt) return ''
-                          return `${p.symbol ?? ''} · ${formatLocalDateTime(p.executedAt)}`
-                        }}
-                        contentStyle={{
-                          background: '#212529',
-                          border: '1px solid #495057',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                      />
-                      <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
-                      <Line
-                        type="monotone"
-                        dataKey="cumulativeRealizedPnl"
-                        stroke="#fd7e14"
-                        strokeWidth={2}
-                        dot={{ r: 2 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                    <LwTimeLine points={lwTradeCharts.cumulativePoints} heightPx={224} zeroBaseline />
                   </ChartWithRightGutter>
                 </div>
               </Card.Body>
@@ -143,32 +100,7 @@ export function TradesPage() {
                 </Card.Subtitle>
                 <div style={{ height: '14rem' }}>
                   <ChartWithRightGutter>
-                    <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={pnlCharts.perTradeBars} margin={{ top: 6, right: 8, left: 4, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#49505733" />
-                      <XAxis dataKey="label" stroke="#adb5bd" tick={{ fontSize: 10 }} />
-                      <YAxis stroke="#adb5bd" tick={{ fontSize: 10 }} width={48} />
-                      <Tooltip
-                        formatter={(value: number) => formatInr(value)}
-                        labelFormatter={(_, payload) => {
-                          const p = payload?.[0]?.payload as { symbol?: string } | undefined
-                          return p?.symbol ?? ''
-                        }}
-                        contentStyle={{
-                          background: '#212529',
-                          border: '1px solid #495057',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                      />
-                      <ReferenceLine y={0} stroke="#6c757d" strokeDasharray="4 4" />
-                      <Bar dataKey="net" maxBarSize={36} radius={[2, 2, 0, 0]}>
-                        {pnlCharts.perTradeBars.map((r) => (
-                          <Cell key={r.key} fill={r.net >= 0 ? '#198754' : '#dc3545'} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                    <LwSyntheticHistogram rows={lwTradeCharts.perTradeBars} heightPx={224} />
                   </ChartWithRightGutter>
                 </div>
               </Card.Body>
