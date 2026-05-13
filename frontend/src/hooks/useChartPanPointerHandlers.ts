@@ -129,6 +129,12 @@ export function useChartPanPointerHandlers(options: {
         transform: `translateX(${rubberTranslateX}px)`,
         transition: dragging ? undefined : RELEASE_TRANSITION,
         willChange: dragging ? 'transform' : undefined,
+        boxSizing: 'border-box',
+        borderRadius: 'var(--bs-border-radius)',
+        border: '1px solid var(--bs-border-color-translucent)',
+        backgroundColor: dragging
+          ? 'color-mix(in srgb, var(--bs-secondary-bg) 78%, transparent)'
+          : 'color-mix(in srgb, var(--bs-secondary-bg) 52%, transparent)',
       }
     : undefined
 

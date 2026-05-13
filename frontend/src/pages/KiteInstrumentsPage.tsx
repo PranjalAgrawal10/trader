@@ -48,6 +48,10 @@ import {
   type HistoricalChartCandlesResponse,
 } from '../api/kiteChartHistorical'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
+import {
+  CHART_FULLSCREEN_META_WRAP_CLASS,
+  CHART_FULLSCREEN_META_WRAP_STYLE,
+} from '../constants/chartLayout'
 import { Layout } from '../components/Layout'
 import { ChartZoomControls } from '../components/ChartZoomControls'
 import { HistoricalRangeCaption } from '../components/HistoricalRangeCaption'
@@ -1372,15 +1376,6 @@ function effectiveCustomEmaPeriod(visibility: MaLineVisibility, period: number):
   return n
 }
 
-
-/** Top-left scroll stack when the chart panel is browser-fullscreen. */
-const CHART_FULLSCREEN_META_WRAP_CLASS = 'align-self-start text-start mb-2 flex-shrink-0 small border-bottom border-secondary pb-2'
-const CHART_FULLSCREEN_META_WRAP_STYLE: { maxHeight: string; overflowY: 'auto'; maxWidth: string; WebkitOverflowScrolling: 'touch' } = {
-  maxHeight: 'min(42vh, 28rem)',
-  overflowY: 'auto',
-  maxWidth: 'min(42rem, 100%)',
-  WebkitOverflowScrolling: 'touch',
-}
 
 /** Caption strip + sticky thead + ~5 tbody rows; additional rows scroll inside the box. */
 const ML_PREDICTION_HISTORY_SCROLL_MAX_HEIGHT_COMPACT = 'calc(1.85rem + 2.1rem + (5 * 2rem))'
@@ -3177,6 +3172,7 @@ function CompactPriceChart({
   demoPaperBuyMarkers,
   paperLastBuyPrice,
   zerodhaConnected,
+  tileChartControlsSlot,
 }: {
   row: KiteInstrumentRow
   rangePreset: ChartRangePreset
@@ -3192,6 +3188,8 @@ function CompactPriceChart({
   /** Latest demo BUY fill for an open paper long — horizontal guide. */
   paperLastBuyPrice?: number | null
   zerodhaConnected: boolean
+  /** Per-tile chrome inside the fullscreen element (interval override, etc.). */
+  tileChartControlsSlot?: ReactNode
 }) {
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(true)
@@ -3405,6 +3403,26 @@ function CompactPriceChart({
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
+  const compactChartZoomToolbar = (
+    <ChartZoomControls
+      idPrefix={`fav-chart-${row.instrumentToken}`}
+      totalBars={series.length}
+      visibleBarCount={zoomVisibleBars}
+      onHorizontalZoomIn={onChartZoomIn}
+      onHorizontalZoomOut={onChartZoomOut}
+      onHorizontalZoomReset={onChartZoomReset}
+      verticalZoomScale={priceVerticalZoomScale}
+      onVerticalZoomIn={onVerticalZoomIn}
+      onVerticalZoomOut={onVerticalZoomOut}
+      onVerticalZoomReset={onVerticalZoomReset}
+      compact
+      onToggleFullscreen={toggleFullscreen}
+      fullscreenActive={fullscreenActive}
+      onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
+      chartRefreshing={loading}
+    />
+  )
+
   const compactHasChart = !error && series.length > 0
   const compactMetaOutside = !fullscreenActive || !compactHasChart
 
@@ -3470,6 +3488,7 @@ function CompactPriceChart({
         >
           {fullscreenActive ? (
             <div className={CHART_FULLSCREEN_META_WRAP_CLASS} style={CHART_FULLSCREEN_META_WRAP_STYLE}>
+              {tileChartControlsSlot}
               {candleRange && !error ? (
                 <HistoricalRangeCaption
                   compact
@@ -3486,25 +3505,15 @@ function CompactPriceChart({
                 candleSeries={seriesWithCustom}
                 onPredictionHistoryChange={setMlPredictionOverlayEntries}
               />
+              {compactChartZoomToolbar}
             </div>
           ) : null}
-          <ChartZoomControls
-            idPrefix={`fav-chart-${row.instrumentToken}`}
-            totalBars={series.length}
-            visibleBarCount={zoomVisibleBars}
-            onHorizontalZoomIn={onChartZoomIn}
-            onHorizontalZoomOut={onChartZoomOut}
-            onHorizontalZoomReset={onChartZoomReset}
-            verticalZoomScale={priceVerticalZoomScale}
-            onVerticalZoomIn={onVerticalZoomIn}
-            onVerticalZoomOut={onVerticalZoomOut}
-            onVerticalZoomReset={onVerticalZoomReset}
-            compact
-            onToggleFullscreen={toggleFullscreen}
-            fullscreenActive={fullscreenActive}
-            onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
-            chartRefreshing={loading}
-          />
+          {!fullscreenActive ? (
+            <>
+              {tileChartControlsSlot ? <div className="mb-2">{tileChartControlsSlot}</div> : null}
+              {compactChartZoomToolbar}
+            </>
+          ) : null}
           <div
             className={fullscreenActive ? 'flex-grow-1 w-100' : 'w-100'}
             style={{
@@ -3802,25 +3811,6 @@ function FavoritesChartsGrid({
                     ) : null}
                   </div>
                 </div>
-                <Form.Group className="mb-2" controlId={`fav-iv-${row.instrumentToken}`}>
-                  <Form.Label className="small text-secondary text-uppercase mb-1">Candles for this symbol</Form.Label>
-                  <Form.Select
-                    size="sm"
-                    value={chartIntervalByInstrumentToken[row.instrumentToken] ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      onInstrumentIntervalChange(row.instrumentToken, v === '' ? null : (v as ChartInterval))
-                    }}
-                    aria-label={`Chart interval for ${row.tradingsymbol}`}
-                  >
-                    <option value="">Default ({defaultInterval})</option>
-                    {CHART_INTERVALS.map((iv) => (
-                      <option key={iv} value={iv}>
-                        {iv}
-                      </option>
-                    ))}
-                  </Form.Select>
-                </Form.Group>
                 <CompactPriceChart
                   row={row}
                   rangePreset={rangePreset}
@@ -3834,6 +3824,29 @@ function FavoritesChartsGrid({
                   demoPaperBuyMarkers={demoPaperOpenBuysByInstrumentToken[row.instrumentToken]}
                   paperLastBuyPrice={demoPaperLastBuyPriceByInstrumentToken[row.instrumentToken] ?? null}
                   zerodhaConnected={zerodhaConnected}
+                  tileChartControlsSlot={
+                    <Form.Group className="mb-0" controlId={`fav-iv-${row.instrumentToken}`}>
+                      <Form.Label className="small text-secondary text-uppercase mb-1">
+                        Candles for this symbol
+                      </Form.Label>
+                      <Form.Select
+                        size="sm"
+                        value={chartIntervalByInstrumentToken[row.instrumentToken] ?? ''}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          onInstrumentIntervalChange(row.instrumentToken, v === '' ? null : (v as ChartInterval))
+                        }}
+                        aria-label={`Chart interval for ${row.tradingsymbol}`}
+                      >
+                        <option value="">Default ({defaultInterval})</option>
+                        {CHART_INTERVALS.map((iv) => (
+                          <option key={iv} value={iv}>
+                            {iv}
+                          </option>
+                        ))}
+                      </Form.Select>
+                    </Form.Group>
+                  }
                 />
                 <TrendAnalysisMultiPanel
                   instrumentToken={row.instrumentToken}
@@ -4139,6 +4152,25 @@ function InstrumentChartCard({
   )
   const onVerticalZoomReset = useCallback(() => setPriceVerticalZoomScale(1), [])
 
+  const browseChartZoomToolbar = (
+    <ChartZoomControls
+      idPrefix="browse-chart-zoom"
+      totalBars={displayWithMa.length}
+      visibleBarCount={zoomVisibleBars}
+      onHorizontalZoomIn={onChartZoomIn}
+      onHorizontalZoomOut={onChartZoomOut}
+      onHorizontalZoomReset={onChartZoomReset}
+      verticalZoomScale={priceVerticalZoomScale}
+      onVerticalZoomIn={onVerticalZoomIn}
+      onVerticalZoomOut={onVerticalZoomOut}
+      onVerticalZoomReset={onVerticalZoomReset}
+      onToggleFullscreen={toggleFullscreen}
+      fullscreenActive={fullscreenActive}
+      onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
+      chartRefreshing={loading}
+    />
+  )
+
   const browseHasChartData = !error && displayWithMa.length > 0
   const browseDetailMetaInFullscreen = fullscreenActive && browseHasChartData
 
@@ -4270,24 +4302,10 @@ function InstrumentChartCard({
                 {fullscreenActive ? (
                   <div className={CHART_FULLSCREEN_META_WRAP_CLASS} style={CHART_FULLSCREEN_META_WRAP_STYLE}>
                     {browseDetailMeta}
+                    {browseChartZoomToolbar}
                   </div>
                 ) : null}
-                <ChartZoomControls
-                  idPrefix="browse-chart-zoom"
-                  totalBars={displayWithMa.length}
-                  visibleBarCount={zoomVisibleBars}
-                  onHorizontalZoomIn={onChartZoomIn}
-                  onHorizontalZoomOut={onChartZoomOut}
-                  onHorizontalZoomReset={onChartZoomReset}
-                  verticalZoomScale={priceVerticalZoomScale}
-                  onVerticalZoomIn={onVerticalZoomIn}
-                  onVerticalZoomOut={onVerticalZoomOut}
-                  onVerticalZoomReset={onVerticalZoomReset}
-                  onToggleFullscreen={toggleFullscreen}
-                  fullscreenActive={fullscreenActive}
-                  onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
-                  chartRefreshing={loading}
-                />
+                {!fullscreenActive ? browseChartZoomToolbar : null}
                 <div
                   className={fullscreenActive ? 'flex-grow-1 w-100' : undefined}
                   style={{
@@ -6612,6 +6630,23 @@ export function KiteInstrumentsPage() {
                 selectedInstrumentToken={demoPaperToken}
                 onSelectedInstrumentTokenChange={setDemoPaperToken}
                 paperLastBuyPrice={manualTradePaperLastBuyPrice}
+                chartFullscreenToolbar={
+                  <ChartSettingsToolbar
+                    idPrefix="manual-trade-scalper"
+                    rangePreset={chartRangePreset}
+                    onRangePresetChange={setChartRangePreset}
+                    interval={chartIntervalByToken[demoPaperToken.trim()] ?? chartInterval}
+                    onIntervalChange={(iv) => persistInstrumentChartInterval(demoPaperToken.trim(), iv)}
+                    trendAnalysisSelections={trendAnalysisSelections}
+                    onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
+                    graphType={chartGraphType}
+                    onGraphTypeChange={setChartGraphType}
+                    maLineVisibility={maLineVisibility}
+                    onMaLineVisibilityChange={patchMaLineVisibility}
+                    customEmaPeriod={customEmaPeriod}
+                    onCustomEmaPeriodChange={setCustomEmaPeriod}
+                  />
+                }
                 kiteChart={{
                   rangePreset: chartRangePreset,
                   interval: chartIntervalByToken[demoPaperToken.trim()] ?? chartInterval,

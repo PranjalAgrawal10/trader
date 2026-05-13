@@ -1,9 +1,11 @@
 import axios from 'axios'
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Badge, Card, Col, Form, Row, Spinner } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
 import { ReferenceLine } from 'recharts'
 import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
+import { CHART_FULLSCREEN_META_WRAP_CLASS, CHART_FULLSCREEN_META_WRAP_STYLE } from '../constants/chartLayout'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useChartPanPointerHandlers } from '../hooks/useChartPanPointerHandlers'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
@@ -88,6 +90,7 @@ export function ManualTradeScalperView({
   onSelectedInstrumentTokenChange,
   paperLastBuyPrice,
   kiteChart,
+  chartFullscreenToolbar,
 }: {
   isZerodha: boolean
   tradingLocks: ManualTradeScalperInstrument[]
@@ -104,6 +107,8 @@ export function ManualTradeScalperView({
     onChartZoomStoredChange: (stored: number | null) => void
     demoPaperBuyMarkers: readonly DemoPaperOpenBuyMarkerDto[]
   }
+  /** Range / interval / graph / indicators; shown in fullscreen scroll strip with caption + zoom. */
+  chartFullscreenToolbar?: ReactNode
 }) {
   const {
     rangePreset,
@@ -318,6 +323,27 @@ export function ManualTradeScalperView({
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
+  const manualChartZoomToolbar =
+    selected != null ? (
+      <ChartZoomControls
+        idPrefix={`manual-trade-chart-${selected.instrumentToken}`}
+        totalBars={series.length}
+        visibleBarCount={zoomVisibleBars}
+        onHorizontalZoomIn={onChartZoomIn}
+        onHorizontalZoomOut={onChartZoomOut}
+        onHorizontalZoomReset={onChartZoomReset}
+        verticalZoomScale={priceVerticalZoomScale}
+        onVerticalZoomIn={onVerticalZoomIn}
+        onVerticalZoomOut={onVerticalZoomOut}
+        onVerticalZoomReset={onVerticalZoomReset}
+        compact
+        onToggleFullscreen={toggleFullscreen}
+        fullscreenActive={fullscreenActive}
+        onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
+        chartRefreshing={chartLoading}
+      />
+    ) : null
+
   const liveVsBar = useMemo(() => {
     const last = live.lastPrice
     const ref = series.length > 0 ? series[series.length - 1]?.close : null
@@ -408,11 +434,14 @@ export function ManualTradeScalperView({
         </Row>
 
         <p className="small text-muted mb-2 mb-md-3">
-          <strong>Chart</strong> uses the same <strong>Range</strong>, <strong>interval</strong>, line/bar/candle mode,{' '}
-          <strong>MA / S&amp;R</strong> toggles, <strong>zoom</strong>, and refresh cadence as{' '}
-          <strong>Instruments → Browse / Favorites</strong> (toolbar above). Change those on the Instruments page —
-          favorites stay in sync with this view.
+          <strong>Chart</strong> uses the same persisted <strong>Range</strong>, <strong>interval</strong>, line/bar/candle
+          mode, <strong>MA / S&amp;R</strong> toggles, <strong>horizontal</strong>/<strong>vertical</strong> zoom, and
+          refresh cadence as <strong>Browse</strong> / <strong>All favorites</strong>.
         </p>
+
+        {chartFullscreenToolbar && !fullscreenActive ? (
+          <div className="mb-2">{chartFullscreenToolbar}</div>
+        ) : null}
 
         {typeLabel?.length ? (
           <p className="small text-muted mb-2 mb-md-3">
@@ -458,7 +487,8 @@ export function ManualTradeScalperView({
             }
           >
             {fullscreenActive ? (
-              <div className="align-self-start text-start mb-2 flex-shrink-0 small border-bottom border-secondary pb-2">
+              <div className={CHART_FULLSCREEN_META_WRAP_CLASS} style={CHART_FULLSCREEN_META_WRAP_STYLE}>
+                {chartFullscreenToolbar}
                 {candleRange && !chartError ? (
                   <HistoricalRangeCaption
                     compact
@@ -467,25 +497,10 @@ export function ManualTradeScalperView({
                     toIso={candleRange.to}
                   />
                 ) : null}
+                {manualChartZoomToolbar}
               </div>
             ) : null}
-            <ChartZoomControls
-              idPrefix={`manual-trade-chart-${selected.instrumentToken}`}
-              totalBars={series.length}
-              visibleBarCount={zoomVisibleBars}
-              onHorizontalZoomIn={onChartZoomIn}
-              onHorizontalZoomOut={onChartZoomOut}
-              onHorizontalZoomReset={onChartZoomReset}
-              verticalZoomScale={priceVerticalZoomScale}
-              onVerticalZoomIn={onVerticalZoomIn}
-              onVerticalZoomOut={onVerticalZoomOut}
-              onVerticalZoomReset={onVerticalZoomReset}
-              compact
-              onToggleFullscreen={toggleFullscreen}
-              fullscreenActive={fullscreenActive}
-              onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
-              chartRefreshing={chartLoading}
-            />
+            {!fullscreenActive ? manualChartZoomToolbar : null}
             <div
               className={fullscreenActive ? 'flex-grow-1 w-100' : 'w-100'}
               style={{
