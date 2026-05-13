@@ -2314,7 +2314,7 @@ function MlAutomationOutcomesPieGrid({
   rows: readonly MlAutomationRecentRow[]
   priceModels: PriceDirectionModelsApiResponse | null
 }) {
-  const [piesExpanded, setPiesExpanded] = useState(true)
+  const [piesExpanded, setPiesExpanded] = useState(false)
   const outcomesPiesCollapseId = useId()
   const modelIds = useMemo(
     () => orderedAutomationEngineIds(priceModels, rows),
@@ -2557,7 +2557,7 @@ function MlAutomationDirectionVotePie({
   /** Rows returned from server before search + table filters (for caption). */
   totalLoaded: number
 }) {
-  const [pieExpanded, setPieExpanded] = useState(true)
+  const [pieExpanded, setPieExpanded] = useState(false)
   const directionPieCollapseId = useId()
   const directions = useMemo(
     () =>
@@ -2703,7 +2703,7 @@ function MlFullscreenAllModelsPies({
   lightGbmHistory: readonly MlPredictionLogEntry[]
   compact?: boolean
 }) {
-  const [piesExpanded, setPiesExpanded] = useState(true)
+  const [piesExpanded, setPiesExpanded] = useState(false)
   const fullscreenPiesCollapseId = useId()
   const modelIds = useMemo(
     () => orderedModelIdsForFullscreenPies(priceModels, history, lightGbmHistory),
