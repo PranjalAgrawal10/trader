@@ -21,6 +21,16 @@ export function clampChartPanOffsetBars(
   return Math.min(Math.max(0, panOffsetBars), m)
 }
 
+/** Makes the trailing (newest) bar sit on horizontal center for line/bar charts (matches candle cluster centering). */
+export function xAxisDomainCenterLatest(data: readonly { idx: number }[]): [number, number] | undefined {
+  if (data.length === 0) return undefined
+  const idxMin = data[0].idx
+  const idxMax = data[data.length - 1].idx
+  if (idxMin > idxMax) return undefined
+  if (idxMin === idxMax) return [idxMin - 0.5, idxMax + 0.5]
+  return [idxMin, 2 * idxMax - idxMin]
+}
+
 /**
  * When zoomed, shows a sliding window of {@link visibleBarCount} bars. {@link panOffsetBars} moves the window left
  * (older): 0 = anchored to the latest bar; max = oldest possible window.

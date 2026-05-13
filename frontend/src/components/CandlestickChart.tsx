@@ -28,7 +28,7 @@ const VOL_PRICE_GAP_PX = 4
 const VOL_BAR_INSET_TOP = 4
 const VOL_BAR_INSET_BOTTOM = 2
 
-/** When zoomed to few bars, avoid stretching candles across the full plot — keep a max pitch and anchor the cluster to the right (latest on the right edge). */
+/** When zoomed to few bars, avoid stretching candles across the full plot — keep a max pitch and center the cluster (latest bar in the middle). */
 const MAX_CANDLE_SLOT_PX = 28
 
 /** Bullish / bearish candle colors (typical trading terminal green / red). */
@@ -291,10 +291,12 @@ export function CandlestickChart({
     let clusterStartX = PAD.left
     if (naturalSlotW > MAX_CANDLE_SLOT_PX) {
       slotW = MAX_CANDLE_SLOT_PX
-      clusterStartX = PAD.left + plotW - n * slotW
-      if (clusterStartX < PAD.left) {
+      const clusterW = n * slotW
+      if (clusterW > plotW) {
         slotW = naturalSlotW
         clusterStartX = PAD.left
+      } else {
+        clusterStartX = PAD.left + (plotW - clusterW) / 2
       }
     }
     const bodyW = Math.min(Math.max(1, slotW * 0.65), 14)

@@ -29,6 +29,7 @@ import {
   SR_LINE_COLORS,
   SR_SWING_PERIOD,
 } from '../utils/movingAverages'
+import { xAxisDomainCenterLatest } from '../utils/chartZoom'
 
 /** Recharts margins for OHLC-derived line/bar (matches legacy Kite layout). */
 const RECHARTS_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
@@ -183,9 +184,11 @@ function InstrumentChartCornerLegend({
 function InstrumentVolumeHistogram({
   chartData,
   compact,
+  centeredXDomain,
 }: {
   chartData: ChartPointWithMa[]
   compact?: boolean
+  centeredXDomain?: [number, number]
 }) {
   if (chartData.length === 0) return null
 
@@ -201,7 +204,14 @@ function InstrumentVolumeHistogram({
     >
       <ResponsiveContainer width="100%" height="100%" debounce={50}>
         <BarChart data={chartData} margin={{ ...RECHARTS_MARGINS, top: 3, bottom: 1 }}>
-          <XAxis dataKey="idx" stroke="#adb5bd" hide />
+          <XAxis
+            dataKey="idx"
+            type={centeredXDomain ? 'number' : undefined}
+            domain={centeredXDomain ?? ['auto', 'auto']}
+            allowDataOverflow={Boolean(centeredXDomain)}
+            stroke="#adb5bd"
+            hide
+          />
           <YAxis stroke="#adb5bd" tick={{ fontSize: yTickFs }} width={yAxisWidth} domain={[0, 'auto']} />
           <Tooltip
             cursor={{ fill: 'rgba(255,255,255,0.04)' }}
@@ -351,6 +361,8 @@ export function InstrumentPriceChart({
   density = 'compact',
   showVolume = true,
 }: InstrumentPriceChartProps) {
+  const centeredXDomain = useMemo(() => xAxisDomainCenterLatest(data), [data])
+
   if (graphType === 'candlestick') {
     return (
       <div className="w-100 h-100">
@@ -386,7 +398,15 @@ export function InstrumentPriceChart({
               <ResponsiveContainer width="100%" height="100%">
                 {graphType === 'line' ? (
                   <LineChart data={lineChartData} margin={RECHARTS_MARGINS}>
-                    <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: xTickFs }} hide />
+                    <XAxis
+                      dataKey="idx"
+                      type="number"
+                      domain={centeredXDomain ?? ['dataMin', 'dataMax']}
+                      allowDataOverflow
+                      stroke="#adb5bd"
+                      tick={{ fontSize: xTickFs }}
+                      hide
+                    />
                     <YAxis
                       stroke="#adb5bd"
                       tick={{ fontSize: xTickFs + 1 }}
@@ -415,7 +435,15 @@ export function InstrumentPriceChart({
                   </LineChart>
                 ) : (
                   <ComposedChart data={data} margin={RECHARTS_MARGINS}>
-                    <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: xTickFs }} hide />
+                    <XAxis
+                      dataKey="idx"
+                      type="number"
+                      domain={centeredXDomain ?? ['dataMin', 'dataMax']}
+                      allowDataOverflow
+                      stroke="#adb5bd"
+                      tick={{ fontSize: xTickFs }}
+                      hide
+                    />
                     <YAxis
                       stroke="#adb5bd"
                       tick={{ fontSize: xTickFs + 1 }}
@@ -441,7 +469,7 @@ export function InstrumentPriceChart({
                 )}
               </ResponsiveContainer>
             </div>
-            {showVolume ? <InstrumentVolumeHistogram chartData={data} compact={compactVol} /> : null}
+            {showVolume ? <InstrumentVolumeHistogram chartData={data} compact={compactVol} centeredXDomain={centeredXDomain} /> : null}
           </div>
         </ChartWithRightGutter>
       </div>
