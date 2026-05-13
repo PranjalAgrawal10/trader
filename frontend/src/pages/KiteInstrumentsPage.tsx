@@ -49,6 +49,8 @@ import {
 } from '../api/kiteChartHistorical'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
+import { ChartZoomControls } from '../components/ChartZoomControls'
+import { HistoricalRangeCaption } from '../components/HistoricalRangeCaption'
 import { ManualTradeScalperView } from '../components/ManualTradeScalperView'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { InstrumentPriceChart } from '../components/InstrumentPriceChart'
@@ -61,7 +63,6 @@ import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMark
 import type { ChartPointOhlc, ChartIntervalKey, LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
-  CHART_ZOOM_MIN_BARS,
   clampChartPanAllowNewerGhost,
   sliceChartForZoom,
   zoomInBarCount,
@@ -79,6 +80,19 @@ import {
   type MlPredictionLogEntry,
   type MlPriceDirectionHistoryApiRow,
 } from '../utils/mlPredictionHistory'
+import {
+  CHART_INTERVALS,
+  CHART_LIVE_POLL_MS,
+  CHART_RANGE_LABEL,
+  CHART_RANGE_PRESETS,
+  coerceChartGraphType,
+  coerceChartInterval,
+  coerceChartRangePreset,
+  historicalRangeQueryParams,
+  type ChartGraphType,
+  type ChartInterval,
+  type ChartRangePreset,
+} from '../utils/kiteInstrumentChartShared'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import {
   addCustomEmaToChartPoints,
@@ -822,22 +836,6 @@ function initialAutomationEmailReportDatetimeLocal(): { from: string; to: string
   return { from: dateToDatetimeLocalInputValue(from), to: dateToDatetimeLocalInputValue(to) }
 }
 
-const CHART_INTERVALS = [
-  '1m',
-  '2m',
-  '3m',
-  '4m',
-  '5m',
-  '10m',
-  '15m',
-  '30m',
-  '1h',
-  '4h',
-  '1d',
-  '1w',
-] as const
-type ChartInterval = (typeof CHART_INTERVALS)[number]
-
 const TRADER_TREND_ANALYSIS_INTERVALS_LS = 'trader-trend-analysis-intervals'
 
 /** Preserve chart order — only validated codes from storage. */
@@ -877,87 +875,6 @@ function sortMlAutomationIntervalCodes(intervals: string[]): string[] {
   })
 }
 
-/** Lookback for historical request. Labels mirror candle-style shorthand (5m = last 5 minutes); `1mo` = last calendar month. `auto` = omit from/to (server default per interval). */
-const CHART_RANGE_PRESETS = [
-  'auto',
-  'last5m',
-  'last10m',
-  'last15m',
-  'last30m',
-  'last1h',
-  'last5h',
-  'last10h',
-  'last1d',
-  'last2d',
-  'last5d',
-  'last1mo',
-] as const
-type ChartRangePreset = (typeof CHART_RANGE_PRESETS)[number]
-
-const CHART_RANGE_LABEL: Record<ChartRangePreset, string> = {
-  auto: 'Auto',
-  last5m: '5m',
-  last10m: '10m',
-  last15m: '15m',
-  last30m: '30m',
-  last1h: '1h',
-  last5h: '5h',
-  last10h: '10h',
-  last1d: '1d',
-  last2d: '2d',
-  last5d: '5d',
-  last1mo: '1mo',
-}
-
-function historicalRangeQueryParams(preset: ChartRangePreset): { from?: string; to?: string } {
-  if (preset === 'auto') return {}
-  const to = new Date()
-  const from = new Date(to.getTime())
-  switch (preset) {
-    case 'last5m':
-      from.setUTCMinutes(from.getUTCMinutes() - 5)
-      break
-    case 'last10m':
-      from.setUTCMinutes(from.getUTCMinutes() - 10)
-      break
-    case 'last15m':
-      from.setUTCMinutes(from.getUTCMinutes() - 15)
-      break
-    case 'last30m':
-      from.setUTCMinutes(from.getUTCMinutes() - 30)
-      break
-    case 'last1h':
-      from.setUTCHours(from.getUTCHours() - 1)
-      break
-    case 'last5h':
-      from.setUTCHours(from.getUTCHours() - 5)
-      break
-    case 'last10h':
-      from.setUTCHours(from.getUTCHours() - 10)
-      break
-    case 'last1d':
-      from.setUTCDate(from.getUTCDate() - 1)
-      break
-    case 'last2d':
-      from.setUTCDate(from.getUTCDate() - 2)
-      break
-    case 'last5d':
-      from.setUTCDate(from.getUTCDate() - 5)
-      break
-    case 'last1mo':
-      from.setUTCMonth(from.getUTCMonth() - 1)
-      break
-  }
-  return { from: from.toISOString(), to: to.toISOString() }
-}
-
-type ChartGraphType = 'line' | 'bar' | 'candlestick'
-
-function coerceChartInterval(v: string | null | undefined): ChartInterval {
-  if (v && (CHART_INTERVALS as readonly string[]).includes(v)) return v as ChartInterval
-  return '5m'
-}
-
 function coerceChartIntervalOverrideMap(
   v: Record<string, string> | null | undefined,
 ): Record<string, ChartInterval> {
@@ -968,17 +885,6 @@ function coerceChartIntervalOverrideMap(
     out[token] = raw as ChartInterval
   }
   return out
-}
-
-function coerceChartRangePreset(v: string | null | undefined): ChartRangePreset {
-  if (v && (CHART_RANGE_PRESETS as readonly string[]).includes(v)) return v as ChartRangePreset
-  return 'auto'
-}
-
-function coerceChartGraphType(v: string | null | undefined): ChartGraphType {
-  if (v === 'bar' || v === 'line' || v === 'candlestick') return v
-  if (v === 'trend') return 'candlestick'
-  return 'line'
 }
 
 type MainTab =
@@ -1479,145 +1385,12 @@ const ML_AUTOMATION_TABLE_MAX_HEIGHT = 'min(780px, 75vh)'
 const TODAY_TOP_MOVERS_FETCH_TAKE = 30
 const TODAY_TOP_MOVERS_PAGE_SIZE = 5
 
-/** Fewer bars visible (most recent on the right); reindexed for chart axes. */
-function ChartZoomControls({
-  idPrefix,
-  totalBars,
-  visibleBarCount,
-  onZoomIn,
-  onZoomOut,
-  onReset,
-  compact,
-  onToggleFullscreen,
-  fullscreenActive,
-  onRefreshChart,
-  chartRefreshing,
-}: {
-  idPrefix: string
-  totalBars: number
-  visibleBarCount: number | null
-  onZoomIn: () => void
-  onZoomOut: () => void
-  onReset: () => void
-  compact?: boolean
-  onToggleFullscreen?: () => void
-  fullscreenActive?: boolean
-  onRefreshChart?: () => void
-  chartRefreshing?: boolean
-}) {
-  const refreshBtn = onRefreshChart ? (
-    <Button
-      type="button"
-      variant="outline-secondary"
-      size="sm"
-      id={`${idPrefix}-chart-refresh`}
-      className={compact ? 'py-0 px-2' : undefined}
-      disabled={chartRefreshing}
-      onClick={onRefreshChart}
-      title="Reload candles from server"
-      aria-label="Refresh chart data"
-    >
-      {chartRefreshing ? (
-        <>
-          <Spinner animation="border" size="sm" className="me-1" role="status" />
-          {compact ? '' : 'Refreshing'}
-        </>
-      ) : compact ? (
-        '↻'
-      ) : (
-        'Refresh chart'
-      )}
-    </Button>
-  ) : null
-
-  const fullscreenBtn = onToggleFullscreen ? (
-    <Button
-      type="button"
-      variant="outline-secondary"
-      size="sm"
-      id={`${idPrefix}-fullscreen`}
-      className={compact ? 'py-0 px-2' : undefined}
-      onClick={onToggleFullscreen}
-      title={fullscreenActive ? 'Exit full screen' : 'Full screen chart'}
-      aria-label={fullscreenActive ? 'Exit full screen' : 'Full screen chart'}
-    >
-      {fullscreenActive ? (compact ? 'Exit' : 'Exit full screen') : compact ? 'Full' : 'Full screen'}
-    </Button>
-  ) : null
-
-  if (totalBars < 2) {
-    if (!fullscreenBtn && !refreshBtn) return null
-    return (
-      <div className={`d-flex flex-wrap align-items-center gap-2 ${compact ? 'mb-1' : 'mb-2'}`}>
-        {refreshBtn}
-        {fullscreenBtn}
-      </div>
-    )
-  }
-
-  const showing = visibleBarCount ?? totalBars
-  const zoomed = visibleBarCount != null && visibleBarCount < totalBars
-  const canZoomIn = showing > CHART_ZOOM_MIN_BARS
-  const canZoomOut = zoomed
-  const canReset = zoomed
-  return (
-    <div className={`d-flex flex-wrap align-items-center gap-2 ${compact ? 'mb-1' : 'mb-2'}`}>
-      <span className={`small text-secondary text-uppercase ${compact ? '' : 'me-1'}`}>Zoom</span>
-      <ButtonGroup size="sm">
-        <Button
-          type="button"
-          variant="outline-secondary"
-          id={`${idPrefix}-zoom-in`}
-          disabled={!canZoomIn}
-          onClick={onZoomIn}
-          title="Zoom in (fewer bars, latest on the right)"
-          aria-label="Zoom chart in"
-        >
-          +
-        </Button>
-        <Button
-          type="button"
-          variant="outline-secondary"
-          id={`${idPrefix}-zoom-out`}
-          disabled={!canZoomOut}
-          onClick={onZoomOut}
-          title="Zoom out"
-          aria-label="Zoom chart out"
-        >
-          −
-        </Button>
-        <Button
-          type="button"
-          variant="outline-secondary"
-          id={`${idPrefix}-zoom-reset`}
-          disabled={!canReset}
-          onClick={onReset}
-          title="Show full downloaded range"
-          aria-label="Reset chart zoom"
-        >
-          Reset
-        </Button>
-      </ButtonGroup>
-      {zoomed ? (
-        <span className="small text-muted" style={{ fontSize: compact ? '0.7rem' : undefined }}>
-          {visibleBarCount} / {totalBars} bars · drag chart to pan
-        </span>
-      ) : null}
-      {refreshBtn}
-      {fullscreenBtn}
-    </div>
-  )
-}
-
-
-
 type ChartPoint = ChartPointOhlc
 
 /** Re-fetch OHLC while a chart is mounted (browser tab visible) to keep the series current. */
 // Per-chart historical-OHLC refresh cadence. With many favorite/locked tiles open this
 // multiplies (one timer per tile) so 60s keeps the call rate well under broker quotas
-// while still feeling "live" alongside the websocket tick overlay.
-const CHART_LIVE_POLL_MS = 60_000
+// while still feeling "live" alongside the websocket tick overlay. See CHART_LIVE_POLL_MS in kiteInstrumentChartShared.
 
 function historicalCandlesToChartPoints(data: HistoricalCandlesResponse): ChartPoint[] {
   return data.candles.map((c, idx) => ({
@@ -1653,37 +1426,6 @@ function chartPointsFromHistoricalResponse(data: HistoricalCandlesResponse): Cha
 }
 
 type CandleRangeMeta = { interval: string; from: string; to: string }
-
-function HistoricalRangeCaption({
-  candleInterval,
-  fromIso,
-  toIso,
-  compact,
-}: {
-  candleInterval: string
-  fromIso: string
-  toIso: string
-  compact?: boolean
-}) {
-  const from = formatLocalDateTime(fromIso)
-  const to = formatLocalDateTime(toIso)
-  return (
-    <div className={compact ? 'small text-secondary mb-2' : 'small text-secondary mb-3'}>
-      <div className={compact ? 'mb-0' : 'mb-1'}>
-        <strong className="text-body-secondary">From</strong>{' '}
-        <span className="font-monospace">{from}</span>
-        <span className="text-body-secondary"> - </span>
-        <strong className="text-body-secondary">To</strong>{' '}
-        <span className="font-monospace">{to}</span>
-      </div>
-      <div className="text-muted" style={{ fontSize: compact ? '0.72rem' : '0.78rem' }}>
-        Candle interval: {candleInterval}
-      </div>
-    </div>
-  )
-}
-
-
 
 function ChartSettingsToolbar({
   idPrefix,
@@ -6807,6 +6549,16 @@ export function KiteInstrumentsPage() {
                 selectedInstrumentToken={demoPaperToken}
                 onSelectedInstrumentTokenChange={setDemoPaperToken}
                 paperLastBuyPrice={manualTradePaperLastBuyPrice}
+                kiteChart={{
+                  rangePreset: chartRangePreset,
+                  interval: chartIntervalByToken[demoPaperToken.trim()] ?? chartInterval,
+                  graphType: chartGraphType,
+                  maLineVisibility,
+                  customEmaPeriod,
+                  zoomVisibleBars: chartZoomByToken[demoPaperToken.trim()] ?? null,
+                  onZoomVisibleBarsChange: (bars) => persistInstrumentChartZoom(demoPaperToken.trim(), bars),
+                  demoPaperBuyMarkers: demoPaperOpenBuysByInstrumentToken[demoPaperToken.trim()] ?? [],
+                }}
               />
               <ManualPaperTradePanel
                 heading={<h2 className="h6 text-body mb-2">Manual paper trade</h2>}

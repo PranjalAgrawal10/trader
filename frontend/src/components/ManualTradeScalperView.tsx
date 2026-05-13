@@ -1,32 +1,56 @@
 import axios from 'axios'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Badge, Button, ButtonGroup, Card, Col, Form, Row, Spinner } from 'react-bootstrap'
+import { Alert, Badge, Card, Col, Form, Row, Spinner } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
+import { ReferenceLine } from 'recharts'
 import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
-import { InstrumentPriceChart } from './InstrumentPriceChart'
+import { useChartFullscreen } from '../hooks/useChartFullscreen'
+import { useChartPanPointerHandlers } from '../hooks/useChartPanPointerHandlers'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
+import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
+import {
+  CHART_LIVE_POLL_MS,
+  historicalRangeQueryParams,
+  type ChartGraphType,
+  type ChartInterval,
+  type ChartRangePreset,
+} from '../utils/kiteInstrumentChartShared'
+import type { ChartIntervalKey, LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
+import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
+import {
+  addCustomEmaToChartPoints,
+  CUSTOM_EMA_PERIOD_MAX,
+  CUSTOM_EMA_PERIOD_MIN,
+  extendYDomainWithLivePrice,
+  type ChartPointWithMa,
+  type MaLineVisibility,
+  yDomainForOhlcAndVisibleMas,
+} from '../utils/movingAverages'
 import {
   chartPointsFromHistorical,
-  mergeScalperLiveIntoSeries,
   pctChange,
-  SCALPER_INTERVALS,
-  SCALPER_MA,
-  SCALPER_POLL_MS,
-  SCALPER_RANGES,
-  scalperRangeQueryParams,
-  type ScalperInterval,
-  type ScalperRange,
 } from '../utils/scalperChartHelpers'
-import { formatLocalDateTime } from '../utils/formatLocalDateTime'
-import type { LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
-import type { ChartPointWithMa } from '../utils/movingAverages'
+import {
+  clampChartPanAllowNewerGhost,
+  sliceChartForZoom,
+  zoomInBarCount,
+  zoomOutBarCount,
+} from '../utils/chartZoom'
+import { ChartZoomControls } from './ChartZoomControls'
+import { HistoricalRangeCaption } from './HistoricalRangeCaption'
+import { InstrumentPriceChart } from './InstrumentPriceChart'
 
 export interface ManualTradeScalperInstrument {
   instrumentToken: string
   tradingsymbol: string
   exchange: string
   instrumentType?: string | null
+}
+
+export type DemoPaperOpenBuyMarkerDto = {
+  boughtAtUtc: string
+  contractsRemaining: number
 }
 
 function problemDetail(err: unknown): string {
@@ -37,29 +61,62 @@ function problemDetail(err: unknown): string {
   return 'Request failed.'
 }
 
-/** Tight-interval candles + live ticks (same behaviour as `/scalper`), bound to locks and manual paper-trade symbol. */
+function effectiveCustomEmaPeriod(visibility: MaLineVisibility, period: number): number | null {
+  if (!visibility.showCustomEma) return null
+  const n = Math.floor(period)
+  if (!Number.isFinite(n) || n < CUSTOM_EMA_PERIOD_MIN || n > CUSTOM_EMA_PERIOD_MAX) return null
+  return n
+}
+
+type CandleRangeMeta = { interval: string; from: string; to: string }
+
+/**
+ * Manual paper-trade chart uses the same Kite merged-OHLC pipeline, zoom/pan, refresh cadence,
+ * and toolbar settings as favorite tiles (Instruments → Favorites “All charts”).
+ */
 export function ManualTradeScalperView({
   isZerodha,
   tradingLocks,
   selectedInstrumentToken,
   onSelectedInstrumentTokenChange,
   paperLastBuyPrice,
+  kiteChart,
 }: {
   isZerodha: boolean
   tradingLocks: ManualTradeScalperInstrument[]
   selectedInstrumentToken: string
   onSelectedInstrumentTokenChange: (instrumentToken: string) => void
-  /** Latest demo paper BUY fill when the selected lock has an open long. */
   paperLastBuyPrice?: number | null
+  kiteChart: {
+    rangePreset: ChartRangePreset
+    interval: ChartInterval
+    graphType: ChartGraphType
+    maLineVisibility: MaLineVisibility
+    customEmaPeriod: number
+    zoomVisibleBars: number | null
+    onZoomVisibleBarsChange: (bars: number | null) => void
+    demoPaperBuyMarkers: readonly DemoPaperOpenBuyMarkerDto[]
+  }
 }) {
-  const [interval, setInterval] = useState<ScalperInterval>('1m')
-  const [rangePreset, setRangePreset] = useState<ScalperRange>('last30m')
-  const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
-  const rawSeriesRef = useRef<ChartPointWithMa[] | null>(null)
+  const {
+    rangePreset,
+    interval,
+    graphType,
+    maLineVisibility,
+    customEmaPeriod,
+    zoomVisibleBars,
+    onZoomVisibleBarsChange,
+    demoPaperBuyMarkers,
+  } = kiteChart
+
+  const [series, setSeries] = useState<ChartPointWithMa[]>([])
+  const seriesSourceRef = useRef<ChartPointWithMa[] | null>(null)
   const liveVolAccRef = useRef<LiveTickVolumeAccumulator>({ lastCumulativeVolume: null })
-  const [candleMeta, setCandleMeta] = useState<{ interval: string; from: string; to: string } | null>(null)
+  const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
   const [chartError, setChartError] = useState<string | null>(null)
   const [chartLoading, setChartLoading] = useState(false)
+  const [chartRefreshTick, setChartRefreshTick] = useState(0)
+  const [chartPanOffsetBars, setChartPanOffsetBars] = useState(0)
 
   const selected = useMemo(
     () => tradingLocks.find((r) => r.instrumentToken === selectedInstrumentToken) ?? null,
@@ -71,8 +128,8 @@ export function ManualTradeScalperView({
   const reload = useCallback(
     async (signal?: AbortSignal) => {
       if (!isZerodha || !selected) {
-        setRawSeries([])
-        setCandleMeta(null)
+        setSeries([])
+        setCandleRange(null)
         setChartLoading(false)
         setChartError(null)
         return
@@ -80,15 +137,15 @@ export function ManualTradeScalperView({
       setChartLoading(true)
       setChartError(null)
       try {
-        const range = scalperRangeQueryParams(rangePreset)
-        const data = await fetchMergedHistoricalChartCandles(selected.instrumentToken, interval, range, signal)
+        const extra = historicalRangeQueryParams(rangePreset)
+        const data = await fetchMergedHistoricalChartCandles(selected.instrumentToken, interval, extra, signal)
         if (signal?.aborted) return
-        setRawSeries(chartPointsFromHistorical(data))
-        setCandleMeta({ interval: data.interval, from: data.from, to: data.to })
+        setSeries(chartPointsFromHistorical(data))
+        setCandleRange({ interval: data.interval, from: data.from, to: data.to })
       } catch (err: unknown) {
         if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
-        setRawSeries([])
-        setCandleMeta(null)
+        setSeries([])
+        setCandleRange(null)
         setChartError(problemDetail(err))
       } finally {
         if (!signal?.aborted) setChartLoading(false)
@@ -101,42 +158,143 @@ export function ManualTradeScalperView({
     const ac = new AbortController()
     void reload(ac.signal)
     return () => ac.abort()
-  }, [reload])
+  }, [reload, chartRefreshTick])
 
   useEffect(() => {
     if (!isZerodha || !selected) return
     const id = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
       void reload()
-    }, SCALPER_POLL_MS)
+    }, CHART_LIVE_POLL_MS)
     return () => window.clearInterval(id)
   }, [isZerodha, selected, interval, rangePreset, reload])
 
-  const displaySeries = useMemo(() => {
-    if (rawSeriesRef.current !== rawSeries) {
-      rawSeriesRef.current = rawSeries
+  useEffect(() => {
+    if (zoomVisibleBars != null && series.length > 0 && zoomVisibleBars > series.length) {
+      onZoomVisibleBarsChange(null)
+    }
+  }, [series.length, zoomVisibleBars, onZoomVisibleBarsChange])
+
+  const customEmaApplied = useMemo(
+    () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
+    [maLineVisibility, customEmaPeriod],
+  )
+
+  const tickMergedSeries = useMemo(() => {
+    if (seriesSourceRef.current !== series) {
+      seriesSourceRef.current = series
       liveVolAccRef.current.lastCumulativeVolume = null
     }
-    return mergeScalperLiveIntoSeries(rawSeries, live.lastTick, interval, liveVolAccRef.current)
-  }, [rawSeries, live.lastTick, interval])
+    return mergeLiveTickIntoOhlc(
+      series,
+      live.lastTick,
+      interval as ChartIntervalKey,
+      graphType,
+      liveVolAccRef.current,
+    ) as ChartPointWithMa[]
+  }, [series, live.lastTick, interval, graphType])
+
+  const seriesWithCustom = useMemo(
+    () => addCustomEmaToChartPoints(tickMergedSeries, customEmaApplied),
+    [tickMergedSeries, customEmaApplied],
+  )
+
+  useEffect(() => {
+    setChartPanOffsetBars(0)
+  }, [zoomVisibleBars, selected?.instrumentToken])
+
+  useEffect(() => {
+    setChartPanOffsetBars((p) => clampChartPanAllowNewerGhost(p, seriesWithCustom.length, zoomVisibleBars))
+  }, [seriesWithCustom.length, zoomVisibleBars])
+
+  const chartPanEnabled =
+    zoomVisibleBars != null && seriesWithCustom.length > zoomVisibleBars && seriesWithCustom.length > 1
+
+  const { panPointerProps } = useChartPanPointerHandlers({
+    enabled: chartPanEnabled,
+    totalBars: seriesWithCustom.length,
+    visibleBarCount: zoomVisibleBars,
+    maxNewerGhostBars: zoomVisibleBars ?? 0,
+    panOffsetBars: chartPanOffsetBars,
+    setPanOffsetBars: setChartPanOffsetBars,
+  })
+
+  const { style: chartPanPointerStyle, ...chartPanPointerHandlers } = panPointerProps
+
+  const chartData = useMemo(
+    () => sliceChartForZoom(seriesWithCustom, zoomVisibleBars, chartPanOffsetBars),
+    [seriesWithCustom, zoomVisibleBars, chartPanOffsetBars],
+  )
+
+  const paperBuyDataIndices = useMemo(
+    () => [...chartDataIndicesForPaperBuyMarkers(demoPaperBuyMarkers ?? [], chartData, interval as ChartIntervalKey)],
+    [demoPaperBuyMarkers, chartData, interval],
+  )
+
+  const paperBuyReferenceLines = useMemo(() => {
+    return paperBuyDataIndices.map((di, seg) => {
+      const rowPt = chartData[di]
+      if (!rowPt || !selected) return null
+      return (
+        <ReferenceLine
+          key={`demo-pbuy-${selected.instrumentToken}-${seg}-${rowPt.t}`}
+          x={rowPt.idx}
+          stroke="#84cc16"
+          strokeWidth={1.35}
+          strokeDasharray="5 5"
+          opacity={0.92}
+        />
+      )
+    })
+  }, [paperBuyDataIndices, chartData, selected])
+
+  const paperLastBuyReferenceLine =
+    paperLastBuyPrice != null && Number.isFinite(paperLastBuyPrice) ? (
+      <ReferenceLine
+        y={paperLastBuyPrice}
+        stroke="#f59e0b"
+        strokeWidth={1.5}
+        strokeDasharray="4 6"
+        label={{ value: 'Last buy', position: 'insideLeft', fill: '#f59e0b', fontSize: 9, fontWeight: 600 }}
+      />
+    ) : null
+
+  const rechartsYDomain = useMemo(() => {
+    const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
+    let d = extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
+    d = extendYDomainWithLivePrice(d, live.lastPrice)
+    return d
+  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice])
 
   const { entries: mlPredictionEntries, reloadHistory: reloadMlHistory } = useMlChartPredictionEntries(
     selected?.instrumentToken ?? null,
     interval,
-    displaySeries,
+    seriesWithCustom,
   )
 
   useEffect(() => {
-    if (!selected?.instrumentToken || rawSeries.length === 0) return
+    if (!selected?.instrumentToken || series.length === 0) return
     void reloadMlHistory()
-  }, [selected?.instrumentToken, interval, rawSeries, reloadMlHistory])
+  }, [selected?.instrumentToken, interval, series, reloadMlHistory])
+
+  const onChartZoomIn = useCallback(() => {
+    onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, series.length))
+  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+
+  const onChartZoomOut = useCallback(() => {
+    onZoomVisibleBarsChange(zoomOutBarCount(zoomVisibleBars, series.length))
+  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+
+  const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
+
+  const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
   const liveVsBar = useMemo(() => {
     const last = live.lastPrice
-    const ref = rawSeries.length > 0 ? rawSeries[rawSeries.length - 1]?.close : null
+    const ref = series.length > 0 ? series[series.length - 1]?.close : null
     if (ref == null || last == null || !Number.isFinite(ref) || !Number.isFinite(last)) return null
     return pctChange(ref, last)
-  }, [live.lastPrice, rawSeries])
+  }, [live.lastPrice, series])
 
   if (!isZerodha) return null
 
@@ -160,6 +318,9 @@ export function ManualTradeScalperView({
       </Card>
     )
   }
+
+  const chartHasData = !chartError && series.length > 0
+  const metaOutside = !fullscreenActive || !chartHasData
 
   return (
     <Card className="border-secondary">
@@ -215,63 +376,113 @@ export function ManualTradeScalperView({
               </Form.Select>
             </Form.Group>
           </Col>
-          <Col xs={12} md="auto" className="d-flex flex-wrap gap-1 align-items-center">
-            <ButtonGroup size="sm">
-              {SCALPER_INTERVALS.map((iv) => (
-                <Button
-                  key={iv}
-                  variant={interval === iv ? 'primary' : 'outline-primary'}
-                  onClick={() => setInterval(iv)}
-                >
-                  {iv}
-                </Button>
-              ))}
-            </ButtonGroup>
-            <ButtonGroup size="sm">
-              {SCALPER_RANGES.map((r) => (
-                <Button
-                  key={r.id}
-                  variant={rangePreset === r.id ? 'secondary' : 'outline-secondary'}
-                  onClick={() => setRangePreset(r.id)}
-                >
-                  {r.label}
-                </Button>
-              ))}
-            </ButtonGroup>
-          </Col>
         </Row>
+
+        <p className="small text-muted mb-2 mb-md-3">
+          <strong>Chart</strong> uses the same <strong>Range</strong>, <strong>interval</strong>, line/bar/candle mode,{' '}
+          <strong>MA / S&amp;R</strong> toggles, <strong>zoom</strong>, and refresh cadence as{' '}
+          <strong>Instruments → Browse / Favorites</strong> (toolbar above). Change those on the Instruments page —
+          favorites stay in sync with this view.
+        </p>
 
         {typeLabel?.length ? (
           <p className="small text-muted mb-2 mb-md-3">
-            Instrument type{' '}
-            <span className="font-monospace">{typeLabel}</span> · polls ~{SCALPER_POLL_MS / 1000}s + live ticks when
-            open.
+            Instrument type <span className="font-monospace">{typeLabel}</span> · historical data refreshes about every{' '}
+            {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible + live ticks when open.
           </p>
-        ) : null}
+        ) : (
+          <p className="small text-muted mb-2 mb-md-3">
+            Historical data refreshes about every {Math.round(CHART_LIVE_POLL_MS / 1000)}s while this tab is visible + live
+            ticks when open.
+          </p>
+        )}
 
         {chartError ? <Alert variant="danger" className="py-2 small mb-2">{chartError}</Alert> : null}
-        {candleMeta ? (
-          <div className="small text-muted mb-2 font-monospace">
-            {candleMeta.interval} · {formatLocalDateTime(candleMeta.from)} → {formatLocalDateTime(candleMeta.to)}
-          </div>
+
+        {metaOutside && candleRange && !chartError ? (
+          <HistoricalRangeCaption
+            compact
+            candleInterval={candleRange.interval}
+            fromIso={candleRange.from}
+            toIso={candleRange.to}
+          />
         ) : null}
 
-        {chartLoading && rawSeries.length === 0 ? (
+        {chartLoading && series.length === 0 ? (
           <div className="text-center py-4 text-secondary small">
             <Spinner animation="border" size="sm" className="me-2" />
             Loading candles…
           </div>
-        ) : selected && displaySeries.length > 0 ? (
-          <div style={{ height: 'min(48vh, 440px)', minHeight: '260px' }}>
-            <InstrumentPriceChart
-              graphType="candlestick"
-              data={displaySeries}
-              maLineVisibility={SCALPER_MA}
-              customEmaPeriod={null}
-              livePrice={live.lastPrice}
-              paperLastBuyPrice={paperLastBuyPrice ?? null}
-              mlPredictionEntries={mlPredictionEntries}
+        ) : selected && chartHasData ? (
+          <div
+            ref={panelRef}
+            className={fullscreenActive ? 'd-flex flex-column' : undefined}
+            style={
+              fullscreenActive
+                ? {
+                    minHeight: '100vh',
+                    height: '100%',
+                    background: 'var(--bs-body-bg)',
+                    padding: '0.35rem',
+                  }
+                : undefined
+            }
+          >
+            {fullscreenActive ? (
+              <div className="align-self-start text-start mb-2 flex-shrink-0 small border-bottom border-secondary pb-2">
+                {candleRange && !chartError ? (
+                  <HistoricalRangeCaption
+                    compact
+                    candleInterval={candleRange.interval}
+                    fromIso={candleRange.from}
+                    toIso={candleRange.to}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            <ChartZoomControls
+              idPrefix={`manual-trade-chart-${selected.instrumentToken}`}
+              totalBars={series.length}
+              visibleBarCount={zoomVisibleBars}
+              onZoomIn={onChartZoomIn}
+              onZoomOut={onChartZoomOut}
+              onReset={onChartZoomReset}
+              compact
+              onToggleFullscreen={toggleFullscreen}
+              fullscreenActive={fullscreenActive}
+              onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
+              chartRefreshing={chartLoading}
             />
+            <div
+              className={fullscreenActive ? 'flex-grow-1 w-100' : 'w-100'}
+              style={{
+                height: fullscreenActive ? '100%' : 'min(48vh, 440px)',
+                minHeight: fullscreenActive ? 0 : '260px',
+                flex: fullscreenActive ? '1 1 auto' : undefined,
+                ...chartPanPointerStyle,
+              }}
+              {...chartPanPointerHandlers}
+            >
+              <InstrumentPriceChart
+                graphType={graphType}
+                data={chartData}
+                maLineVisibility={maLineVisibility}
+                customEmaPeriod={customEmaApplied}
+                livePrice={live.lastPrice ?? null}
+                paperLastBuyPrice={paperLastBuyPrice ?? null}
+                paperBuyDataIndices={paperBuyDataIndices}
+                mlPredictionEntries={mlPredictionEntries}
+                rechartsYDomain={rechartsYDomain ?? undefined}
+                referenceLines={
+                  <>
+                    {paperBuyReferenceLines}
+                    {paperLastBuyReferenceLine}
+                  </>
+                }
+                density="compact"
+                newerGhostBars={Math.max(0, -chartPanOffsetBars)}
+              />
+            </div>
           </div>
         ) : selected && !chartLoading ? (
           <p className="text-muted small mb-0">No candle data for this range.</p>
