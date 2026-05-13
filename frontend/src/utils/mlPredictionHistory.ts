@@ -194,6 +194,62 @@ export function mlRefBarMarkersForVisibleChart(
   return out
 }
 
+/**
+ * Predictions whose <strong>next bar</strong> is the candle at <paramref name="sliceIndex"/>
+ * (resolved <c>nextBarTime</c> match), plus <strong>pending</strong> rows whose ref bar is the previous candle
+ * (next bar not written yet).
+ */
+export function predictionsForTargetBarSlice(
+  entries: readonly MlPredictionLogEntry[],
+  chartData: readonly { t: string }[],
+  sliceIndex: number,
+): MlPredictionLogEntry[] {
+  const bar = chartData[sliceIndex]
+  if (!bar) return []
+  const prevBar = sliceIndex > 0 ? chartData[sliceIndex - 1] : null
+  const seen = new Set<string>()
+  const out: MlPredictionLogEntry[] = []
+  for (const e of entries) {
+    if (e.nextBarTime != null && barTimesMatch(e.nextBarTime, bar.t)) {
+      if (!seen.has(e.id)) {
+        seen.add(e.id)
+        out.push(e)
+      }
+      continue
+    }
+    if (e.outcome === 'pending' && prevBar != null && barTimesMatch(e.refBarTime, prevBar.t)) {
+      if (!seen.has(e.id)) {
+        seen.add(e.id)
+        out.push(e)
+      }
+    }
+  }
+  return sortByPredictedAtNewestFirst(out)
+}
+
+/** Map chart slice index → predictions that target that bar (see {@link predictionsForTargetBarSlice}). */
+export function mapMlPredictionsPerTargetBar(
+  entries: readonly MlPredictionLogEntry[],
+  chartData: readonly { t: string }[],
+): Map<number, MlPredictionLogEntry[]> {
+  const m = new Map<number, MlPredictionLogEntry[]>()
+  for (let i = 0; i < chartData.length; i++) {
+    const preds = predictionsForTargetBarSlice(entries, chartData, i)
+    if (preds.length > 0) m.set(i, preds)
+  }
+  return m
+}
+
+/** Short on-chart caption (newest row first; <c>+n</c> when multiple models). */
+export function formatMlTargetBarRibbon(entries: readonly MlPredictionLogEntry[]): string | null {
+  if (entries.length === 0) return null
+  const sorted = sortByPredictedAtNewestFirst([...entries])
+  const p = sorted[0]
+  const arrow = p.direction === 'up' ? '\u2191' : p.direction === 'down' ? '\u2193' : '\u00b7'
+  const extra = sorted.length > 1 ? `+${sorted.length - 1}` : ''
+  return `${arrow}${p.confidence}%${extra}`
+}
+
 /** Compare predicted next-bar direction vs following candle close vs ref close. */
 export function resolveMlEntry(entry: MlPredictionLogEntry, series: ChartPointWithMa[]): MlPredictionLogEntry {
   if (entry.outcome !== 'pending') return entry

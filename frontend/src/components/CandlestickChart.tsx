@@ -14,7 +14,12 @@ import {
   SR_SWING_PERIOD,
 } from '../utils/movingAverages'
 import type { MlPredictionLogEntry } from '../utils/mlPredictionHistory'
-import { groupMlPredictionsByChartBarIndex, mlRefBarMarkersForVisibleChart } from '../utils/mlPredictionHistory'
+import {
+  formatMlTargetBarRibbon,
+  groupMlPredictionsByChartBarIndex,
+  mapMlPredictionsPerTargetBar,
+  mlRefBarMarkersForVisibleChart,
+} from '../utils/mlPredictionHistory'
 
 const PAD = { top: 6, right: 8, left: 52 }
 
@@ -180,6 +185,11 @@ export function CandlestickChart({
 
   const mlPredictionsByDataIndex = useMemo(
     () => groupMlPredictionsByChartBarIndex(mlPredictionEntries, data),
+    [mlPredictionEntries, data],
+  )
+
+  const mlTargetBySliceIndex = useMemo(
+    () => mapMlPredictionsPerTargetBar(mlPredictionEntries, data),
     [mlPredictionEntries, data],
   )
 
@@ -551,6 +561,54 @@ export function CandlestickChart({
               style={{ pointerEvents: 'none' }}
             />
           ) : null}
+
+          {mlTargetBySliceIndex.size > 0 && layout
+            ? data.map((c, i) => {
+                const preds = mlTargetBySliceIndex.get(i)
+                if (!preds?.length) return null
+                const ribbon = formatMlTargetBarRibbon(preds)
+                if (!ribbon) return null
+                const cx = layout.clusterStartX + i * layout.slotW + layout.slotW / 2
+                const yHi = layout.yPrice(c.high)
+                const yy = Math.max(layout.priceTopY + 7, yHi - 10)
+                const primary = preds[0]
+                const fill =
+                  primary.direction === 'up'
+                    ? '#bbf7d0'
+                    : primary.direction === 'down'
+                      ? '#fecaca'
+                      : '#cbd5e1'
+                const detail = preds
+                  .map(
+                    (e) =>
+                      `${e.direction.toUpperCase()} ${e.confidence}% · ${e.outcome} · ${e.modelId}`,
+                  )
+                  .join('\n')
+
+                return (
+                  <g key={`ml-tgt-${c.t}-${c.idx}`} style={{ pointerEvents: 'none' }}>
+                    <title>{`ML targeting this bar\n${detail}`}</title>
+                    <text
+                      x={cx}
+                      y={yy}
+                      textAnchor="middle"
+                      dominantBaseline="auto"
+                      fill={fill}
+                      fontSize={Math.min(10, Math.max(7, layout.slotW * 0.45))}
+                      fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, monospace"
+                      fontWeight={700}
+                      style={{
+                        userSelect: 'none',
+                        filter:
+                          'drop-shadow(1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(-1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(0 1px 0 rgb(33 37 41 / 90%))',
+                      }}
+                    >
+                      {ribbon}
+                    </text>
+                  </g>
+                )
+              })
+            : null}
           {mlMarkersOnChart.length > 0 && layout
             ? mlMarkersOnChart.map((slot, k) => {
                 const idx = slot.dataIndex
@@ -814,6 +872,32 @@ export function CandlestickChart({
                     <div className="mt-2 pt-1 border-top border-secondary border-opacity-50">
                       <div className="text-white-50 small mb-1">ML predictions (ref bar)</div>
                       {sorted.map((e) => (
+                        <div key={e.id} className="font-monospace" style={{ fontSize: '0.68rem', lineHeight: 1.4 }}>
+                          <span
+                            className={
+                              e.direction === 'up'
+                                ? 'text-success'
+                                : e.direction === 'down'
+                                  ? 'text-danger'
+                                  : 'text-secondary'
+                            }
+                          >
+                            {e.direction.toUpperCase()}
+                          </span>{' '}
+                          {e.confidence}% · {e.outcome} ·{' '}
+                          <span className="text-secondary">{e.modelId}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
+                {(() => {
+                  const targetPreds = mlTargetBySliceIndex.get(hover.idx)
+                  if (!targetPreds?.length) return null
+                  return (
+                    <div className="mt-2 pt-1 border-top border-secondary border-opacity-50">
+                      <div className="text-white-50 small mb-1">ML targeting this candle</div>
+                      {targetPreds.map((e) => (
                         <div key={e.id} className="font-monospace" style={{ fontSize: '0.68rem', lineHeight: 1.4 }}>
                           <span
                             className={

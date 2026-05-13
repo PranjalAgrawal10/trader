@@ -35,6 +35,7 @@ import {
   Legend,
   Line,
   LineChart,
+  LabelList,
   Pie,
   PieChart,
   ReferenceLine,
@@ -69,10 +70,12 @@ import {
 } from '../utils/chartZoom'
 import {
   appendMlPrediction,
+  formatMlTargetBarRibbon,
   historiesEqual,
   historyItemsFromApi,
-  mlRefBarMarkersForVisibleChart,
   loadMlHistory,
+  mapMlPredictionsPerTargetBar,
+  mlRefBarMarkersForVisibleChart,
   ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID,
   resolveMlHistory,
   saveMlHistory,
@@ -1789,6 +1792,63 @@ function InstrumentVolumeHistogram({
         </BarChart>
       </ResponsiveContainer>
     </div>
+  )
+}
+
+/** On-chart ribbons: next-bar ML rows that target each bar (see {@link mapMlPredictionsPerTargetBar}). */
+function MlTargetBarPredictionLabelList({
+  chartData,
+  mlEntries,
+}: {
+  chartData: ChartPointWithMa[]
+  mlEntries: readonly MlPredictionLogEntry[]
+}) {
+  const labelMap = useMemo(() => mapMlPredictionsPerTargetBar(mlEntries, chartData), [mlEntries, chartData])
+  const LabelContent = useCallback(
+    ({ x, y, index }: { x?: number; y?: number; index?: number }) => {
+      if (typeof index !== 'number' || x == null || y == null) return null
+      const preds = labelMap.get(index)
+      const text = preds ? formatMlTargetBarRibbon(preds) : null
+      if (!text || !preds?.length) return null
+      const p0 = preds[0]
+      const fill =
+        p0.direction === 'up' ? '#bbf7d0' : p0.direction === 'down' ? '#fecaca' : '#cbd5e1'
+      const detail = preds
+        .map((e) => `${e.direction.toUpperCase()} ${e.confidence}% · ${e.outcome} · ${e.modelId}`)
+        .join('\n')
+      return (
+        <text
+          x={x}
+          y={y - 10}
+          fill={fill}
+          textAnchor="middle"
+          fontSize={9}
+          fontWeight={700}
+          fontFamily="ui-monospace, SFMono-Regular, Menlo, Monaco, monospace"
+          style={{
+            pointerEvents: 'none',
+            filter:
+              'drop-shadow(1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(-1px 0 0 rgb(33 37 41 / 90%)) drop-shadow(0 1px 0 rgb(33 37 41 / 90%))',
+          }}
+        >
+          <title>{`ML targeting this bar\n${detail}`}</title>
+          {text}
+        </text>
+      )
+    },
+    [labelMap],
+  )
+
+  if (mlEntries.length === 0) return null
+
+  return (
+    <LabelList
+      dataKey="close"
+      position="top"
+      offset={14}
+      style={{ pointerEvents: 'none' }}
+      content={LabelContent}
+    />
   )
 }
 
@@ -4000,7 +4060,12 @@ function CompactPriceChart({
                                   />
                                 )}
                               />
-                              <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                              <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close">
+                                <MlTargetBarPredictionLabelList
+                                  chartData={chartData}
+                                  mlEntries={mlPredictionOverlayEntries}
+                                />
+                              </Line>
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                               {paperBuyReferenceLines}
                               {mlPredictionReferenceLines}
@@ -4025,7 +4090,12 @@ function CompactPriceChart({
                                   />
                                 )}
                               />
-                              <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close" />
+                              <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close">
+                                <MlTargetBarPredictionLabelList
+                                  chartData={chartData}
+                                  mlEntries={mlPredictionOverlayEntries}
+                                />
+                              </Bar>
                               <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                               {paperBuyReferenceLines}
                               {mlPredictionReferenceLines}
@@ -4803,7 +4873,12 @@ function InstrumentChartCard({
                                         />
                                       )}
                                     />
-                                    <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close" />
+                                    <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close">
+                                      <MlTargetBarPredictionLabelList
+                                        chartData={chartData}
+                                        mlEntries={mlPredictionOverlayEntries}
+                                      />
+                                    </Line>
                                     <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                                     {browsePaperBuyReferenceLines}
                                     {browseMlPredictionReferenceLines}
@@ -4831,7 +4906,12 @@ function InstrumentChartCard({
                                         />
                                       )}
                                     />
-                                    <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close" />
+                                    <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close">
+                                      <MlTargetBarPredictionLabelList
+                                        chartData={chartData}
+                                        mlEntries={mlPredictionOverlayEntries}
+                                      />
+                                    </Bar>
                                     <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
                                     {browsePaperBuyReferenceLines}
                                     {browseMlPredictionReferenceLines}
@@ -4861,9 +4941,10 @@ function InstrumentChartCard({
               <strong>candle</strong> in Candles view. Lime dashed verticals mark candles where OPEN demo{' '}
               <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> lots); an{' '}
               <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold lots.{' '}
-              <strong>ML next-bar bias</strong> verticals mark the candle used as each prediction&apos;s{' '}
-              <strong>ref bar</strong> (purple / pink tint = direction; dashed = pending vs resolved); hover a candle or see the{' '}
-              <strong>ML history</strong> panel for details. Calls{' '}
+              <strong>ML next-bar bias</strong>{' '}
+              <span className="font-monospace text-body-secondary">↑72%</span>-style ribbons above bars show which prediction applies{' '}
+              <em>to each candle&apos;s interval</em> (multiple models append <strong>+n</strong>); tinted verticals mark each prediction&apos;s{' '}
+              <strong>ref bar</strong>; hover a candle or use the <strong>ML history</strong> panel for full rows. Calls{' '}
               <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
               <span className="font-monospace">model</span> query (see{' '}
               <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.
