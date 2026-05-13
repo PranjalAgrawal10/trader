@@ -39,6 +39,11 @@ import {
   zoomInChartZoomStored,
   zoomOutChartZoomStored,
 } from '../utils/chartZoom'
+import {
+  applyVerticalPriceZoomToDomain,
+  zoomInVerticalPriceScale,
+  zoomOutVerticalPriceScale,
+} from '../utils/chartVerticalZoom'
 import { ChartZoomControls } from './ChartZoomControls'
 import { HistoricalRangeCaption } from './HistoricalRangeCaption'
 import { InstrumentPriceChart } from './InstrumentPriceChart'
@@ -119,6 +124,7 @@ export function ManualTradeScalperView({
   const [chartLoading, setChartLoading] = useState(false)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
   const [chartPanOffsetBars, setChartPanOffsetBars] = useState(0)
+  const [priceVerticalZoomScale, setPriceVerticalZoomScale] = useState(1)
 
   const selected = useMemo(
     () => tradingLocks.find((r) => r.instrumentToken === selectedInstrumentToken) ?? null,
@@ -170,6 +176,10 @@ export function ManualTradeScalperView({
     }, CHART_LIVE_POLL_MS)
     return () => window.clearInterval(id)
   }, [isZerodha, selected, interval, rangePreset, reload])
+
+  useEffect(() => {
+    setPriceVerticalZoomScale(1)
+  }, [selected?.instrumentToken])
 
   const customEmaApplied = useMemo(
     () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
@@ -272,8 +282,8 @@ export function ManualTradeScalperView({
     const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     let d = extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
     d = extendYDomainWithLivePrice(d, live.lastPrice)
-    return d
-  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice])
+    return applyVerticalPriceZoomToDomain(d ?? undefined, priceVerticalZoomScale) ?? d
+  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice, priceVerticalZoomScale])
 
   const { entries: mlPredictionEntries, reloadHistory: reloadMlHistory } = useMlChartPredictionEntries(
     selected?.instrumentToken ?? null,
@@ -295,6 +305,16 @@ export function ManualTradeScalperView({
   }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
 
   const onChartZoomReset = useCallback(() => onChartZoomStoredChange(null), [onChartZoomStoredChange])
+
+  const onVerticalZoomIn = useCallback(
+    () => setPriceVerticalZoomScale((v) => zoomInVerticalPriceScale(v)),
+    [],
+  )
+  const onVerticalZoomOut = useCallback(
+    () => setPriceVerticalZoomScale((v) => zoomOutVerticalPriceScale(v)),
+    [],
+  )
+  const onVerticalZoomReset = useCallback(() => setPriceVerticalZoomScale(1), [])
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
@@ -453,9 +473,13 @@ export function ManualTradeScalperView({
               idPrefix={`manual-trade-chart-${selected.instrumentToken}`}
               totalBars={series.length}
               visibleBarCount={zoomVisibleBars}
-              onZoomIn={onChartZoomIn}
-              onZoomOut={onChartZoomOut}
-              onReset={onChartZoomReset}
+              onHorizontalZoomIn={onChartZoomIn}
+              onHorizontalZoomOut={onChartZoomOut}
+              onHorizontalZoomReset={onChartZoomReset}
+              verticalZoomScale={priceVerticalZoomScale}
+              onVerticalZoomIn={onVerticalZoomIn}
+              onVerticalZoomOut={onVerticalZoomOut}
+              onVerticalZoomReset={onVerticalZoomReset}
               compact
               onToggleFullscreen={toggleFullscreen}
               fullscreenActive={fullscreenActive}
@@ -490,6 +514,7 @@ export function ManualTradeScalperView({
                 }
                 density="compact"
                 newerGhostBars={Math.max(0, -chartPanOffsetBars)}
+                priceVerticalZoomScale={priceVerticalZoomScale}
               />
             </div>
           </div>

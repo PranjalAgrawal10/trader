@@ -2,6 +2,7 @@ import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { CHART_CANDLE_MAX_SLOT_PX, CHART_RIGHT_EDGE_GAP_FRACT } from '../constants/chartLayout'
 import type { ChartPointWithMaAndTrend } from '../utils/closeLinearTrend'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
+import { applyVerticalPriceZoomToDomain } from '../utils/chartVerticalZoom'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import type { ChartPointWithMa, MaLineVisibility } from '../utils/movingAverages'
 import {
@@ -155,6 +156,7 @@ export function CandlestickChart({
   paperBuyDataIndices = [],
   mlPredictionEntries = [],
   newerGhostSlots = 0,
+  verticalPriceZoomScale = 1,
 }: {
   data: ChartPointWithMa[]
   maLineVisibility?: MaLineVisibility
@@ -170,6 +172,8 @@ export function CandlestickChart({
   mlPredictionEntries?: readonly MlPredictionLogEntry[]
   /** Empty candle slots on the right (pan “past” newest while zoomed). */
   newerGhostSlots?: number
+  /** Narrow visible price span around midpoint (&lt;= 1; 1 = auto min/max fit). */
+  verticalPriceZoomScale?: number
 }) {
   const { ref, w, h } = useContainerPixelSize<HTMLDivElement>()
 
@@ -295,6 +299,12 @@ export function CandlestickChart({
       max += pad
     }
 
+    const yZoomed = applyVerticalPriceZoomToDomain([min, max], verticalPriceZoomScale)
+    if (yZoomed) {
+      min = yZoomed[0]
+      max = yZoomed[1]
+    }
+
     const yPrice = (p: number) => priceTopY + ((max - p) / (max - min)) * pricePlotH
     const n = data.length
 
@@ -367,7 +377,7 @@ export function CandlestickChart({
       labelY,
       plotRightX,
     }
-  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice, paperLastBuyPrice, newerGhostSlots])
+  }, [data, w, h, maLineVisibility, trendSeries, customEmaPeriod, livePrice, paperLastBuyPrice, newerGhostSlots, verticalPriceZoomScale])
 
   const yTicks = useMemo(() => {
     if (!layout) return []

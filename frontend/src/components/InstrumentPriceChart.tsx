@@ -56,6 +56,8 @@ export type InstrumentPriceChartProps = {
   showVolume?: boolean
   /** Recharts candles: empty slots past newest when dragging “newer” while zoomed. */
   newerGhostBars?: number
+  /** 1 = fit auto price bounds; &lt; 1 narrows Y range around midpoint (candles + line/bar). */
+  priceVerticalZoomScale?: number
 }
 
 /** SMA / EMA / S&R overlays — same styling as CandlestickChart. */
@@ -363,6 +365,7 @@ export function InstrumentPriceChart({
   density = 'compact',
   showVolume = true,
   newerGhostBars = 0,
+  priceVerticalZoomScale = 1,
 }: InstrumentPriceChartProps) {
   const ghost = Math.max(0, Math.floor(newerGhostBars))
   const centeredXDomain = useMemo(() => xAxisDomainCenterLatest(data, ghost), [data, ghost])
@@ -379,6 +382,7 @@ export function InstrumentPriceChart({
           paperBuyDataIndices={paperBuyDataIndices}
           mlPredictionEntries={mlPredictionEntries}
           newerGhostSlots={ghost}
+          verticalPriceZoomScale={priceVerticalZoomScale}
         />
       </div>
     )

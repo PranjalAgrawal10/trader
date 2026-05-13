@@ -71,6 +71,11 @@ import {
   zoomOutChartZoomStored,
 } from '../utils/chartZoom'
 import {
+  applyVerticalPriceZoomToDomain,
+  zoomInVerticalPriceScale,
+  zoomOutVerticalPriceScale,
+} from '../utils/chartVerticalZoom'
+import {
   appendMlPrediction,
   historiesEqual,
   historyItemsFromApi,
@@ -3195,6 +3200,7 @@ function CompactPriceChart({
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
   const [mlPredictionOverlayEntries, setMlPredictionOverlayEntries] = useState<readonly MlPredictionLogEntry[]>([])
   const [chartPanOffsetBars, setChartPanOffsetBars] = useState(0)
+  const [priceVerticalZoomScale, setPriceVerticalZoomScale] = useState(1)
   const fetchCtxRef = useRef<{
     token: string | null
     interval: ChartInterval | null
@@ -3263,6 +3269,10 @@ function CompactPriceChart({
   useEffect(() => {
     setMlPredictionOverlayEntries([])
   }, [row.instrumentToken, interval])
+
+  useEffect(() => {
+    setPriceVerticalZoomScale(1)
+  }, [row.instrumentToken])
 
   const customEmaApplied = useMemo(
     () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
@@ -3370,8 +3380,8 @@ function CompactPriceChart({
     const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     let d = extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
     d = extendYDomainWithLivePrice(d, live.lastPrice)
-    return d
-  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice])
+    return applyVerticalPriceZoomToDomain(d ?? undefined, priceVerticalZoomScale) ?? d
+  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice, priceVerticalZoomScale])
 
   const onChartZoomIn = useCallback(() => {
     onChartZoomStoredChange(zoomInChartZoomStored(chartZoomStored, seriesWithCustom.length))
@@ -3382,6 +3392,16 @@ function CompactPriceChart({
   }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
 
   const onChartZoomReset = useCallback(() => onChartZoomStoredChange(null), [onChartZoomStoredChange])
+
+  const onVerticalZoomIn = useCallback(
+    () => setPriceVerticalZoomScale((v) => zoomInVerticalPriceScale(v)),
+    [],
+  )
+  const onVerticalZoomOut = useCallback(
+    () => setPriceVerticalZoomScale((v) => zoomOutVerticalPriceScale(v)),
+    [],
+  )
+  const onVerticalZoomReset = useCallback(() => setPriceVerticalZoomScale(1), [])
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
@@ -3472,9 +3492,13 @@ function CompactPriceChart({
             idPrefix={`fav-chart-${row.instrumentToken}`}
             totalBars={series.length}
             visibleBarCount={zoomVisibleBars}
-            onZoomIn={onChartZoomIn}
-            onZoomOut={onChartZoomOut}
-            onReset={onChartZoomReset}
+            onHorizontalZoomIn={onChartZoomIn}
+            onHorizontalZoomOut={onChartZoomOut}
+            onHorizontalZoomReset={onChartZoomReset}
+            verticalZoomScale={priceVerticalZoomScale}
+            onVerticalZoomIn={onVerticalZoomIn}
+            onVerticalZoomOut={onVerticalZoomOut}
+            onVerticalZoomReset={onVerticalZoomReset}
             compact
             onToggleFullscreen={toggleFullscreen}
             fullscreenActive={fullscreenActive}
@@ -3509,6 +3533,7 @@ function CompactPriceChart({
               }
               density="compact"
               newerGhostBars={Math.max(0, -chartPanOffsetBars)}
+              priceVerticalZoomScale={priceVerticalZoomScale}
             />
           </div>
         </div>
@@ -3891,6 +3916,7 @@ function InstrumentChartCard({
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
   const [mlPredictionOverlayEntries, setMlPredictionOverlayEntries] = useState<readonly MlPredictionLogEntry[]>([])
   const [chartPanOffsetBars, setChartPanOffsetBars] = useState(0)
+  const [priceVerticalZoomScale, setPriceVerticalZoomScale] = useState(1)
   const chartFetchCtxRef = useRef<{
     token: string | null
     interval: ChartInterval | null
@@ -3967,6 +3993,10 @@ function InstrumentChartCard({
   useEffect(() => {
     setMlPredictionOverlayEntries([])
   }, [selection?.instrumentToken, interval])
+
+  useEffect(() => {
+    setPriceVerticalZoomScale(1)
+  }, [selection?.instrumentToken])
 
   const displaySeries = useMemo(() => {
     if (browseSeriesSourceRef.current !== series) {
@@ -4064,8 +4094,8 @@ function InstrumentChartCard({
     let d = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     d = extendYDomainWithLivePrice(d, liveLastPrice)
     d = extendYDomainWithLivePrice(d, paperLastBuyPrice)
-    return d
-  }, [chartData, maLineVisibility, liveLastPrice, paperLastBuyPrice])
+    return applyVerticalPriceZoomToDomain(d ?? undefined, priceVerticalZoomScale) ?? d
+  }, [chartData, maLineVisibility, liveLastPrice, paperLastBuyPrice, priceVerticalZoomScale])
 
   const liveLtpReferenceLine =
     liveLastPrice != null && Number.isFinite(liveLastPrice) ? (
@@ -4098,6 +4128,16 @@ function InstrumentChartCard({
   }, [onChartZoomStoredChange, chartZoomStored, displayWithMa.length])
 
   const onChartZoomReset = useCallback(() => onChartZoomStoredChange(null), [onChartZoomStoredChange])
+
+  const onVerticalZoomIn = useCallback(
+    () => setPriceVerticalZoomScale((v) => zoomInVerticalPriceScale(v)),
+    [],
+  )
+  const onVerticalZoomOut = useCallback(
+    () => setPriceVerticalZoomScale((v) => zoomOutVerticalPriceScale(v)),
+    [],
+  )
+  const onVerticalZoomReset = useCallback(() => setPriceVerticalZoomScale(1), [])
 
   const browseHasChartData = !error && displayWithMa.length > 0
   const browseDetailMetaInFullscreen = fullscreenActive && browseHasChartData
@@ -4236,9 +4276,13 @@ function InstrumentChartCard({
                   idPrefix="browse-chart-zoom"
                   totalBars={displayWithMa.length}
                   visibleBarCount={zoomVisibleBars}
-                  onZoomIn={onChartZoomIn}
-                  onZoomOut={onChartZoomOut}
-                  onReset={onChartZoomReset}
+                  onHorizontalZoomIn={onChartZoomIn}
+                  onHorizontalZoomOut={onChartZoomOut}
+                  onHorizontalZoomReset={onChartZoomReset}
+                  verticalZoomScale={priceVerticalZoomScale}
+                  onVerticalZoomIn={onVerticalZoomIn}
+                  onVerticalZoomOut={onVerticalZoomOut}
+                  onVerticalZoomReset={onVerticalZoomReset}
                   onToggleFullscreen={toggleFullscreen}
                   fullscreenActive={fullscreenActive}
                   onRefreshChart={() => setChartRefreshTick((n) => n + 1)}
@@ -4273,6 +4317,7 @@ function InstrumentChartCard({
                     }
                     density="comfortable"
                     newerGhostBars={Math.max(0, -chartPanOffsetBars)}
+                    priceVerticalZoomScale={priceVerticalZoomScale}
                   />
                 </div>
               </div>
