@@ -6,7 +6,6 @@ import { Link } from 'react-router-dom'
 import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
 import { CHART_FULLSCREEN_META_WRAP_CLASS, CHART_FULLSCREEN_META_WRAP_STYLE } from '../constants/chartLayout'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
-import { useChartPanPointerHandlers } from '../hooks/useChartPanPointerHandlers'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
 import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
@@ -15,7 +14,6 @@ import {
   historicalRangeQueryParams,
   type ChartGraphType,
   type ChartInterval,
-  type ChartRangePreset,
 } from '../utils/kiteInstrumentChartShared'
 import type { ChartIntervalKey, LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
@@ -32,19 +30,7 @@ import {
   chartPointsFromHistorical,
   pctChange,
 } from '../utils/scalperChartHelpers'
-import {
-  clampChartPanAllowNewerGhost,
-  correctedChartZoomStored,
-  sliceChartForZoom,
-  visibleBarsFromChartZoomStored,
-  zoomInChartZoomStored,
-  zoomOutChartZoomStored,
-} from '../utils/chartZoom'
-import {
-  applyVerticalPriceZoomToDomain,
-  zoomInVerticalPriceScale,
-  zoomOutVerticalPriceScale,
-} from '../utils/chartVerticalZoom'
+import { sliceChartForZoom } from '../utils/chartZoom'
 import { ChartZoomControls } from './ChartZoomControls'
 import { HistoricalRangeCaption } from './HistoricalRangeCaption'
 import { InstrumentPriceChart } from './InstrumentPriceChart'
@@ -78,9 +64,15 @@ function effectiveCustomEmaPeriod(visibility: MaLineVisibility, period: number):
 
 type CandleRangeMeta = { interval: string; from: string; to: string }
 
+/** Fixed historical lookback for this chart (toolbar Range row is omitted on Manual trade). */
+const MANUAL_TRADE_HISTORICAL_RANGE = 'last3d' as const
+
+/** Newest-first window length on the chart (full download is larger). */
+const MANUAL_TRADE_CHART_VISIBLE_BARS = 10
+
 /**
- * Manual paper-trade chart uses the same Kite merged-OHLC pipeline, zoom/pan, refresh cadence,
- * and toolbar settings as favorite tiles (Instruments → Favorites “All charts”).
+ * Manual paper-trade scalper chart: merges live ticks like other tiles; always requests three calendar days of OHLC and
+ * plots only the newest ten bars from that window.
  */
 export function ManualTradeScalperView({
   isZerodha,
@@ -97,26 +89,20 @@ export function ManualTradeScalperView({
   onSelectedInstrumentTokenChange: (instrumentToken: string) => void
   paperLastBuyPrice?: number | null
   kiteChart: {
-    rangePreset: ChartRangePreset
     interval: ChartInterval
     graphType: ChartGraphType
     maLineVisibility: MaLineVisibility
     customEmaPeriod: number
-    chartZoomStored: number | null
-    onChartZoomStoredChange: (stored: number | null) => void
     demoPaperBuyMarkers: readonly DemoPaperOpenBuyMarkerDto[]
   }
-  /** Range / interval / graph / indicators; shown in fullscreen scroll strip with caption + zoom. */
+  /** Range / interval / graph / indicators; shown in fullscreen scroll strip with caption. */
   chartFullscreenToolbar?: ReactNode
 }) {
   const {
-    rangePreset,
     interval,
     graphType,
     maLineVisibility,
     customEmaPeriod,
-    chartZoomStored,
-    onChartZoomStoredChange,
     demoPaperBuyMarkers,
   } = kiteChart
 
@@ -127,8 +113,6 @@ export function ManualTradeScalperView({
   const [chartError, setChartError] = useState<string | null>(null)
   const [chartLoading, setChartLoading] = useState(false)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
-  const [chartPanOffsetBars, setChartPanOffsetBars] = useState(0)
-  const [priceVerticalZoomScale, setPriceVerticalZoomScale] = useState(1)
 
   const selected = useMemo(
     () => tradingLocks.find((r) => r.instrumentToken === selectedInstrumentToken) ?? null,
@@ -149,7 +133,7 @@ export function ManualTradeScalperView({
       setChartLoading(true)
       setChartError(null)
       try {
-        const extra = historicalRangeQueryParams(rangePreset)
+        const extra = historicalRangeQueryParams(MANUAL_TRADE_HISTORICAL_RANGE)
         const data = await fetchMergedHistoricalChartCandles(selected.instrumentToken, interval, extra, signal)
         if (signal?.aborted) return
         setSeries(chartPointsFromHistorical(data))
@@ -163,7 +147,7 @@ export function ManualTradeScalperView({
         if (!signal?.aborted) setChartLoading(false)
       }
     },
-    [isZerodha, selected, interval, rangePreset],
+    [isZerodha, selected, interval],
   )
 
   useEffect(() => {
@@ -179,11 +163,7 @@ export function ManualTradeScalperView({
       void reload()
     }, CHART_LIVE_POLL_MS)
     return () => window.clearInterval(id)
-  }, [isZerodha, selected, interval, rangePreset, reload])
-
-  useEffect(() => {
-    setPriceVerticalZoomScale(1)
-  }, [selected?.instrumentToken])
+  }, [isZerodha, selected, interval, reload])
 
   const customEmaApplied = useMemo(
     () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
@@ -209,44 +189,9 @@ export function ManualTradeScalperView({
     [tickMergedSeries, customEmaApplied],
   )
 
-  const zoomVisibleBars = useMemo(
-    () => visibleBarsFromChartZoomStored(chartZoomStored, seriesWithCustom.length),
-    [chartZoomStored, seriesWithCustom.length],
-  )
-
-  useEffect(() => {
-    if (chartZoomStored == null || seriesWithCustom.length === 0) return
-    const next = correctedChartZoomStored(chartZoomStored, seriesWithCustom.length)
-    if (next === undefined) return
-    if (next === chartZoomStored) return
-    onChartZoomStoredChange(next)
-  }, [chartZoomStored, seriesWithCustom.length, onChartZoomStoredChange])
-
-  useEffect(() => {
-    setChartPanOffsetBars(0)
-  }, [chartZoomStored, selected?.instrumentToken])
-
-  useEffect(() => {
-    setChartPanOffsetBars((p) => clampChartPanAllowNewerGhost(p, seriesWithCustom.length, zoomVisibleBars))
-  }, [seriesWithCustom.length, zoomVisibleBars])
-
-  const chartPanEnabled =
-    zoomVisibleBars != null && seriesWithCustom.length > zoomVisibleBars && seriesWithCustom.length > 1
-
-  const { panPointerProps } = useChartPanPointerHandlers({
-    enabled: chartPanEnabled,
-    totalBars: seriesWithCustom.length,
-    visibleBarCount: zoomVisibleBars,
-    maxNewerGhostBars: zoomVisibleBars ?? 0,
-    panOffsetBars: chartPanOffsetBars,
-    setPanOffsetBars: setChartPanOffsetBars,
-  })
-
-  const { style: chartPanPointerStyle, ...chartPanPointerHandlers } = panPointerProps
-
   const chartData = useMemo(
-    () => sliceChartForZoom(seriesWithCustom, zoomVisibleBars, chartPanOffsetBars),
-    [seriesWithCustom, zoomVisibleBars, chartPanOffsetBars],
+    () => sliceChartForZoom(seriesWithCustom, MANUAL_TRADE_CHART_VISIBLE_BARS, 0),
+    [seriesWithCustom],
   )
 
   const paperBuyDataIndices = useMemo(
@@ -258,8 +203,8 @@ export function ManualTradeScalperView({
     const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
     let d = extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
     d = extendYDomainWithLivePrice(d, live.lastPrice)
-    return applyVerticalPriceZoomToDomain(d ?? undefined, priceVerticalZoomScale) ?? d
-  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice, priceVerticalZoomScale])
+    return d
+  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice])
 
   const { entries: mlPredictionEntries, reloadHistory: reloadMlHistory } = useMlChartPredictionEntries(
     selected?.instrumentToken ?? null,
@@ -272,41 +217,12 @@ export function ManualTradeScalperView({
     void reloadMlHistory()
   }, [selected?.instrumentToken, interval, series, reloadMlHistory])
 
-  const onChartZoomIn = useCallback(() => {
-    onChartZoomStoredChange(zoomInChartZoomStored(chartZoomStored, seriesWithCustom.length))
-  }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
-
-  const onChartZoomOut = useCallback(() => {
-    onChartZoomStoredChange(zoomOutChartZoomStored(chartZoomStored, seriesWithCustom.length))
-  }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
-
-  const onChartZoomReset = useCallback(() => onChartZoomStoredChange(null), [onChartZoomStoredChange])
-
-  const onVerticalZoomIn = useCallback(
-    () => setPriceVerticalZoomScale((v) => zoomInVerticalPriceScale(v)),
-    [],
-  )
-  const onVerticalZoomOut = useCallback(
-    () => setPriceVerticalZoomScale((v) => zoomOutVerticalPriceScale(v)),
-    [],
-  )
-  const onVerticalZoomReset = useCallback(() => setPriceVerticalZoomScale(1), [])
-
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
   const manualChartZoomToolbar =
     selected != null ? (
       <ChartZoomControls
         idPrefix={`manual-trade-chart-${selected.instrumentToken}`}
-        totalBars={series.length}
-        visibleBarCount={zoomVisibleBars}
-        onHorizontalZoomIn={onChartZoomIn}
-        onHorizontalZoomOut={onChartZoomOut}
-        onHorizontalZoomReset={onChartZoomReset}
-        verticalZoomScale={priceVerticalZoomScale}
-        onVerticalZoomIn={onVerticalZoomIn}
-        onVerticalZoomOut={onVerticalZoomOut}
-        onVerticalZoomReset={onVerticalZoomReset}
         compact
         onToggleFullscreen={toggleFullscreen}
         fullscreenActive={fullscreenActive}
@@ -405,9 +321,10 @@ export function ManualTradeScalperView({
         </Row>
 
         <p className="small text-muted mb-2 mb-md-3">
-          <strong>Chart</strong> uses the same persisted <strong>Range</strong>, <strong>interval</strong>, line/bar/candle
-          mode, <strong>MA / S&amp;R</strong> toggles, <strong>horizontal</strong>/<strong>vertical</strong> zoom, and
-          refresh cadence as <strong>Browse</strong> / <strong>All favorites</strong>.
+          <strong>Chart</strong> loads the last <strong>3 calendar days</strong> of candles and shows the{' '}
+          <strong>{MANUAL_TRADE_CHART_VISIBLE_BARS} newest</strong> bars. <strong>Interval</strong>, line/bar/candle mode,
+          and <strong>MA / S&amp;R</strong> toggles stay synced with <strong>Browse</strong> / <strong>All favorites</strong>{' '}
+          (toolbar: <strong>refresh</strong> + <strong>fullscreen</strong>; range is fixed for scalper speed).
         </p>
 
         {chartFullscreenToolbar && !fullscreenActive ? (
@@ -478,9 +395,7 @@ export function ManualTradeScalperView({
                 height: fullscreenActive ? '100%' : 'min(48vh, 440px)',
                 minHeight: fullscreenActive ? 0 : '260px',
                 flex: fullscreenActive ? '1 1 auto' : undefined,
-                ...chartPanPointerStyle,
               }}
-              {...chartPanPointerHandlers}
             >
               <InstrumentPriceChart
                 graphType={graphType}
@@ -493,7 +408,7 @@ export function ManualTradeScalperView({
                 mlPredictionEntries={mlPredictionEntries}
                 rechartsYDomain={rechartsYDomain ?? undefined}
                 density="compact"
-                newerGhostBars={Math.max(0, -chartPanOffsetBars)}
+                newerGhostBars={0}
               />
             </div>
           </div>

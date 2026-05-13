@@ -95,16 +95,27 @@ function coerceLwNum(x: unknown): number | null {
   return null
 }
 
-function mlDominantMarkerShape(entries: readonly MlPredictionLogEntry[]): 'arrowUp' | 'arrowDown' | 'square' {
+/** LW markers above candles — aligns with ribbon up/down hues; amber when models disagree (tie). */
+const ML_MARKER_COL = {
+  up: '#22c55e',
+  down: '#dc2626',
+  neutral: '#f59e0b',
+} as const
+
+const ML_MARKER_SIZE = 2.1
+
+function mlDominantMarkerSpec(
+  entries: readonly MlPredictionLogEntry[],
+): { shape: 'arrowUp' | 'arrowDown' | 'square'; color: string } {
   let up = 0
   let down = 0
   for (const e of entries) {
     if (e.direction === 'up') up++
     else if (e.direction === 'down') down++
   }
-  if (up > down) return 'arrowUp'
-  if (down > up) return 'arrowDown'
-  return 'square'
+  if (up > down) return { shape: 'arrowUp', color: ML_MARKER_COL.up }
+  if (down > up) return { shape: 'arrowDown', color: ML_MARKER_COL.down }
+  return { shape: 'square', color: ML_MARKER_COL.neutral }
 }
 
 function lwChartOptions(bg: string) {
@@ -120,16 +131,23 @@ function lwChartOptions(bg: string) {
       textColor: '#adb5bd',
       fontSize: 11,
     },
+    leftPriceScale: { visible: false },
     rightPriceScale: {
-      borderColor: 'rgba(173,181,189,0.35)',
+      visible: false,
+      borderVisible: false,
       scaleMargins: { top: 0.06, bottom: 0.2 },
     },
     timeScale: {
-      borderColor: 'rgba(173,181,189,0.35)',
+      visible: false,
+      borderVisible: false,
       timeVisible: true,
       secondsVisible: false,
     },
-    crosshair: { mode: CrosshairMode.MagnetOHLC },
+    crosshair: {
+      mode: CrosshairMode.MagnetOHLC,
+      vertLine: { labelVisible: false },
+      horzLine: { labelVisible: false },
+    },
   }
 }
 
@@ -197,7 +215,7 @@ function rebuildMainSeries(chart: IChartApi, st: Internals, want: MainKind, barE
   st.trendLine = null
 
   const main = addMain(chart, want, barEstimate)
-  const markers = createSeriesMarkers(main, [])
+  const markers = createSeriesMarkers(main, [], { zOrder: 'top', autoScale: true })
   st.main = main
   st.markers = markers
   st.mainKind = want
@@ -334,7 +352,7 @@ export function InstrumentPriceChart({
       })
 
       const main = addMain(chart, wantMain, data.length + ghost)
-      const markers = createSeriesMarkers(main, [])
+      const markers = createSeriesMarkers(main, [], { zOrder: 'top', autoScale: true })
       st = {
         chart,
         mainKind: wantMain,
@@ -558,11 +576,13 @@ function syncSeriesData(st: Internals, p: SyncPack) {
   for (let i = 0; i < p.data.length; i++) {
     const preds = tgt.get(i)
     if (!preds?.length) continue
+    const spec = mlDominantMarkerSpec(preds)
     markersArr.push({
       time: p.times[i],
       position: 'aboveBar',
-      shape: mlDominantMarkerShape(preds),
-      color: '#94a3b8',
+      shape: spec.shape,
+      color: spec.color,
+      size: ML_MARKER_SIZE,
     })
   }
 
@@ -573,6 +593,7 @@ function syncSeriesData(st: Internals, p: SyncPack) {
       position: 'belowBar',
       color: '#84cc16',
       shape: 'circle',
+      size: 1.6,
     })
   }
   st.markers.setMarkers(markersArr)
@@ -584,7 +605,7 @@ function syncSeriesData(st: Internals, p: SyncPack) {
         color: LIVE_LTP,
         lineWidth: 2,
         lineStyle: LineStyle.LargeDashed,
-        axisLabelVisible: true,
+        axisLabelVisible: false,
         title: 'LTP',
       }),
     )
@@ -595,7 +616,7 @@ function syncSeriesData(st: Internals, p: SyncPack) {
         color: PAPER_BUY_LINE,
         lineWidth: 2,
         lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
+        axisLabelVisible: false,
         title: 'Last buy',
       }),
     )

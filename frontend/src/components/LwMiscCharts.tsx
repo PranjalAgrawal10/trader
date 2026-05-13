@@ -36,9 +36,14 @@ function lwShell(bg: string) {
       vertLines: { color: 'rgba(173,181,189,0.16)' },
       horzLines: { color: 'rgba(173,181,189,0.2)', style: LineStyle.LargeDashed },
     },
-    rightPriceScale: { borderColor: 'rgba(173,181,189,0.35)' },
-    timeScale: { borderColor: 'rgba(173,181,189,0.35)', ticksVisible: true },
-    crosshair: { mode: CrosshairMode.Normal },
+    leftPriceScale: { visible: false },
+    rightPriceScale: { visible: false, borderVisible: false },
+    timeScale: { visible: false, borderVisible: false, ticksVisible: true },
+    crosshair: {
+      mode: CrosshairMode.Normal,
+      vertLine: { labelVisible: false },
+      horzLine: { labelVisible: false },
+    },
   }
 }
 
@@ -147,7 +152,7 @@ export function LwTimeLine({
         color: '#6c757d',
         lineWidth: 1,
         lineStyle: LineStyle.LargeDashed,
-        axisLabelVisible: true,
+        axisLabelVisible: false,
         title: '0',
       })
 

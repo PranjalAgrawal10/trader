@@ -31,6 +31,7 @@ export const CHART_RANGE_PRESETS = [
   'last10h',
   'last1d',
   'last2d',
+  'last3d',
   'last5d',
   'last1mo',
 ] as const
@@ -47,6 +48,7 @@ export const CHART_RANGE_LABEL: Record<ChartRangePreset, string> = {
   last10h: '10h',
   last1d: '1d',
   last2d: '2d',
+  last3d: '3d',
   last5d: '5d',
   last1mo: '1mo',
 }
@@ -84,6 +86,9 @@ export function historicalRangeQueryParams(preset: ChartRangePreset): { from?: s
       break
     case 'last2d':
       from.setUTCDate(from.getUTCDate() - 2)
+      break
+    case 'last3d':
+      from.setUTCDate(from.getUTCDate() - 3)
       break
     case 'last5d':
       from.setUTCDate(from.getUTCDate() - 5)

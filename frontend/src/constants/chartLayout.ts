@@ -4,7 +4,7 @@
  */
 export const CHART_RIGHT_EDGE_GAP_FRACT = 0.05
 
-/** Max horizontal spacing per OHLC candle when clustering (zoomed views); drives layout + drag-to-pan scale. */
+/** Max horizontal spacing per OHLC candle when clustering (zoomed views). */
 export const CHART_CANDLE_MAX_SLOT_PX = 28
 
 /** Top-left scroll stack when a chart uses browser fullscreen (toolbars, captions, zoom). */
