@@ -234,7 +234,7 @@ export function formatMlTargetBarRibbon(entries: readonly MlPredictionLogEntry[]
 }
 
 /** Compare predicted next-bar direction vs following candle close vs ref close. */
-export function resolveMlEntry(entry: MlPredictionLogEntry, series: ChartPointWithMa[]): MlPredictionLogEntry {
+export function resolveMlEntry(entry: MlPredictionLogEntry, series: readonly ChartPointWithMa[]): MlPredictionLogEntry {
   if (entry.outcome !== 'pending') return entry
   const i = series.findIndex((p) => barTimesMatch(p.t, entry.refBarTime))
   if (i < 0 || i + 1 >= series.length) return entry
@@ -258,7 +258,7 @@ export function resolveMlEntry(entry: MlPredictionLogEntry, series: ChartPointWi
   }
 }
 
-export function resolveMlHistory(entries: MlPredictionLogEntry[], series: ChartPointWithMa[]): MlPredictionLogEntry[] {
+export function resolveMlHistory(entries: MlPredictionLogEntry[], series: readonly ChartPointWithMa[]): MlPredictionLogEntry[] {
   return entries.map((e) => resolveMlEntry(e, series))
 }
 

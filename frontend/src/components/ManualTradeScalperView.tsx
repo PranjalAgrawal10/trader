@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
 import { CandlestickChart } from './CandlestickChart'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
+import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
 import {
   chartPointsFromHistorical,
   mergeScalperLiveIntoSeries,
@@ -112,6 +113,17 @@ export function ManualTradeScalperView({
     () => mergeScalperLiveIntoSeries(rawSeries, live.lastTick, interval),
     [rawSeries, live.lastTick, interval],
   )
+
+  const { entries: mlPredictionEntries, reloadHistory: reloadMlHistory } = useMlChartPredictionEntries(
+    selected?.instrumentToken ?? null,
+    interval,
+    displaySeries,
+  )
+
+  useEffect(() => {
+    if (!selected?.instrumentToken || rawSeries.length === 0) return
+    void reloadMlHistory()
+  }, [selected?.instrumentToken, interval, rawSeries, reloadMlHistory])
 
   const liveVsBar = useMemo(() => {
     const last = live.lastPrice
@@ -251,6 +263,7 @@ export function ManualTradeScalperView({
               customEmaPeriod={null}
               livePrice={live.lastPrice}
               paperLastBuyPrice={paperLastBuyPrice ?? null}
+              mlPredictionEntries={mlPredictionEntries}
             />
           </div>
         ) : selected && !chartLoading ? (
