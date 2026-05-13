@@ -20,6 +20,7 @@ import { InstrumentPriceChart } from '../components/InstrumentPriceChart'
 import { Layout } from '../components/Layout'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
+import { useChartOlderBars } from '../hooks/useChartOlderBars'
 import {
   chartPointsFromHistorical,
   mergeScalperLiveIntoSeries,
@@ -232,6 +233,15 @@ export function ScalperPage() {
     if (ref == null || last == null || !Number.isFinite(ref) || !Number.isFinite(last)) return null
     return pctChange(ref, last)
   }, [live.lastPrice, rawSeries])
+
+  const { loadOlderBars, loadingOlderBars, canLoadOlderBars } = useChartOlderBars({
+    instrumentToken: selected?.instrumentToken ?? '',
+    interval,
+    candleWindow: candleMeta ? { from: candleMeta.from, to: candleMeta.to } : null,
+    series: rawSeries,
+    chartPointsFromMerged: chartPointsFromHistorical,
+    setSeries: setRawSeries,
+  })
 
   useEffect(() => {
     const q = searchQ.trim()
@@ -449,6 +459,10 @@ export function ScalperPage() {
                     customEmaPeriod={null}
                     livePrice={live.lastPrice}
                     mlPredictionEntries={mlPredictionEntries}
+                    newerGhostBars={0}
+                    onNeedOlderBars={loadOlderBars}
+                    canLoadOlderBars={canLoadOlderBars}
+                    loadingOlderBars={loadingOlderBars}
                   />
                 </div>
               ) : selected && !chartLoading ? (

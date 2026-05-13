@@ -28,10 +28,7 @@ import {
 import { Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
-import {
-  fetchMergedHistoricalChartCandles,
-  type HistoricalChartCandlesResponse,
-} from '../api/kiteChartHistorical'
+import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import {
   CHART_FULLSCREEN_META_WRAP_CLASS,
@@ -47,12 +44,13 @@ import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import type { LwSyntheticBarRow } from '../components/LwMiscCharts'
 import { LwSyntheticHistogram, LwTimeLine } from '../components/LwMiscCharts'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
+import { useChartOlderBars } from '../hooks/useChartOlderBars'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import type { MarketTickBatchItem } from '../services/marketHub'
 import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
-import type { ChartPointOhlc, ChartIntervalKey, LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
+import type { ChartIntervalKey, LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
-import { sliceChartForZoom } from '../utils/chartZoom'
+import { chartPointsFromHistorical } from '../utils/scalperChartHelpers'
 import {
   appendMlPrediction,
   historiesEqual,
@@ -126,9 +124,6 @@ interface InstrumentSearchResponse {
   scanTruncated: boolean
 }
 
-type HistoricalCandlesResponse = HistoricalChartCandlesResponse
-
-/** GET /api/v1/predictions/price-direction */
 interface PriceDirectionApiResponse {
   direction: 'up' | 'down' | 'neutral'
   confidence: number
@@ -1361,47 +1356,12 @@ const ML_AUTOMATION_TABLE_MAX_HEIGHT = 'min(780px, 75vh)'
 const TODAY_TOP_MOVERS_FETCH_TAKE = 30
 const TODAY_TOP_MOVERS_PAGE_SIZE = 5
 
-type ChartPoint = ChartPointOhlc
+type CandleRangeMeta = { interval: string; from: string; to: string }
 
 /** Re-fetch OHLC while a chart is mounted (browser tab visible) to keep the series current. */
 // Per-chart historical-OHLC refresh cadence. With many favorite/locked tiles open this
 // multiplies (one timer per tile) so 60s keeps the call rate well under broker quotas
 // while still feeling "live" alongside the websocket tick overlay. See CHART_LIVE_POLL_MS in kiteInstrumentChartShared.
-
-function historicalCandlesToChartPoints(data: HistoricalCandlesResponse): ChartPoint[] {
-  return data.candles.map((c, idx) => ({
-    idx: idx + 1,
-    t: c.time,
-    open: Number(c.open),
-    high: Number(c.high),
-    low: Number(c.low),
-    close: Number(c.close),
-    volume: Number(c.volume),
-    ohlc: `O ${c.open}  H ${c.high}  L ${c.low}  C ${c.close}  V ${c.volume}`,
-  }))
-}
-
-/** Prefer server SMA/EMA/support–resistance (after Kite warmup); otherwise compute MAs in-browser. S/R is server-only when using API candles. Custom EMA column is added in UI. */
-function chartPointsFromHistoricalResponse(data: HistoricalCandlesResponse): ChartPointWithMa[] {
-  const pts = historicalCandlesToChartPoints(data)
-  const serverMa =
-    data.candles.length === pts.length &&
-    data.candles.some((c) => c.sma20 != null || c.ema9 != null || c.ema21 != null)
-  const base: ChartPointWithMa[] = !serverMa
-    ? attachMovingAverages(pts)
-    : pts.map((p, i) => ({
-        ...p,
-        sma20: data.candles[i].sma20 != null ? Number(data.candles[i].sma20) : null,
-        ema9: data.candles[i].ema9 != null ? Number(data.candles[i].ema9) : null,
-        ema21: data.candles[i].ema21 != null ? Number(data.candles[i].ema21) : null,
-        emaCustom: null,
-        srSupport: data.candles[i].srSupport != null ? Number(data.candles[i].srSupport) : null,
-        srResistance: data.candles[i].srResistance != null ? Number(data.candles[i].srResistance) : null,
-      }))
-  return addCustomEmaToChartPoints(base, null)
-}
-
-type CandleRangeMeta = { interval: string; from: string; to: string }
 
 function ChartSettingsToolbar({
   idPrefix,
@@ -3211,7 +3171,7 @@ function CompactPriceChart({
           historicalRangeQueryParams(rangePreset),
           ac.signal,
         )
-        const pts = chartPointsFromHistoricalResponse(data)
+        const pts = chartPointsFromHistorical(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
         if (initial) setError(null)
@@ -3268,7 +3228,16 @@ function CompactPriceChart({
     [tickMergedSeries, customEmaApplied],
   )
 
-  const chartData = useMemo(() => sliceChartForZoom(seriesWithCustom, null, 0), [seriesWithCustom])
+  const { loadOlderBars, loadingOlderBars, canLoadOlderBars } = useChartOlderBars({
+    instrumentToken: row.instrumentToken,
+    interval,
+    candleWindow: candleRange ? { from: candleRange.from, to: candleRange.to } : null,
+    series,
+    chartPointsFromMerged: chartPointsFromHistorical,
+    setSeries,
+  })
+
+  const chartData = seriesWithCustom
 
   const paperBuyDataIndices = useMemo(
     () =>
@@ -3407,6 +3376,9 @@ function CompactPriceChart({
               rechartsYDomain={rechartsYDomain ?? undefined}
               density="compact"
               newerGhostBars={0}
+              onNeedOlderBars={loadOlderBars}
+              canLoadOlderBars={canLoadOlderBars}
+              loadingOlderBars={loadingOlderBars}
             />
           </div>
         </div>
@@ -3826,7 +3798,7 @@ function InstrumentChartCard({
           historicalRangeQueryParams(rangePreset),
           ac.signal,
         )
-        const pts = chartPointsFromHistoricalResponse(data)
+        const pts = chartPointsFromHistorical(data)
         setSeries(pts)
         setCandleRange({ interval: data.interval, from: data.from, to: data.to })
         if (initial) setError(null)
@@ -3883,7 +3855,16 @@ function InstrumentChartCard({
     [displaySeries, customEmaApplied],
   )
 
-  const chartData = useMemo(() => sliceChartForZoom(displayWithMa, null, 0), [displayWithMa])
+  const { loadOlderBars, loadingOlderBars, canLoadOlderBars } = useChartOlderBars({
+    instrumentToken: selection?.instrumentToken ?? '',
+    interval,
+    candleWindow: candleRange ? { from: candleRange.from, to: candleRange.to } : null,
+    series,
+    chartPointsFromMerged: chartPointsFromHistorical,
+    setSeries,
+  })
+
+  const chartData = displayWithMa
 
   const browsePaperBuyDataIndices = useMemo(
     () =>
@@ -4063,6 +4044,9 @@ function InstrumentChartCard({
                     rechartsYDomain={rechartsYDomain ?? undefined}
                     density="comfortable"
                     newerGhostBars={0}
+                    onNeedOlderBars={loadOlderBars}
+                    canLoadOlderBars={canLoadOlderBars}
+                    loadingOlderBars={loadingOlderBars}
                   />
                 </div>
               </div>

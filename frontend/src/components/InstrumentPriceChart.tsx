@@ -2,8 +2,17 @@
  * Zerodha-style OHLC chart using TradingView Lightweight Charts™ v5+
  * @see https://tradingview.github.io/lightweight-charts/
  */
-import { Fragment, useLayoutEffect, useMemo, useRef } from 'react'
-import type { IChartApi, IPriceLine, ISeriesApi, SeriesMarker, Time } from 'lightweight-charts'
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { MutableRefObject } from 'react'
+import type {
+  IChartApi,
+  IPriceLine,
+  ISeriesApi,
+  LogicalRange,
+  MouseEventParams,
+  SeriesMarker,
+  Time,
+} from 'lightweight-charts'
 import {
   BarSeries,
   CandlestickSeries,
@@ -17,6 +26,10 @@ import {
   LineType,
 } from 'lightweight-charts'
 import type { UTCTimestamp } from 'lightweight-charts'
+import {
+  CHART_DEFAULT_VISIBLE_BARS,
+  CHART_LOAD_OLDER_VISIBLE_THRESHOLD,
+} from '../constants/chartLayout'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import {
@@ -30,7 +43,10 @@ import {
   lwVolumesFromBars,
 } from '../utils/lightweightInstrumentData'
 import type { MlPredictionLogEntry } from '../utils/mlPredictionHistory'
-import { mapMlPredictionsPerTargetBar } from '../utils/mlPredictionHistory'
+import {
+  mapMlPredictionsPerTargetBar,
+  sortMlRibbonEntries,
+} from '../utils/mlPredictionHistory'
 import type { ChartPointWithMa, MaLineVisibility } from '../utils/movingAverages'
 import {
   DEFAULT_MA_LINE_VISIBILITY,
@@ -58,6 +74,20 @@ export type InstrumentPriceChartProps = {
   density?: InstrumentChartDensity
   showVolume?: boolean
   newerGhostBars?: number
+  /**
+   * When set (>0): first paint anchors the view on this many newest real bars (user can LW-pan sideways).
+   * When null/omit: defaults to {@link CHART_DEFAULT_VISIBLE_BARS}.
+   */
+  defaultVisibleBars?: number | null
+  /** When false, fit entire series horizontally on first layout (still allows pan/zoom afterward). */
+  enableInitialViewportClip?: boolean
+  /** Show price + time axes (readable scale). Default true for OHLC. */
+  showScales?: boolean
+  /** Panned near the oldest bar — fetch and prepend older OHLC upstream. */
+  onNeedOlderBars?: () => void
+  /** Gate for {@link onNeedOlderBars}; false disables further prefetch. */
+  canLoadOlderBars?: boolean
+  loadingOlderBars?: boolean
 }
 
 type MainKind = 'candlestick' | 'bar' | 'line'
@@ -71,6 +101,8 @@ type Internals = {
   trendLine: ISeriesApi<'Line'> | null
   maSeries: Partial<Record<string, ISeriesApi<'Line'>>>
   priceLines: IPriceLine[]
+  unsubscribeVisibleLogicalRange?: () => void
+  unsubscribeCrosshairMove?: () => void
 }
 
 const LIVE_LTP = '#38bdf8'
@@ -102,26 +134,42 @@ const ML_MARKER_COL = {
   neutral: '#f59e0b',
 } as const
 
-const ML_MARKER_SIZE = 2.1
+const ML_MARKER_SIZE = 0.85
 
-function mlDominantMarkerSpec(
-  entries: readonly MlPredictionLogEntry[],
-): { shape: 'arrowUp' | 'arrowDown' | 'square'; color: string } {
-  let up = 0
-  let down = 0
-  for (const e of entries) {
-    if (e.direction === 'up') up++
-    else if (e.direction === 'down') down++
-  }
-  if (up > down) return { shape: 'arrowUp', color: ML_MARKER_COL.up }
-  if (down > up) return { shape: 'arrowDown', color: ML_MARKER_COL.down }
+/** Stack markers vertically in price space so every model prediction stays visible above the candle. */
+function mlMarkerStackHigh(bar: ChartPointWithMa, stackIndex: number): number {
+  const spread = Math.max(bar.high - bar.low, Math.abs(bar.close) * 0.0005, 1e-9)
+  const step = spread * 0.16
+  return bar.high + step * (stackIndex + 1)
+}
+
+function mlEntryMarkerAttrs(
+  e: MlPredictionLogEntry,
+): Pick<SeriesMarker<Time>, 'shape' | 'color'> {
+  if (e.direction === 'up') return { shape: 'arrowUp', color: ML_MARKER_COL.up }
+  if (e.direction === 'down') return { shape: 'arrowDown', color: ML_MARKER_COL.down }
   return { shape: 'square', color: ML_MARKER_COL.neutral }
 }
 
-function lwChartOptions(bg: string) {
+const ML_HOVER_DETAIL_MAX_CHARS = 180
+
+function truncateForHover(text: string): string {
+  if (text.length <= ML_HOVER_DETAIL_MAX_CHARS) return text
+  return `${text.slice(0, ML_HOVER_DETAIL_MAX_CHARS - 1)}…`
+}
+
+function mlPredictionOutcomeAbbrev(o: MlPredictionLogEntry['outcome']): string {
+  if (o === 'correct') return '✓ ok'
+  if (o === 'wrong') return '✗ miss'
+  return '… pend'
+}
+
+function lwChartOptions(bg: string, showScales: boolean) {
   return {
     attributionLogo: false,
     autoSize: true,
+    handleScroll: true,
+    handleScale: true,
     grid: {
       vertLines: { color: 'rgba(173,181,189,0.18)', style: LineStyle.Dotted },
       horzLines: { color: 'rgba(173,181,189,0.22)', style: LineStyle.LargeDashed },
@@ -133,20 +181,20 @@ function lwChartOptions(bg: string) {
     },
     leftPriceScale: { visible: false },
     rightPriceScale: {
-      visible: false,
-      borderVisible: false,
+      visible: showScales,
+      borderVisible: showScales,
       scaleMargins: { top: 0.06, bottom: 0.2 },
     },
     timeScale: {
-      visible: false,
-      borderVisible: false,
+      visible: showScales,
+      borderVisible: showScales,
       timeVisible: true,
       secondsVisible: false,
     },
     crosshair: {
       mode: CrosshairMode.MagnetOHLC,
-      vertLine: { labelVisible: false },
-      horzLine: { labelVisible: false },
+      vertLine: { labelVisible: showScales },
+      horzLine: { labelVisible: showScales },
     },
   }
 }
@@ -187,6 +235,18 @@ function addMain(chart: IChartApi, kind: MainKind, barCountEstimate: number): In
 function disposeInternals(st: Internals | null) {
   if (!st) return
   clearPriceLines(st)
+  try {
+    st.unsubscribeVisibleLogicalRange?.()
+  } catch {
+    /* noop */
+  }
+  st.unsubscribeVisibleLogicalRange = undefined
+  try {
+    st.unsubscribeCrosshairMove?.()
+  } catch {
+    /* noop */
+  }
+  st.unsubscribeCrosshairMove = undefined
   try {
     st.markers.detach()
   } catch {
@@ -276,7 +336,7 @@ function InstrumentChartCornerLegend({
   return (
     <div
       className="position-absolute small text-secondary"
-      style={{ right: 8, top: 4, fontSize: '0.65rem', pointerEvents: 'none', zIndex: 2 }}
+      style={{ left: 8, top: 4, fontSize: '0.65rem', pointerEvents: 'none', zIndex: 2 }}
     >
       {items.map((item, i) => (
         <Fragment key={item.key}>
@@ -301,11 +361,31 @@ export function InstrumentPriceChart({
   density = 'compact',
   showVolume = true,
   newerGhostBars = 0,
+  defaultVisibleBars = CHART_DEFAULT_VISIBLE_BARS,
+  enableInitialViewportClip = true,
+  showScales = true,
+  onNeedOlderBars,
+  canLoadOlderBars = true,
+  loadingOlderBars = false,
 }: InstrumentPriceChartProps) {
-  const hostRef = useRef<HTMLDivElement | null>(null)
+  const chartMountRef = useRef<HTMLDivElement | null>(null)
   const stRef = useRef<Internals | null>(null)
+  const mlPerTargetBarRef = useRef<Map<number, MlPredictionLogEntry[]>>(new Map())
+  const dataLenRef = useRef(0)
   const compactVol = density === 'compact'
   const ghost = Math.max(0, Math.floor(newerGhostBars))
+
+  const onNeedOlderRef = useRef(onNeedOlderBars)
+  const canOlderRef = useRef(canLoadOlderBars)
+  const loadingOlderRef = useRef(loadingOlderBars)
+  const olderThrottleUntilRef = useRef(0)
+  const viewportDidInitRef = useRef(false)
+  const lastVpFirstBarTRef = useRef<string | undefined>(undefined)
+  const lastVpLenRef = useRef(0)
+
+  onNeedOlderRef.current = onNeedOlderBars
+  canOlderRef.current = canLoadOlderBars
+  loadingOlderRef.current = loadingOlderBars
 
   const times = useMemo(() => barTimesUtc(data, ghost), [data, ghost])
   const fixedY = useMemo(() => coerceFixedLwRange(rechartsYDomain), [rechartsYDomain])
@@ -316,6 +396,18 @@ export function InstrumentPriceChart({
 
   const maKeysMemo = useMemo(() => lwMaSeriesKeys(maLineVisibility, customEmaPeriod), [customEmaPeriod, maLineVisibility])
 
+  const mlCrosshairHoverRef = useRef<{
+    x: number
+    y: number
+    entriesKey: string
+  } | null>(null)
+
+  const [mlCrosshairHover, setMlCrosshairHover] = useState<{
+    x: number
+    y: number
+    entries: MlPredictionLogEntry[]
+  } | null>(null)
+
   const trendSeries = useMemo(() => {
     if (
       !maLineVisibility.showLinearCloseTrend ||
@@ -325,10 +417,57 @@ export function InstrumentPriceChart({
     return attachLinearTrendToChartPoints(data)
   }, [data, graphType, maLineVisibility.showLinearCloseTrend])
   useLayoutEffect(() => {
-    const el = hostRef.current
+    const el = chartMountRef.current
+    mlPerTargetBarRef.current = mapMlPredictionsPerTargetBar(mlPredictionEntries, data)
+    dataLenRef.current = data.length
+
+    const applyMlHoverFromCrosshair = (param: MouseEventParams<Time>) => {
+      if (!param.point) {
+        if (mlCrosshairHoverRef.current !== null) {
+          mlCrosshairHoverRef.current = null
+          setMlCrosshairHover(null)
+        }
+        return
+      }
+      const n = dataLenRef.current
+      const liRaw = param.logical
+      const li = typeof liRaw === 'number' ? Math.round(liRaw) : NaN
+      if (!Number.isFinite(li) || li < 0 || li >= n) {
+        if (mlCrosshairHoverRef.current !== null) {
+          mlCrosshairHoverRef.current = null
+          setMlCrosshairHover(null)
+        }
+        return
+      }
+      const raw = mlPerTargetBarRef.current.get(li)
+      if (!raw?.length) {
+        if (mlCrosshairHoverRef.current !== null) {
+          mlCrosshairHoverRef.current = null
+          setMlCrosshairHover(null)
+        }
+        return
+      }
+      const entries = sortMlRibbonEntries(raw)
+      const entriesKey = entries.map((e) => e.id).join('|')
+      const next = {
+        x: param.point!.x,
+        y: param.point!.y,
+        entriesKey,
+      }
+      const prev = mlCrosshairHoverRef.current
+      if (prev && prev.entriesKey === entriesKey && prev.x === next.x && prev.y === next.y) return
+      mlCrosshairHoverRef.current = next
+      setMlCrosshairHover({ x: next.x, y: next.y, entries })
+    }
+
     if (!el || data.length === 0) {
+      viewportDidInitRef.current = false
+      lastVpLenRef.current = 0
+      lastVpFirstBarTRef.current = undefined
       disposeInternals(stRef.current)
       stRef.current = null
+      mlCrosshairHoverRef.current = null
+      setMlCrosshairHover(null)
       return
     }
 
@@ -337,7 +476,7 @@ export function InstrumentPriceChart({
     let st = stRef.current
     if (!st?.chart) {
       disposeInternals(st)
-      const chart = createChart(el, lwChartOptions(bgMemo))
+      const chart = createChart(el, lwChartOptions(bgMemo, showScales))
       const histogram = showVolume
         ? chart.addSeries(HistogramSeries, {
             priceFormat: { type: 'volume' },
@@ -362,6 +501,8 @@ export function InstrumentPriceChart({
         trendLine: null,
         maSeries: {},
         priceLines: [],
+        unsubscribeVisibleLogicalRange: undefined,
+        unsubscribeCrosshairMove: undefined,
       }
       stRef.current = st
       chart.applyOptions({
@@ -401,27 +542,87 @@ export function InstrumentPriceChart({
       paperBuyDataIndices,
     })
 
-    stAlive.chart.timeScale().fitContent()
+    stAlive.chart.applyOptions(lwChartOptions(bgMemo, showScales))
+
+    applyInstrumentChartViewport(stAlive.chart, {
+      enableInitialViewportClip,
+      defaultVisibleBars,
+      dataLen: data.length,
+      ghostBars: ghost,
+      firstBarIso: data[0]?.t,
+      viewportDidInitRef,
+      lastVpLenRef,
+      lastVpFirstBarTRef,
+    })
+
+    try {
+      stAlive.unsubscribeVisibleLogicalRange?.()
+    } catch {
+      /* noop */
+    }
+    stAlive.unsubscribeVisibleLogicalRange = undefined
+
+    try {
+      stAlive.unsubscribeCrosshairMove?.()
+    } catch {
+      /* noop */
+    }
+    stAlive.unsubscribeCrosshairMove = undefined
+    stAlive.chart.subscribeCrosshairMove(applyMlHoverFromCrosshair)
+    stAlive.unsubscribeCrosshairMove = () => {
+      try {
+        stAlive.chart.unsubscribeCrosshairMove(applyMlHoverFromCrosshair)
+      } catch {
+        /* noop */
+      }
+    }
+
+    if (onNeedOlderBars) {
+      const ts = stAlive.chart.timeScale()
+      const visHandler = (r: LogicalRange | null) => {
+        if (r === null || r.from === undefined || r.from > CHART_LOAD_OLDER_VISIBLE_THRESHOLD) return
+        if (!onNeedOlderRef.current || !canOlderRef.current) return
+        if (loadingOlderRef.current) return
+        const now = Date.now()
+        if (now < olderThrottleUntilRef.current) return
+        olderThrottleUntilRef.current = now + 900
+        queueMicrotask(() => onNeedOlderRef.current?.())
+      }
+      ts.subscribeVisibleLogicalRangeChange(visHandler)
+      stAlive.unsubscribeVisibleLogicalRange = () => {
+        try {
+          ts.unsubscribeVisibleLogicalRangeChange(visHandler)
+        } catch {
+          /* noop */
+        }
+      }
+    }
 
     return () => undefined
     // intentionally drive off props that affect LW content
   }, [
     bgMemo,
+    canLoadOlderBars,
     compactVol,
     customEmaPeriod,
     data,
+    defaultVisibleBars,
     density,
+    enableInitialViewportClip,
     fixedY,
     ghost,
     graphType,
+    loadingOlderBars,
     livePrice,
     maKeysMemo,
     maLineVisibility,
     mlPredictionEntries,
     newerGhostBars,
+    onNeedOlderBars,
     paperBuyDataIndices,
     paperLastBuyPrice,
     showVolume,
+    showScales,
     times,
     trendSeries,
   ])
@@ -435,9 +636,48 @@ export function InstrumentPriceChart({
 
   return (
     <div className="position-relative w-100 h-100 d-flex flex-column">
-      <div className="flex-grow-1" style={{ minHeight: 0 }} ref={hostRef}>
-        {data.length === 0 ? (
-          <div className="d-flex align-items-center justify-content-center text-secondary small h-100">No candles.</div>
+      <div className="flex-grow-1 position-relative" style={{ minHeight: 0 }}>
+        <div ref={chartMountRef} className="w-100 h-100">
+          {data.length === 0 ? (
+            <div className="d-flex align-items-center justify-content-center text-secondary small h-100">No candles.</div>
+          ) : null}
+        </div>
+        {mlCrosshairHover != null ? (
+          <div
+            className="rounded border shadow-sm bg-body text-secondary overflow-auto border-secondary"
+            style={{
+              pointerEvents: 'none',
+              position: 'absolute',
+              left: mlCrosshairHover.x + 12,
+              top: mlCrosshairHover.y + 12,
+              zIndex: 5,
+              maxWidth: 288,
+              maxHeight: 220,
+              fontSize: '0.625rem',
+              lineHeight: 1.35,
+              padding: '6px 8px',
+            }}
+          >
+            {mlCrosshairHover.entries.map((e) => (
+              <div key={e.id} className="mb-1 text-start" style={{ marginBottom: 4 }}>
+                <span className="text-body fw-semibold me-1">
+                  {e.direction === 'up' ? '↑' : e.direction === 'down' ? '↓' : '◇'}
+                </span>
+                <span className="text-body">{e.modelId}</span>
+                <span className="text-muted mx-1">·</span>
+                <span>{e.confidence.toFixed(1)}%</span>
+                <span className="text-muted mx-1">·</span>
+                <span className="text-muted">{mlPredictionOutcomeAbbrev(e.outcome)}</span>
+                <span className="text-muted mx-1">·</span>
+                <span className="font-monospace text-muted">{formatLocalDateTime(e.predictedAt)}</span>
+                {e.detail ? (
+                  <div className="text-muted fst-italic mt-1" style={{ wordBreak: 'break-word', fontSize: '0.58rem' }}>
+                    {truncateForHover(e.detail)}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
         ) : null}
       </div>
       <InstrumentChartCornerLegend
@@ -447,6 +687,66 @@ export function InstrumentPriceChart({
       />
     </div>
   )
+}
+
+function applyInstrumentChartViewport(
+  chart: IChartApi,
+  p: {
+    enableInitialViewportClip: boolean
+    defaultVisibleBars: number | null
+    dataLen: number
+    ghostBars: number
+    firstBarIso: string | undefined
+    viewportDidInitRef: MutableRefObject<boolean>
+    lastVpLenRef: MutableRefObject<number>
+    lastVpFirstBarTRef: MutableRefObject<string | undefined>
+  },
+) {
+  const nMain = p.dataLen
+  const ts = chart.timeScale()
+  const logicalTo = Math.max(p.dataLen + p.ghostBars - 1, 0)
+
+  if (nMain === 0) {
+    p.viewportDidInitRef.current = false
+    p.lastVpLenRef.current = 0
+    p.lastVpFirstBarTRef.current = undefined
+    return
+  }
+
+  const prevLen = p.lastVpLenRef.current
+  const prevFirstIso = p.lastVpFirstBarTRef.current
+  const prevFirstMs = prevFirstIso ? Date.parse(prevFirstIso) : NaN
+  const nextFirstIso = p.firstBarIso ?? ''
+  const nextFirstMs = nextFirstIso ? Date.parse(nextFirstIso) : NaN
+  const prepended =
+    prevLen > 0 &&
+    nMain > prevLen &&
+    Number.isFinite(prevFirstMs) &&
+    Number.isFinite(nextFirstMs) &&
+    nextFirstMs < prevFirstMs - 400
+
+  if (prepended) {
+    const grow = nMain - prevLen
+    const vis = ts.getVisibleLogicalRange()
+    if (vis !== null && Number.isFinite(vis.from) && Number.isFinite(vis.to)) {
+      ts.setVisibleLogicalRange({ from: vis.from + grow, to: vis.to + grow })
+    }
+  } else if (!p.viewportDidInitRef.current) {
+    const rawCap =
+      p.defaultVisibleBars != null && Number.isFinite(p.defaultVisibleBars)
+        ? Math.floor(p.defaultVisibleBars as number)
+        : CHART_DEFAULT_VISIBLE_BARS
+    if (p.enableInitialViewportClip && rawCap > 0 && nMain > rawCap) {
+      const clip = Math.min(rawCap, nMain)
+      ts.setVisibleLogicalRange({ from: nMain - clip, to: logicalTo })
+    } else {
+      ts.fitContent()
+    }
+    p.viewportDidInitRef.current = true
+  }
+
+  p.lastVpFirstBarTRef.current = p.firstBarIso
+  p.lastVpLenRef.current = nMain
 }
 
 function lwTimeFmt(t: Time): string {
@@ -576,14 +876,20 @@ function syncSeriesData(st: Internals, p: SyncPack) {
   for (let i = 0; i < p.data.length; i++) {
     const preds = tgt.get(i)
     if (!preds?.length) continue
-    const spec = mlDominantMarkerSpec(preds)
-    markersArr.push({
-      time: p.times[i],
-      position: 'aboveBar',
-      shape: spec.shape,
-      color: spec.color,
-      size: ML_MARKER_SIZE,
-    })
+    const bar = p.data[i]
+    const sorted = sortMlRibbonEntries(preds)
+    for (let j = 0; j < sorted.length; j++) {
+      const e = sorted[j]
+      const attrs = mlEntryMarkerAttrs(e)
+      markersArr.push({
+        time: p.times[i],
+        position: 'atPriceTop',
+        shape: attrs.shape,
+        color: attrs.color,
+        price: mlMarkerStackHigh(bar, j),
+        size: ML_MARKER_SIZE,
+      })
+    }
   }
 
   for (const idx of p.paperBuyDataIndices) {
@@ -593,7 +899,7 @@ function syncSeriesData(st: Internals, p: SyncPack) {
       position: 'belowBar',
       color: '#84cc16',
       shape: 'circle',
-      size: 1.6,
+      size: 1.25,
     })
   }
   st.markers.setMarkers(markersArr)

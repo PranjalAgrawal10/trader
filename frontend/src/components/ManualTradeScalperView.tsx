@@ -4,8 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Badge, Card, Col, Form, Row, Spinner } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
 import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
-import { CHART_FULLSCREEN_META_WRAP_CLASS, CHART_FULLSCREEN_META_WRAP_STYLE } from '../constants/chartLayout'
+import {
+  CHART_DEFAULT_VISIBLE_BARS,
+  CHART_FULLSCREEN_META_WRAP_CLASS,
+  CHART_FULLSCREEN_META_WRAP_STYLE,
+} from '../constants/chartLayout'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
+import { useChartOlderBars } from '../hooks/useChartOlderBars'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
 import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
@@ -30,7 +35,6 @@ import {
   chartPointsFromHistorical,
   pctChange,
 } from '../utils/scalperChartHelpers'
-import { sliceChartForZoom } from '../utils/chartZoom'
 import { ChartZoomControls } from './ChartZoomControls'
 import { HistoricalRangeCaption } from './HistoricalRangeCaption'
 import { InstrumentPriceChart } from './InstrumentPriceChart'
@@ -67,12 +71,10 @@ type CandleRangeMeta = { interval: string; from: string; to: string }
 /** Fixed historical lookback for this chart (toolbar Range row is omitted on Manual trade). */
 const MANUAL_TRADE_HISTORICAL_RANGE = 'last3d' as const
 
-/** Newest-first window length on the chart (full download is larger). */
-const MANUAL_TRADE_CHART_VISIBLE_BARS = 10
-
 /**
- * Manual paper-trade scalper chart: merges live ticks like other tiles; always requests three calendar days of OHLC and
- * plots only the newest ten bars from that window.
+ * Manual paper-trade scalper chart: merges live ticks like other tiles; always requests three calendar days of OHLC,
+ * anchors the Lightweight range on the {@link CHART_DEFAULT_VISIBLE_BARS} newest candles, and loads older bars when you
+ * scroll left toward the window start.
  */
 export function ManualTradeScalperView({
   isZerodha,
@@ -189,10 +191,16 @@ export function ManualTradeScalperView({
     [tickMergedSeries, customEmaApplied],
   )
 
-  const chartData = useMemo(
-    () => sliceChartForZoom(seriesWithCustom, MANUAL_TRADE_CHART_VISIBLE_BARS, 0),
-    [seriesWithCustom],
-  )
+  const { loadOlderBars, loadingOlderBars, canLoadOlderBars } = useChartOlderBars({
+    instrumentToken: selected?.instrumentToken ?? '',
+    interval,
+    candleWindow: candleRange ? { from: candleRange.from, to: candleRange.to } : null,
+    series,
+    chartPointsFromMerged: chartPointsFromHistorical,
+    setSeries,
+  })
+
+  const chartData = seriesWithCustom
 
   const paperBuyDataIndices = useMemo(
     () => [...chartDataIndicesForPaperBuyMarkers(demoPaperBuyMarkers ?? [], chartData, interval as ChartIntervalKey)],
@@ -321,10 +329,11 @@ export function ManualTradeScalperView({
         </Row>
 
         <p className="small text-muted mb-2 mb-md-3">
-          <strong>Chart</strong> loads the last <strong>3 calendar days</strong> of candles and shows the{' '}
-          <strong>{MANUAL_TRADE_CHART_VISIBLE_BARS} newest</strong> bars. <strong>Interval</strong>, line/bar/candle mode,
-          and <strong>MA / S&amp;R</strong> toggles stay synced with <strong>Browse</strong> / <strong>All favorites</strong>{' '}
-          (toolbar: <strong>refresh</strong> + <strong>fullscreen</strong>; range is fixed for scalper speed).
+          <strong>Chart</strong> loads the last <strong>3 calendar days</strong> of candles; it starts zoomed on about the{' '}
+          <strong>{CHART_DEFAULT_VISIBLE_BARS} newest</strong> bars (pan left for more inside the window — at the left edge
+          it fetches older candles). <strong>Interval</strong>, line/bar/candle mode, and <strong>MA / S&amp;R</strong> toggles
+          stay synced with <strong>Browse</strong> / <strong>All favorites</strong> (toolbar: <strong>refresh</strong> +{' '}
+          <strong>fullscreen</strong>; range is fixed for scalper speed).
         </p>
 
         {chartFullscreenToolbar && !fullscreenActive ? (
@@ -409,6 +418,9 @@ export function ManualTradeScalperView({
                 rechartsYDomain={rechartsYDomain ?? undefined}
                 density="compact"
                 newerGhostBars={0}
+                onNeedOlderBars={loadOlderBars}
+                canLoadOlderBars={canLoadOlderBars}
+                loadingOlderBars={loadingOlderBars}
               />
             </div>
           </div>

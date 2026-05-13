@@ -71,7 +71,8 @@ export function historicalCandlesToPoints(data: HistoricalChartCandlesResponse):
 export function chartPointsFromHistorical(data: HistoricalChartCandlesResponse): ChartPointWithMa[] {
   const pts = historicalCandlesToPoints(data)
   const serverMa =
-    data.candles.length === pts.length && data.candles.some((c) => c.sma20 != null || c.ema9 != null)
+    data.candles.length === pts.length &&
+    data.candles.some((c) => c.sma20 != null || c.ema9 != null || c.ema21 != null)
   const base: ChartPointWithMa[] = !serverMa
     ? attachMovingAverages(pts)
     : pts.map((p, i) => ({
