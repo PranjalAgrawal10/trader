@@ -64,9 +64,11 @@ import type { ChartPointOhlc, ChartIntervalKey, LiveTickVolumeAccumulator } from
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
   clampChartPanAllowNewerGhost,
+  correctedChartZoomStored,
   sliceChartForZoom,
-  zoomInBarCount,
-  zoomOutBarCount,
+  visibleBarsFromChartZoomStored,
+  zoomInChartZoomStored,
+  zoomOutChartZoomStored,
 } from '../utils/chartZoom'
 import {
   appendMlPrediction,
@@ -3165,8 +3167,8 @@ function CompactPriceChart({
   heightPx,
   maLineVisibility,
   customEmaPeriod,
-  zoomVisibleBars,
-  onZoomVisibleBarsChange,
+  chartZoomStored,
+  onChartZoomStoredChange,
   demoPaperBuyMarkers,
   paperLastBuyPrice,
   zerodhaConnected,
@@ -3178,8 +3180,8 @@ function CompactPriceChart({
   heightPx: number
   maLineVisibility: MaLineVisibility
   customEmaPeriod: number
-  zoomVisibleBars: number | null
-  onZoomVisibleBarsChange: (bars: number | null) => void
+  chartZoomStored: number | null
+  onChartZoomStoredChange: (stored: number | null) => void
   /** OPEN demo BUY legs — vertical markers removed FIFO when sells execute. */
   demoPaperBuyMarkers?: readonly DemoPaperOpenBuyMarkerDto[]
   /** Latest demo BUY fill for an open paper long — horizontal guide. */
@@ -3202,12 +3204,6 @@ function CompactPriceChart({
   const liveVolAccRef = useRef<LiveTickVolumeAccumulator>({ lastCumulativeVolume: null })
 
   const live = useLiveMarketTick(row.instrumentToken, zerodhaConnected)
-
-  useEffect(() => {
-    if (zoomVisibleBars != null && series.length > 0 && zoomVisibleBars > series.length) {
-      onZoomVisibleBarsChange(null)
-    }
-  }, [series.length, zoomVisibleBars, onZoomVisibleBarsChange])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -3292,9 +3288,22 @@ function CompactPriceChart({
     [tickMergedSeries, customEmaApplied],
   )
 
+  const zoomVisibleBars = useMemo(
+    () => visibleBarsFromChartZoomStored(chartZoomStored, seriesWithCustom.length),
+    [chartZoomStored, seriesWithCustom.length],
+  )
+
+  useEffect(() => {
+    if (chartZoomStored == null || seriesWithCustom.length === 0) return
+    const next = correctedChartZoomStored(chartZoomStored, seriesWithCustom.length)
+    if (next === undefined) return
+    if (next === chartZoomStored) return
+    onChartZoomStoredChange(next)
+  }, [chartZoomStored, seriesWithCustom.length, onChartZoomStoredChange])
+
   useEffect(() => {
     setChartPanOffsetBars(0)
-  }, [zoomVisibleBars, row.instrumentToken])
+  }, [chartZoomStored, row.instrumentToken])
 
   useEffect(() => {
     setChartPanOffsetBars((p) =>
@@ -3365,14 +3374,14 @@ function CompactPriceChart({
   }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice])
 
   const onChartZoomIn = useCallback(() => {
-    onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, series.length))
-  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+    onChartZoomStoredChange(zoomInChartZoomStored(chartZoomStored, seriesWithCustom.length))
+  }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
 
   const onChartZoomOut = useCallback(() => {
-    onZoomVisibleBarsChange(zoomOutBarCount(zoomVisibleBars, series.length))
-  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+    onChartZoomStoredChange(zoomOutChartZoomStored(chartZoomStored, seriesWithCustom.length))
+  }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
 
-  const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
+  const onChartZoomReset = useCallback(() => onChartZoomStoredChange(null), [onChartZoomStoredChange])
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
@@ -3694,7 +3703,7 @@ function FavoritesChartsGrid({
   tradingLockKeySet?: Set<string>
   onToggleTradingLock?: (r: KiteInstrumentRow) => void
   chartZoomByInstrumentToken: Record<string, number>
-  onInstrumentChartZoomChange: (instrumentToken: string, bars: number | null) => void
+  onInstrumentChartZoomChange: (instrumentToken: string, chartZoomStored: number | null) => void
   automationRecent: readonly MlAutomationRecentRow[]
   automationRecentLoading: boolean
   automationPriceModels: PriceDirectionModelsApiResponse | null
@@ -3795,8 +3804,8 @@ function FavoritesChartsGrid({
                   heightPx={220}
                   maLineVisibility={maLineVisibility}
                   customEmaPeriod={customEmaPeriod}
-                  zoomVisibleBars={chartZoomByInstrumentToken[row.instrumentToken] ?? null}
-                  onZoomVisibleBarsChange={(bars) => onInstrumentChartZoomChange(row.instrumentToken, bars)}
+                  chartZoomStored={chartZoomByInstrumentToken[row.instrumentToken] ?? null}
+                  onChartZoomStoredChange={(stored) => onInstrumentChartZoomChange(row.instrumentToken, stored)}
                   demoPaperBuyMarkers={demoPaperOpenBuysByInstrumentToken[row.instrumentToken]}
                   paperLastBuyPrice={demoPaperLastBuyPriceByInstrumentToken[row.instrumentToken] ?? null}
                   zerodhaConnected={zerodhaConnected}
@@ -3843,8 +3852,8 @@ function InstrumentChartCard({
   onToggleTradingLock,
   liveLastPrice,
   liveLastTick,
-  zoomVisibleBars,
-  onZoomVisibleBarsChange,
+  chartZoomStored,
+  onChartZoomStoredChange,
   trendAnalysisSelections,
   onTrendAnalysisSelectionsChange,
   demoPaperBuyMarkers,
@@ -3867,8 +3876,8 @@ function InstrumentChartCard({
   onToggleTradingLock?: () => void
   liveLastPrice?: number | null
   liveLastTick?: MarketTickBatchItem | null
-  zoomVisibleBars: number | null
-  onZoomVisibleBarsChange: (bars: number | null) => void
+  chartZoomStored: number | null
+  onChartZoomStoredChange: (stored: number | null) => void
   trendAnalysisSelections: ChartInterval[]
   onTrendAnalysisSelectionsChange: (next: ChartInterval[]) => void
   demoPaperBuyMarkers?: readonly DemoPaperOpenBuyMarkerDto[]
@@ -3983,21 +3992,28 @@ function InstrumentChartCard({
     [displaySeries, customEmaApplied],
   )
 
+  const zoomVisibleBars = useMemo(
+    () => visibleBarsFromChartZoomStored(chartZoomStored, displayWithMa.length),
+    [chartZoomStored, displayWithMa.length],
+  )
+
+  useEffect(() => {
+    if (chartZoomStored == null || displayWithMa.length === 0) return
+    const next = correctedChartZoomStored(chartZoomStored, displayWithMa.length)
+    if (next === undefined) return
+    if (next === chartZoomStored) return
+    onChartZoomStoredChange(next)
+  }, [chartZoomStored, displayWithMa.length, onChartZoomStoredChange])
+
   useEffect(() => {
     setChartPanOffsetBars(0)
-  }, [zoomVisibleBars, selection?.instrumentToken])
+  }, [chartZoomStored, selection?.instrumentToken])
 
   useEffect(() => {
     setChartPanOffsetBars((p) =>
       clampChartPanAllowNewerGhost(p, displayWithMa.length, zoomVisibleBars),
     )
   }, [displayWithMa.length, zoomVisibleBars])
-
-  useEffect(() => {
-    if (zoomVisibleBars != null && displayWithMa.length > 0 && zoomVisibleBars > displayWithMa.length) {
-      onZoomVisibleBarsChange(null)
-    }
-  }, [displayWithMa.length, zoomVisibleBars, onZoomVisibleBarsChange])
 
   const chartPanEnabled =
     zoomVisibleBars != null &&
@@ -4074,14 +4090,14 @@ function InstrumentChartCard({
     ) : null
 
   const onChartZoomIn = useCallback(() => {
-    onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, displayWithMa.length))
-  }, [onZoomVisibleBarsChange, zoomVisibleBars, displayWithMa.length])
+    onChartZoomStoredChange(zoomInChartZoomStored(chartZoomStored, displayWithMa.length))
+  }, [onChartZoomStoredChange, chartZoomStored, displayWithMa.length])
 
   const onChartZoomOut = useCallback(() => {
-    onZoomVisibleBarsChange(zoomOutBarCount(zoomVisibleBars, displayWithMa.length))
-  }, [onZoomVisibleBarsChange, zoomVisibleBars, displayWithMa.length])
+    onChartZoomStoredChange(zoomOutChartZoomStored(chartZoomStored, displayWithMa.length))
+  }, [onChartZoomStoredChange, chartZoomStored, displayWithMa.length])
 
-  const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
+  const onChartZoomReset = useCallback(() => onChartZoomStoredChange(null), [onChartZoomStoredChange])
 
   const browseHasChartData = !error && displayWithMa.length > 0
   const browseDetailMetaInFullscreen = fullscreenActive && browseHasChartData
@@ -4765,19 +4781,21 @@ export function KiteInstrumentsPage() {
   const chartZoomSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const chartIntervalSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
-  const persistInstrumentChartZoom = useCallback((instrumentToken: string, visibleBars: number | null) => {
+  const persistInstrumentChartZoom = useCallback((instrumentToken: string, chartZoomStored: number | null) => {
     setChartZoomByToken((prev) => {
       const next = { ...prev }
-      if (visibleBars == null) delete next[instrumentToken]
-      else next[instrumentToken] = visibleBars
+      if (chartZoomStored == null) delete next[instrumentToken]
+      else next[instrumentToken] = chartZoomStored
       return next
     })
     const timers = chartZoomSaveTimersRef.current
     const existing = timers[instrumentToken]
     if (existing) window.clearTimeout(existing)
     timers[instrumentToken] = window.setTimeout(() => {
+      const body =
+        chartZoomStored == null ? { instrumentToken } : { instrumentToken, visibleFraction: chartZoomStored }
       void api
-        .put('/broker/kite/instruments/chart-zoom', { instrumentToken, visibleBars })
+        .put('/broker/kite/instruments/chart-zoom', body)
         .catch(() => {
           /* non-fatal */
         })
@@ -6555,8 +6573,8 @@ export function KiteInstrumentsPage() {
                   graphType: chartGraphType,
                   maLineVisibility,
                   customEmaPeriod,
-                  zoomVisibleBars: chartZoomByToken[demoPaperToken.trim()] ?? null,
-                  onZoomVisibleBarsChange: (bars) => persistInstrumentChartZoom(demoPaperToken.trim(), bars),
+                  chartZoomStored: chartZoomByToken[demoPaperToken.trim()] ?? null,
+                  onChartZoomStoredChange: (stored) => persistInstrumentChartZoom(demoPaperToken.trim(), stored),
                   demoPaperBuyMarkers: demoPaperOpenBuysByInstrumentToken[demoPaperToken.trim()] ?? [],
                 }}
               />
@@ -7709,11 +7727,11 @@ export function KiteInstrumentsPage() {
                 }
                 liveLastPrice={liveLtp}
                 liveLastTick={liveLastTick}
-                zoomVisibleBars={
+                chartZoomStored={
                   chartRow ? chartZoomByToken[chartRow.instrumentToken] ?? null : null
                 }
-                onZoomVisibleBarsChange={(bars) => {
-                  if (chartRow) persistInstrumentChartZoom(chartRow.instrumentToken, bars)
+                onChartZoomStoredChange={(stored) => {
+                  if (chartRow) persistInstrumentChartZoom(chartRow.instrumentToken, stored)
                 }}
                 trendAnalysisSelections={trendAnalysisSelections}
                 onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}

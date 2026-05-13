@@ -1004,10 +1004,9 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException("A numeric instrument token is required.");
 
         var token = body.InstrumentToken.Trim();
-        if (body.VisibleBars is int vb && (vb < ChartZoomMinBars || vb > ChartZoomMaxBars))
+        if (body.VisibleFraction.HasValue && body.VisibleBars.HasValue)
         {
-            throw new InvalidOperationException(
-                $"visibleBars must be between {ChartZoomMinBars} and {ChartZoomMaxBars}, or null to clear.");
+            throw new InvalidOperationException("Specify either visibleBars or visibleFraction, not both.");
         }
 
         var row = await _kiteChartSettings.GetAsync(userId, ct).ConfigureAwait(false);
@@ -1015,10 +1014,30 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException("User not found.");
 
         var dict = ParseChartZoomDict(row.ChartZoomByInstrumentTokenJson);
-        if (body.VisibleBars is null)
-            dict.Remove(token);
+        if (body.VisibleFraction.HasValue)
+        {
+            var vf = body.VisibleFraction.Value;
+            if (!double.IsFinite(vf))
+                throw new InvalidOperationException("visibleFraction must be a finite number.");
+            if (vf <= 0d)
+                throw new InvalidOperationException("visibleFraction must be greater than zero.");
+            if (vf >= 1d)
+                dict.Remove(token);
+            else
+                dict[token] = Math.Round(vf, 6, MidpointRounding.AwayFromZero);
+        }
+        else if (body.VisibleBars is int vb)
+        {
+            if (vb < ChartZoomMinBars || vb > ChartZoomMaxBars)
+            {
+                throw new InvalidOperationException(
+                    $"visibleBars must be between {ChartZoomMinBars} and {ChartZoomMaxBars}, or omit to clear.");
+            }
+
+            dict[token] = vb;
+        }
         else
-            dict[token] = body.VisibleBars.Value;
+            dict.Remove(token);
 
         var json = dict.Count == 0 ? null : JsonSerializer.Serialize(dict, ChartZoomJsonOptions);
         await _kiteChartSettings.SaveChartZoomJsonAsync(userId, json, ct).ConfigureAwait(false);
@@ -1081,7 +1100,7 @@ public sealed class BrokerService : IBrokerService
         return d.Count == 0 ? null : d;
     }
 
-    private static Dictionary<string, int>? ParseChartZoomMap(string? json)
+    private static Dictionary<string, double>? ParseChartZoomMap(string? json)
     {
         var d = ParseChartZoomDict(json);
         return d.Count == 0 ? null : d;
@@ -1105,21 +1124,35 @@ public sealed class BrokerService : IBrokerService
         }
     }
 
-    private static Dictionary<string, int> ParseChartZoomDict(string? json)
+    private static Dictionary<string, double> ParseChartZoomDict(string? json)
     {
         if (string.IsNullOrWhiteSpace(json))
-            return new Dictionary<string, int>(StringComparer.Ordinal);
+            return new Dictionary<string, double>(StringComparer.Ordinal);
 
         try
         {
-            var d = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+            var d = JsonSerializer.Deserialize<Dictionary<string, double>>(json, ChartZoomJsonOptions);
             return d is null
-                ? new Dictionary<string, int>(StringComparer.Ordinal)
-                : new Dictionary<string, int>(d, StringComparer.Ordinal);
+                ? new Dictionary<string, double>(StringComparer.Ordinal)
+                : new Dictionary<string, double>(d, StringComparer.Ordinal);
         }
         catch (JsonException)
         {
-            return new Dictionary<string, int>(StringComparer.Ordinal);
+            try
+            {
+                var legacy = JsonSerializer.Deserialize<Dictionary<string, int>>(json, ChartZoomJsonOptions);
+                if (legacy is null || legacy.Count == 0)
+                    return new Dictionary<string, double>(StringComparer.Ordinal);
+
+                var converted = new Dictionary<string, double>(StringComparer.Ordinal);
+                foreach (var kv in legacy)
+                    converted[kv.Key] = kv.Value;
+                return converted;
+            }
+            catch (JsonException)
+            {
+                return new Dictionary<string, double>(StringComparer.Ordinal);
+            }
         }
     }
 

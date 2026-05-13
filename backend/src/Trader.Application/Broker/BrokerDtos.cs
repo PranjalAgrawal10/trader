@@ -123,7 +123,8 @@ public sealed record KiteInstrumentsChartSettingsDto(
     string? Interval,
     string? RangePreset,
     string? GraphType,
-    Dictionary<string, int>? ZoomByInstrumentToken = null,
+    /// <summary>Per-token zoom: fractions in (0,1), or legacy whole bar counts (&gt;= 1) saved by older clients.</summary>
+    Dictionary<string, double>? ZoomByInstrumentToken = null,
     Dictionary<string, string>? IntervalByInstrumentToken = null,
     bool? MlAutomationEnabled = null,
     string? MlAutomationInterval = null,
@@ -372,8 +373,8 @@ public sealed class FavoriteMlAutomationPutDto
     public JsonElement MinSecondsAfterBarOpenForAutomation { get; set; }
 }
 
-/// <summary>Updates saved visible bar count for one instrument; <c>null</c> <see cref="VisibleBars"/> clears zoom for that token.</summary>
-public sealed record KiteInstrumentsChartZoomPutDto(string InstrumentToken, int? VisibleBars);
+/// <summary>Updates saved zoom for one instrument. Prefer <see cref="VisibleFraction"/>; <c>null</c> on both clears.</summary>
+public sealed record KiteInstrumentsChartZoomPutDto(string InstrumentToken, int? VisibleBars = null, double? VisibleFraction = null);
 
 /// <summary>Sets or clears a per-instrument candle interval override; <c>null</c> <see cref="Interval"/> uses the page default for that token.</summary>
 public sealed record KiteInstrumentsChartIntervalPutDto(string InstrumentToken, string? Interval);

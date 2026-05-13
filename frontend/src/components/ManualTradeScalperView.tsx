@@ -33,9 +33,11 @@ import {
 } from '../utils/scalperChartHelpers'
 import {
   clampChartPanAllowNewerGhost,
+  correctedChartZoomStored,
   sliceChartForZoom,
-  zoomInBarCount,
-  zoomOutBarCount,
+  visibleBarsFromChartZoomStored,
+  zoomInChartZoomStored,
+  zoomOutChartZoomStored,
 } from '../utils/chartZoom'
 import { ChartZoomControls } from './ChartZoomControls'
 import { HistoricalRangeCaption } from './HistoricalRangeCaption'
@@ -93,8 +95,8 @@ export function ManualTradeScalperView({
     graphType: ChartGraphType
     maLineVisibility: MaLineVisibility
     customEmaPeriod: number
-    zoomVisibleBars: number | null
-    onZoomVisibleBarsChange: (bars: number | null) => void
+    chartZoomStored: number | null
+    onChartZoomStoredChange: (stored: number | null) => void
     demoPaperBuyMarkers: readonly DemoPaperOpenBuyMarkerDto[]
   }
 }) {
@@ -104,8 +106,8 @@ export function ManualTradeScalperView({
     graphType,
     maLineVisibility,
     customEmaPeriod,
-    zoomVisibleBars,
-    onZoomVisibleBarsChange,
+    chartZoomStored,
+    onChartZoomStoredChange,
     demoPaperBuyMarkers,
   } = kiteChart
 
@@ -169,12 +171,6 @@ export function ManualTradeScalperView({
     return () => window.clearInterval(id)
   }, [isZerodha, selected, interval, rangePreset, reload])
 
-  useEffect(() => {
-    if (zoomVisibleBars != null && series.length > 0 && zoomVisibleBars > series.length) {
-      onZoomVisibleBarsChange(null)
-    }
-  }, [series.length, zoomVisibleBars, onZoomVisibleBarsChange])
-
   const customEmaApplied = useMemo(
     () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
     [maLineVisibility, customEmaPeriod],
@@ -199,9 +195,22 @@ export function ManualTradeScalperView({
     [tickMergedSeries, customEmaApplied],
   )
 
+  const zoomVisibleBars = useMemo(
+    () => visibleBarsFromChartZoomStored(chartZoomStored, seriesWithCustom.length),
+    [chartZoomStored, seriesWithCustom.length],
+  )
+
+  useEffect(() => {
+    if (chartZoomStored == null || seriesWithCustom.length === 0) return
+    const next = correctedChartZoomStored(chartZoomStored, seriesWithCustom.length)
+    if (next === undefined) return
+    if (next === chartZoomStored) return
+    onChartZoomStoredChange(next)
+  }, [chartZoomStored, seriesWithCustom.length, onChartZoomStoredChange])
+
   useEffect(() => {
     setChartPanOffsetBars(0)
-  }, [zoomVisibleBars, selected?.instrumentToken])
+  }, [chartZoomStored, selected?.instrumentToken])
 
   useEffect(() => {
     setChartPanOffsetBars((p) => clampChartPanAllowNewerGhost(p, seriesWithCustom.length, zoomVisibleBars))
@@ -278,14 +287,14 @@ export function ManualTradeScalperView({
   }, [selected?.instrumentToken, interval, series, reloadMlHistory])
 
   const onChartZoomIn = useCallback(() => {
-    onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, series.length))
-  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+    onChartZoomStoredChange(zoomInChartZoomStored(chartZoomStored, seriesWithCustom.length))
+  }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
 
   const onChartZoomOut = useCallback(() => {
-    onZoomVisibleBarsChange(zoomOutBarCount(zoomVisibleBars, series.length))
-  }, [onZoomVisibleBarsChange, zoomVisibleBars, series.length])
+    onChartZoomStoredChange(zoomOutChartZoomStored(chartZoomStored, seriesWithCustom.length))
+  }, [onChartZoomStoredChange, chartZoomStored, seriesWithCustom.length])
 
-  const onChartZoomReset = useCallback(() => onZoomVisibleBarsChange(null), [onZoomVisibleBarsChange])
+  const onChartZoomReset = useCallback(() => onChartZoomStoredChange(null), [onChartZoomStoredChange])
 
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 

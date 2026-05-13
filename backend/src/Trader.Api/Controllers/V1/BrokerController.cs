@@ -652,7 +652,8 @@ public sealed class BrokerController : ControllerBase
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON with instrumentToken and optional visibleBars (null to clear zoom for that token).",
+                detail:
+                    "Send JSON with instrumentToken plus optional visibleFraction (between 0 and 1 exclusive) or legacy visibleBars; omit both optional fields to clear saved zoom.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 

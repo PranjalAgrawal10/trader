@@ -79,6 +79,10 @@ export function ChartZoomControls({
 
   const showing = visibleBarCount ?? totalBars
   const zoomed = visibleBarCount != null && visibleBarCount < totalBars
+  const windowPctApprox =
+    zoomed && visibleBarCount != null
+      ? Math.max(1, Math.min(99, Math.round((visibleBarCount / totalBars) * 100)))
+      : null
   const canZoomIn = showing > CHART_ZOOM_MIN_BARS
   const canZoomOut = zoomed
   const canReset = zoomed
@@ -92,7 +96,7 @@ export function ChartZoomControls({
           id={`${idPrefix}-zoom-in`}
           disabled={!canZoomIn}
           onClick={onZoomIn}
-          title="Zoom in (fewer bars, latest on the right)"
+          title="Zoom in (narrower window on downloaded history)"
           aria-label="Zoom chart in"
         >
           +
@@ -103,7 +107,7 @@ export function ChartZoomControls({
           id={`${idPrefix}-zoom-out`}
           disabled={!canZoomOut}
           onClick={onZoomOut}
-          title="Zoom out"
+          title="Zoom out (show more downloaded history)"
           aria-label="Zoom chart out"
         >
           −
@@ -114,7 +118,7 @@ export function ChartZoomControls({
           id={`${idPrefix}-zoom-reset`}
           disabled={!canReset}
           onClick={onReset}
-          title="Show full downloaded range"
+          title="Show full downloaded range (no horizontal zoom)"
           aria-label="Reset chart zoom"
         >
           Reset
@@ -122,7 +126,7 @@ export function ChartZoomControls({
       </ButtonGroup>
       {zoomed ? (
         <span className="small text-muted" style={{ fontSize: compact ? '0.7rem' : undefined }}>
-          {visibleBarCount} / {totalBars} bars · drag chart to pan
+          ~{windowPctApprox}% of loaded range ({visibleBarCount} / {totalBars} candles) · drag chart to pan
         </span>
       ) : null}
       {refreshBtn}
