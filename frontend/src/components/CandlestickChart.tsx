@@ -741,7 +741,10 @@ export function CandlestickChart({
                 <div className="font-monospace">
                   O {p.open} · H {p.high} · L {p.low} · C {p.close}
                 </div>
-                <div className="text-secondary small">Vol {p.volume}</div>
+                <div className="text-secondary small">
+                  Vol{' '}
+                  {Number.isFinite(Number(p.volume)) ? Number(p.volume).toLocaleString() : '—'}
+                </div>
                 {maLineVisibility.showSma20 && p.sma20 != null ? (
                   <div className="font-monospace mt-1" style={{ color: MA_LINE_COLORS.sma20 }}>
                     SMA{MA_SMA_PERIOD} {p.sma20.toFixed(4)}

@@ -1,6 +1,5 @@
 import axios from 'axios'
 import {
-  Fragment,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -31,11 +30,9 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  ComposedChart,
   Legend,
   Line,
   LineChart,
-  LabelList,
   Pie,
   PieChart,
   ReferenceLine,
@@ -54,14 +51,13 @@ import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 import { Layout } from '../components/Layout'
 import { ManualTradeScalperView } from '../components/ManualTradeScalperView'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
-import { CandlestickChart } from '../components/CandlestickChart'
-import { MlDirectionRibbonSvg } from '../components/MlDirectionRibbon'
+import { InstrumentPriceChart } from '../components/InstrumentPriceChart'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import type { MarketTickBatchItem } from '../services/marketHub'
 import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
-import type { ChartPointOhlc, ChartIntervalKey } from '../utils/liveCandleMerge'
+import type { ChartPointOhlc, ChartIntervalKey, LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
 import { mergeLiveTickIntoOhlc } from '../utils/liveCandleMerge'
 import {
   CHART_ZOOM_MIN_BARS,
@@ -74,7 +70,6 @@ import {
   historiesEqual,
   historyItemsFromApi,
   loadMlHistory,
-  mapMlPredictionsPerTargetBar,
   ML_LIGHTGBM_TRIPLE_BARRIER_MODEL_ID,
   resolveMlHistory,
   saveMlHistory,
@@ -93,15 +88,12 @@ import {
   extendYDomainWithLivePrice,
   MA_EMA_FAST_PERIOD,
   MA_EMA_SLOW_PERIOD,
-  MA_LINE_COLORS,
   MA_SMA_PERIOD,
-  SR_LINE_COLORS,
   SR_SWING_PERIOD,
   yDomainForOhlcAndVisibleMas,
   type ChartPointWithMa,
   type MaLineVisibility,
 } from '../utils/movingAverages'
-import { LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 
 interface BrokerStatusResponse {
   connected: boolean
@@ -1465,7 +1457,6 @@ function effectiveCustomEmaPeriod(visibility: MaLineVisibility, period: number):
   return n
 }
 
-const CHART_MARGINS = { top: 4, right: 8, left: 0, bottom: 0 }
 
 /** Top-left scroll stack when the chart panel is browser-fullscreen. */
 const CHART_FULLSCREEN_META_WRAP_CLASS = 'align-self-start text-start mb-2 flex-shrink-0 small border-bottom border-secondary pb-2'
@@ -1616,218 +1607,7 @@ function ChartZoomControls({
   )
 }
 
-/** SMA + EMA overlays for Recharts (same colors as candlestick chart). */
-function MovingAverageOverlays({
-  visibility,
-  customEmaLinePeriod,
-}: {
-  visibility: MaLineVisibility
-  customEmaLinePeriod: number | null
-}) {
-  return (
-    <>
-      {visibility.showSma20 ? (
-        <Line
-          type="monotone"
-          dataKey="sma20"
-          stroke={MA_LINE_COLORS.sma20}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`SMA ${MA_SMA_PERIOD}`}
-        />
-      ) : null}
-      {visibility.showEma9 ? (
-        <Line
-          type="monotone"
-          dataKey="ema9"
-          stroke={MA_LINE_COLORS.ema9}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`EMA ${MA_EMA_FAST_PERIOD}`}
-        />
-      ) : null}
-      {visibility.showEma21 ? (
-        <Line
-          type="monotone"
-          dataKey="ema21"
-          stroke={MA_LINE_COLORS.ema21}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`EMA ${MA_EMA_SLOW_PERIOD}`}
-        />
-      ) : null}
-      {visibility.showCustomEma && customEmaLinePeriod != null && customEmaLinePeriod >= 2 ? (
-        <Line
-          type="monotone"
-          dataKey="emaCustom"
-          stroke={MA_LINE_COLORS.emaCustom}
-          dot={false}
-          strokeWidth={1.5}
-          connectNulls
-          name={`EMA ${customEmaLinePeriod}`}
-        />
-      ) : null}
-      {visibility.showSupportResistance ? (
-        <Line
-          type="monotone"
-          dataKey="srSupport"
-          stroke={SR_LINE_COLORS.support}
-          dot={false}
-          strokeWidth={1.25}
-          connectNulls
-          strokeDasharray="4 3"
-          name={`Support (${SR_SWING_PERIOD})`}
-        />
-      ) : null}
-      {visibility.showSupportResistance ? (
-        <Line
-          type="monotone"
-          dataKey="srResistance"
-          stroke={SR_LINE_COLORS.resistance}
-          dot={false}
-          strokeWidth={1.25}
-          connectNulls
-          strokeDasharray="4 3"
-          name={`Resistance (${SR_SWING_PERIOD})`}
-        />
-      ) : null}
-    </>
-  )
-}
 
-/** Matches candle chart: colored SMA/EMA key on top-right of Recharts line/bar. */
-function MaChartCornerLegend({
-  visibility,
-  customEmaLinePeriod,
-  graphType,
-}: {
-  visibility: MaLineVisibility
-  customEmaLinePeriod: number | null
-  graphType: ChartGraphType
-}) {
-  const items: { key: string; label: string; color: string }[] = []
-  if (graphType === 'candlestick' && visibility.showLinearCloseTrend) {
-    items.push({ key: 'tlr', label: 'Trend LR', color: LINEAR_CLOSE_TREND_COLOR })
-  }
-  if (visibility.showSma20) items.push({ key: 'sma', label: `SMA${MA_SMA_PERIOD}`, color: MA_LINE_COLORS.sma20 })
-  if (visibility.showEma9) items.push({ key: 'e9', label: `EMA${MA_EMA_FAST_PERIOD}`, color: MA_LINE_COLORS.ema9 })
-  if (visibility.showEma21) items.push({ key: 'e21', label: `EMA${MA_EMA_SLOW_PERIOD}`, color: MA_LINE_COLORS.ema21 })
-  if (visibility.showCustomEma && customEmaLinePeriod != null && customEmaLinePeriod >= 2) {
-    items.push({
-      key: 'ecust',
-      label: `EMA${customEmaLinePeriod}`,
-      color: MA_LINE_COLORS.emaCustom,
-    })
-  }
-  if (visibility.showSupportResistance) {
-    items.push({ key: 'srs', label: `S${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.support })
-    items.push({ key: 'srr', label: `R${SR_SWING_PERIOD}`, color: SR_LINE_COLORS.resistance })
-  }
-  if (items.length === 0) return null
-  return (
-    <div
-      className="position-absolute small text-secondary"
-      style={{ right: 8, top: 4, fontSize: '0.65rem', pointerEvents: 'none', zIndex: 2 }}
-    >
-      {items.map((item, i) => (
-        <Fragment key={item.key}>
-          {i > 0 ? <span className="text-muted"> · </span> : null}
-          <span style={{ color: item.color }}>{item.label}</span>
-        </Fragment>
-      ))}
-    </div>
-  )
-}
-
-/** Histogram beneath line/bar Recharts views; aligns with candle <code>idx</code>. */
-function InstrumentVolumeHistogram({
-  chartData,
-  compact,
-}: {
-  chartData: ChartPointWithMa[]
-  compact?: boolean
-}) {
-  if (chartData.length === 0) return null
-
-  const paneH = compact ? 46 : 54
-  const maxBarSize = compact ? 20 : 34
-  const yTickFs = compact ? 8 : 9
-  const yAxisWidth = compact ? 32 : 37
-
-  return (
-    <div
-      style={{ height: paneH }}
-      className="flex-shrink-0 border-top border-secondary border-opacity-25"
-    >
-      <ResponsiveContainer width="100%" height="100%" debounce={50}>
-        <BarChart data={chartData} margin={{ ...CHART_MARGINS, top: 3, bottom: 1 }}>
-          <XAxis dataKey="idx" stroke="#adb5bd" hide />
-          <YAxis stroke="#adb5bd" tick={{ fontSize: yTickFs }} width={yAxisWidth} domain={[0, 'auto']} />
-          <Tooltip
-            cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-            formatter={(value: number) => [
-              typeof value === 'number' ? value.toLocaleString() : String(value),
-              'Volume',
-            ]}
-            labelFormatter={() => ''}
-            contentStyle={{
-              background: '#212529',
-              border: '1px solid #495057',
-              borderRadius: 6,
-              fontSize: 11,
-            }}
-          />
-          <Bar dataKey="volume" maxBarSize={maxBarSize} radius={[2, 2, 0, 0]} isAnimationActive={false}>
-            {chartData.map((e) => (
-              <Cell
-                key={`vol-cell-${e.idx}`}
-                fill={e.close >= e.open ? 'rgba(34, 197, 94, 0.62)' : 'rgba(239, 68, 68, 0.62)'}
-              />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-/** On-chart ribbons: next-bar ML rows that target each bar (see {@link mapMlPredictionsPerTargetBar}). */
-function MlTargetBarPredictionLabelList({
-  chartData,
-  mlEntries,
-}: {
-  chartData: ChartPointWithMa[]
-  mlEntries: readonly MlPredictionLogEntry[]
-}) {
-  const labelMap = useMemo(() => mapMlPredictionsPerTargetBar(mlEntries, chartData), [mlEntries, chartData])
-  const LabelContent = useCallback(
-    ({ x, y, index }: { x?: number; y?: number; index?: number }) => {
-      if (typeof index !== 'number' || x == null || y == null) return null
-      const preds = labelMap.get(index)
-      if (!preds?.length) return null
-      const iconPx = 7
-      const fh = Math.round(iconPx + 5)
-      const yTop = y - 10 - fh
-      return <MlDirectionRibbonSvg cx={x} yTop={yTop} entries={preds} iconPx={iconPx} />
-    },
-    [labelMap],
-  )
-
-  if (mlEntries.length === 0) return null
-
-  return (
-    <LabelList
-      dataKey="close"
-      position="top"
-      offset={14}
-      style={{ pointerEvents: 'none' }}
-      content={LabelContent}
-    />
-  )
-}
 
 type ChartPoint = ChartPointOhlc
 
@@ -1901,71 +1681,7 @@ function HistoricalRangeCaption({
   )
 }
 
-function ChartTooltipContent({
-  active,
-  payload,
-  maLineVisibility = DEFAULT_MA_LINE_VISIBILITY,
-  customEmaLinePeriod = null,
-}: {
-  active?: boolean
-  payload?: readonly { payload?: ChartPointWithMa & { trendLine?: number | null } }[]
-  maLineVisibility?: MaLineVisibility
-  customEmaLinePeriod?: number | null
-}) {
-  if (!active || !payload?.length) return null
-  const p = payload[0].payload
-  if (!p) return null
-  return (
-    <div
-      className="rounded border border-secondary p-2 small"
-      style={{ background: '#212529', color: '#f8f9fa' }}
-    >
-      <div>{formatLocalDateTime(p.t)}</div>
-      <div className="font-monospace mt-1">
-        O {p.open} · H {p.high} · L {p.low} · C {p.close}
-      </div>
-      <div className="text-secondary small">Vol {p.volume}</div>
-      {maLineVisibility.showSma20 && p.sma20 != null ? (
-        <div className="font-monospace mt-1" style={{ color: MA_LINE_COLORS.sma20 }}>
-          SMA{MA_SMA_PERIOD} {p.sma20.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showEma9 && p.ema9 != null ? (
-        <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema9 }}>
-          EMA{MA_EMA_FAST_PERIOD} {p.ema9.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showEma21 && p.ema21 != null ? (
-        <div className="font-monospace" style={{ color: MA_LINE_COLORS.ema21 }}>
-          EMA{MA_EMA_SLOW_PERIOD} {p.ema21.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showCustomEma &&
-      customEmaLinePeriod != null &&
-      customEmaLinePeriod >= 2 &&
-      p.emaCustom != null ? (
-        <div className="font-monospace" style={{ color: MA_LINE_COLORS.emaCustom }}>
-          EMA{customEmaLinePeriod} {p.emaCustom.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showSupportResistance && p.srSupport != null ? (
-        <div className="font-monospace mt-1" style={{ color: SR_LINE_COLORS.support }}>
-          Sup{SR_SWING_PERIOD} {p.srSupport.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showSupportResistance && p.srResistance != null ? (
-        <div className="font-monospace" style={{ color: SR_LINE_COLORS.resistance }}>
-          Res{SR_SWING_PERIOD} {p.srResistance.toFixed(4)}
-        </div>
-      ) : null}
-      {maLineVisibility.showLinearCloseTrend && p.trendLine != null && Number.isFinite(p.trendLine) ? (
-        <div className="font-monospace mt-1" style={{ color: LINEAR_CLOSE_TREND_COLOR }}>
-          Trend LR {Number(p.trendLine).toFixed(4)}
-        </div>
-      ) : null}
-    </div>
-  )
-}
+
 
 function ChartSettingsToolbar({
   idPrefix,
@@ -3709,6 +3425,7 @@ function CompactPriceChart({
   onZoomVisibleBarsChange,
   demoPaperBuyMarkers,
   paperLastBuyPrice,
+  zerodhaConnected,
 }: {
   row: KiteInstrumentRow
   rangePreset: ChartRangePreset
@@ -3723,6 +3440,7 @@ function CompactPriceChart({
   demoPaperBuyMarkers?: readonly DemoPaperOpenBuyMarkerDto[]
   /** Latest demo BUY fill for an open paper long — horizontal guide. */
   paperLastBuyPrice?: number | null
+  zerodhaConnected: boolean
 }) {
   const [series, setSeries] = useState<ChartPointWithMa[]>([])
   const [loading, setLoading] = useState(true)
@@ -3735,6 +3453,10 @@ function CompactPriceChart({
     interval: ChartInterval | null
     range: ChartRangePreset | null
   }>({ token: null, interval: null, range: null })
+  const seriesSourceRef = useRef<ChartPointWithMa[] | null>(null)
+  const liveVolAccRef = useRef<LiveTickVolumeAccumulator>({ lastCumulativeVolume: null })
+
+  const live = useLiveMarketTick(row.instrumentToken, zerodhaConnected)
 
   useEffect(() => {
     if (zoomVisibleBars != null && series.length > 0 && zoomVisibleBars > series.length) {
@@ -3806,9 +3528,23 @@ function CompactPriceChart({
     [maLineVisibility, customEmaPeriod],
   )
 
+  const tickMergedSeries = useMemo(() => {
+    if (seriesSourceRef.current !== series) {
+      seriesSourceRef.current = series
+      liveVolAccRef.current.lastCumulativeVolume = null
+    }
+    return mergeLiveTickIntoOhlc(
+      series,
+      live.lastTick,
+      interval as ChartIntervalKey,
+      graphType,
+      liveVolAccRef.current,
+    ) as ChartPointWithMa[]
+  }, [series, live.lastTick, interval, graphType])
+
   const seriesWithCustom = useMemo(
-    () => addCustomEmaToChartPoints(series, customEmaApplied),
-    [series, customEmaApplied],
+    () => addCustomEmaToChartPoints(tickMergedSeries, customEmaApplied),
+    [tickMergedSeries, customEmaApplied],
   )
 
   const chartData = useMemo(() => sliceChartForZoom(seriesWithCustom, zoomVisibleBars), [seriesWithCustom, zoomVisibleBars])
@@ -3849,8 +3585,10 @@ function CompactPriceChart({
 
   const rechartsYDomain = useMemo(() => {
     const base = yDomainForOhlcAndVisibleMas(chartData, maLineVisibility)
-    return extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
-  }, [chartData, maLineVisibility, paperLastBuyPrice])
+    let d = extendYDomainWithLivePrice(base, paperLastBuyPrice ?? null)
+    d = extendYDomainWithLivePrice(d, live.lastPrice)
+    return d
+  }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice])
 
   const onChartZoomIn = useCallback(() => {
     onZoomVisibleBarsChange(zoomInBarCount(zoomVisibleBars, series.length))
@@ -3968,96 +3706,24 @@ function CompactPriceChart({
               minHeight: fullscreenActive ? 0 : undefined,
             }}
           >
-            {graphType === 'candlestick' ? (
-              <div className="w-100 h-100">
-                <CandlestickChart
-                  data={chartData}
-                  maLineVisibility={maLineVisibility}
-                  customEmaPeriod={customEmaApplied}
-                  paperBuyDataIndices={paperBuyDataIndices}
-                  paperLastBuyPrice={paperLastBuyPrice ?? null}
-                  mlPredictionEntries={mlPredictionOverlayEntries}
-                />
-              </div>
-            ) : (
-              <div className="position-relative w-100 h-100 d-flex flex-column">
-                <div className="flex-grow-1 d-flex flex-column" style={{ minHeight: 0 }}>
-                  <ChartWithRightGutter>
-                    <div className="d-flex flex-column w-100 h-100" style={{ minHeight: 0 }}>
-                      <div className="flex-grow-1 w-100" style={{ minHeight: 0 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          {graphType === 'line' ? (
-                            <LineChart data={chartData} margin={CHART_MARGINS}>
-                              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-                              <YAxis
-                                stroke="#adb5bd"
-                                tick={{ fontSize: 10 }}
-                                domain={rechartsYDomain ?? ['auto', 'auto']}
-                                width={48}
-                              />
-                              <Tooltip
-                                content={(props) => (
-                                  <ChartTooltipContent
-                                    active={props.active}
-                                    payload={
-                                      props.payload as readonly {
-                                        payload?: ChartPointWithMa & { trendLine?: number | null }
-                                      }[] | undefined
-                                    }
-                                    maLineVisibility={maLineVisibility}
-                                    customEmaLinePeriod={customEmaApplied}
-                                  />
-                                )}
-                              />
-                              <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close">
-                                <MlTargetBarPredictionLabelList
-                                  chartData={chartData}
-                                  mlEntries={mlPredictionOverlayEntries}
-                                />
-                              </Line>
-                              <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                              {paperBuyReferenceLines}
-                              {paperLastBuyReferenceLine}
-                            </LineChart>
-                          ) : (
-                            <ComposedChart data={chartData} margin={CHART_MARGINS}>
-                              <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 9 }} hide />
-                              <YAxis
-                                stroke="#adb5bd"
-                                tick={{ fontSize: 10 }}
-                                domain={rechartsYDomain ?? ['auto', 'auto']}
-                                width={48}
-                              />
-                              <Tooltip
-                                content={(props) => (
-                                  <ChartTooltipContent
-                                    active={props.active}
-                                    payload={props.payload as readonly { payload?: ChartPointWithMa }[] | undefined}
-                                    maLineVisibility={maLineVisibility}
-                                    customEmaLinePeriod={customEmaApplied}
-                                  />
-                                )}
-                              />
-                              <Bar dataKey="close" fill="#0d6efd" maxBarSize={32} radius={[2, 2, 0, 0]} name="Close">
-                                <MlTargetBarPredictionLabelList
-                                  chartData={chartData}
-                                  mlEntries={mlPredictionOverlayEntries}
-                                />
-                              </Bar>
-                              <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                              {paperBuyReferenceLines}
-                              {paperLastBuyReferenceLine}
-                            </ComposedChart>
-                          )}
-                        </ResponsiveContainer>
-                      </div>
-                      <InstrumentVolumeHistogram chartData={chartData} compact />
-                    </div>
-                  </ChartWithRightGutter>
-                </div>
-                <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} graphType={graphType} />
-              </div>
-            )}
+            <InstrumentPriceChart
+              graphType={graphType}
+              data={chartData}
+              maLineVisibility={maLineVisibility}
+              customEmaPeriod={customEmaApplied}
+              livePrice={live.lastPrice ?? null}
+              paperLastBuyPrice={paperLastBuyPrice ?? null}
+              paperBuyDataIndices={paperBuyDataIndices}
+              mlPredictionEntries={mlPredictionOverlayEntries}
+              rechartsYDomain={rechartsYDomain ?? undefined}
+              referenceLines={
+                <>
+                  {paperBuyReferenceLines}
+                  {paperLastBuyReferenceLine}
+                </>
+              }
+              density="compact"
+            />
           </div>
         </div>
       ) : (
@@ -4356,6 +4022,7 @@ function FavoritesChartsGrid({
                   onZoomVisibleBarsChange={(bars) => onInstrumentChartZoomChange(row.instrumentToken, bars)}
                   demoPaperBuyMarkers={demoPaperOpenBuysByInstrumentToken[row.instrumentToken]}
                   paperLastBuyPrice={demoPaperLastBuyPriceByInstrumentToken[row.instrumentToken] ?? null}
+                  zerodhaConnected={zerodhaConnected}
                 />
                 <TrendAnalysisMultiPanel
                   instrumentToken={row.instrumentToken}
@@ -4442,6 +4109,8 @@ function InstrumentChartCard({
     interval: ChartInterval | null
     range: ChartRangePreset | null
   }>({ token: null, interval: null, range: null })
+  const browseSeriesSourceRef = useRef<ChartPointWithMa[] | null>(null)
+  const browseLiveVolAccRef = useRef<LiveTickVolumeAccumulator>({ lastCumulativeVolume: null })
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
   useEffect(() => {
@@ -4512,10 +4181,19 @@ function InstrumentChartCard({
     setMlPredictionOverlayEntries([])
   }, [selection?.instrumentToken, interval])
 
-  const displaySeries = useMemo(
-    () => mergeLiveTickIntoOhlc(series, liveLastTick ?? null, interval, graphType),
-    [series, liveLastTick, interval, graphType],
-  )
+  const displaySeries = useMemo(() => {
+    if (browseSeriesSourceRef.current !== series) {
+      browseSeriesSourceRef.current = series
+      browseLiveVolAccRef.current.lastCumulativeVolume = null
+    }
+    return mergeLiveTickIntoOhlc(
+      series,
+      liveLastTick ?? null,
+      interval as ChartIntervalKey,
+      graphType,
+      browseLiveVolAccRef.current,
+    )
+  }, [series, liveLastTick, interval, graphType])
 
   const customEmaApplied = useMemo(
     () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
@@ -4751,99 +4429,25 @@ function InstrumentChartCard({
                     minHeight: fullscreenActive ? 0 : undefined,
                   }}
                 >
-                  {graphType === 'candlestick' ? (
-                    <CandlestickChart
-                      data={chartData}
-                      maLineVisibility={maLineVisibility}
-                      customEmaPeriod={customEmaApplied}
-                      livePrice={liveLastPrice ?? null}
-                      paperBuyDataIndices={browsePaperBuyDataIndices}
-                      paperLastBuyPrice={paperLastBuyPrice ?? null}
-                      mlPredictionEntries={mlPredictionOverlayEntries}
-                    />
-                  ) : (
-                    <div className="position-relative w-100 h-100 d-flex flex-column">
-                      <div className="flex-grow-1 d-flex flex-column" style={{ minHeight: 0 }}>
-                        <ChartWithRightGutter>
-                          <div className="d-flex flex-column w-100 h-100" style={{ minHeight: 0 }}>
-                            <div className="flex-grow-1 w-100" style={{ minHeight: 0 }}>
-                              <ResponsiveContainer width="100%" height="100%">
-                                {graphType === 'line' ? (
-                                  <LineChart data={chartData} margin={CHART_MARGINS}>
-                                    <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                                    <YAxis
-                                      stroke="#adb5bd"
-                                      tick={{ fontSize: 11 }}
-                                      domain={rechartsYDomain ?? ['auto', 'auto']}
-                                      width={56}
-                                    />
-                                    <Tooltip
-                                      content={(props) => (
-                                        <ChartTooltipContent
-                                          active={props.active}
-                                          payload={
-                                            props.payload as readonly {
-                                              payload?: ChartPointWithMa & { trendLine?: number | null }
-                                            }[] | undefined
-                                          }
-                                          maLineVisibility={maLineVisibility}
-                                          customEmaLinePeriod={customEmaApplied}
-                                        />
-                                      )}
-                                    />
-                                    <Line type="monotone" dataKey="close" stroke="#0d6efd" dot={false} strokeWidth={2} name="Close">
-                                      <MlTargetBarPredictionLabelList
-                                        chartData={chartData}
-                                        mlEntries={mlPredictionOverlayEntries}
-                                      />
-                                    </Line>
-                                    <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                                    {browsePaperBuyReferenceLines}
-                                    {paperLastBuyReferenceLine}
-                                    {liveLtpReferenceLine}
-                                  </LineChart>
-                                ) : (
-                                  <ComposedChart data={chartData} margin={CHART_MARGINS}>
-                                    <XAxis dataKey="idx" stroke="#adb5bd" tick={{ fontSize: 10 }} hide />
-                                    <YAxis
-                                      stroke="#adb5bd"
-                                      tick={{ fontSize: 11 }}
-                                      domain={rechartsYDomain ?? ['auto', 'auto']}
-                                      width={56}
-                                    />
-                                    <Tooltip
-                                      content={(props) => (
-                                        <ChartTooltipContent
-                                          active={props.active}
-                                          payload={
-                                            props.payload as readonly { payload?: ChartPointWithMa }[] | undefined
-                                          }
-                                          maLineVisibility={maLineVisibility}
-                                          customEmaLinePeriod={customEmaApplied}
-                                        />
-                                      )}
-                                    />
-                                    <Bar dataKey="close" fill="#0d6efd" maxBarSize={48} radius={[2, 2, 0, 0]} name="Close">
-                                      <MlTargetBarPredictionLabelList
-                                        chartData={chartData}
-                                        mlEntries={mlPredictionOverlayEntries}
-                                      />
-                                    </Bar>
-                                    <MovingAverageOverlays visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} />
-                                    {browsePaperBuyReferenceLines}
-                                    {paperLastBuyReferenceLine}
-                                    {liveLtpReferenceLine}
-                                  </ComposedChart>
-                                )}
-                              </ResponsiveContainer>
-                            </div>
-                            <InstrumentVolumeHistogram chartData={chartData} />
-                          </div>
-                        </ChartWithRightGutter>
-                      </div>
-                      <MaChartCornerLegend visibility={maLineVisibility} customEmaLinePeriod={customEmaApplied} graphType={graphType} />
-                    </div>
-                  )}
+                  <InstrumentPriceChart
+                    graphType={graphType}
+                    data={chartData}
+                    maLineVisibility={maLineVisibility}
+                    customEmaPeriod={customEmaApplied}
+                    livePrice={liveLastPrice ?? null}
+                    paperLastBuyPrice={paperLastBuyPrice ?? null}
+                    paperBuyDataIndices={browsePaperBuyDataIndices}
+                    mlPredictionEntries={mlPredictionOverlayEntries}
+                    rechartsYDomain={rechartsYDomain ?? undefined}
+                    referenceLines={
+                      <>
+                        {browsePaperBuyReferenceLines}
+                        {paperLastBuyReferenceLine}
+                        {liveLtpReferenceLine}
+                      </>
+                    }
+                    density="comfortable"
+                  />
                 </div>
               </div>
             ) : null}

@@ -1,6 +1,11 @@
 import type { HistoricalChartCandlesResponse } from '../api/kiteChartHistorical'
 import type { MarketTickBatchItem } from '../services/marketHub'
-import { mergeLiveTickIntoOhlc, type ChartIntervalKey, type ChartPointOhlc } from './liveCandleMerge'
+import {
+  mergeLiveTickIntoOhlc,
+  type ChartIntervalKey,
+  type ChartPointOhlc,
+  type LiveTickVolumeAccumulator,
+} from './liveCandleMerge'
 import {
   addCustomEmaToChartPoints,
   attachMovingAverages,
@@ -85,9 +90,16 @@ export function mergeScalperLiveIntoSeries(
   rawSeries: ChartPointWithMa[],
   liveTick: MarketTickBatchItem | null,
   interval: ScalperInterval,
+  volumeAccumulator?: LiveTickVolumeAccumulator,
 ): ChartPointWithMa[] {
   if (rawSeries.length === 0) return []
-  const tickMerged = mergeLiveTickIntoOhlc(rawSeries as ChartPointOhlc[], liveTick, interval, 'candlestick')
+  const tickMerged = mergeLiveTickIntoOhlc(
+    rawSeries as ChartPointOhlc[],
+    liveTick,
+    interval,
+    'candlestick',
+    volumeAccumulator,
+  )
   return addCustomEmaToChartPoints(attachMovingAverages(tickMerged), null)
 }
 

@@ -1,9 +1,9 @@
 import axios from 'axios'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Badge, Button, ButtonGroup, Card, Col, Form, Row, Spinner } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
 import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
-import { CandlestickChart } from './CandlestickChart'
+import { InstrumentPriceChart } from './InstrumentPriceChart'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
 import {
@@ -19,6 +19,7 @@ import {
   type ScalperRange,
 } from '../utils/scalperChartHelpers'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
+import type { LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
 import type { ChartPointWithMa } from '../utils/movingAverages'
 
 export interface ManualTradeScalperInstrument {
@@ -54,6 +55,8 @@ export function ManualTradeScalperView({
   const [interval, setInterval] = useState<ScalperInterval>('1m')
   const [rangePreset, setRangePreset] = useState<ScalperRange>('last30m')
   const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
+  const rawSeriesRef = useRef<ChartPointWithMa[] | null>(null)
+  const liveVolAccRef = useRef<LiveTickVolumeAccumulator>({ lastCumulativeVolume: null })
   const [candleMeta, setCandleMeta] = useState<{ interval: string; from: string; to: string } | null>(null)
   const [chartError, setChartError] = useState<string | null>(null)
   const [chartLoading, setChartLoading] = useState(false)
@@ -109,10 +112,13 @@ export function ManualTradeScalperView({
     return () => window.clearInterval(id)
   }, [isZerodha, selected, interval, rangePreset, reload])
 
-  const displaySeries = useMemo(
-    () => mergeScalperLiveIntoSeries(rawSeries, live.lastTick, interval),
-    [rawSeries, live.lastTick, interval],
-  )
+  const displaySeries = useMemo(() => {
+    if (rawSeriesRef.current !== rawSeries) {
+      rawSeriesRef.current = rawSeries
+      liveVolAccRef.current.lastCumulativeVolume = null
+    }
+    return mergeScalperLiveIntoSeries(rawSeries, live.lastTick, interval, liveVolAccRef.current)
+  }, [rawSeries, live.lastTick, interval])
 
   const { entries: mlPredictionEntries, reloadHistory: reloadMlHistory } = useMlChartPredictionEntries(
     selected?.instrumentToken ?? null,
@@ -257,7 +263,8 @@ export function ManualTradeScalperView({
           </div>
         ) : selected && displaySeries.length > 0 ? (
           <div style={{ height: 'min(48vh, 440px)', minHeight: '260px' }}>
-            <CandlestickChart
+            <InstrumentPriceChart
+              graphType="candlestick"
               data={displaySeries}
               maLineVisibility={SCALPER_MA}
               customEmaPeriod={null}

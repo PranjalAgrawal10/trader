@@ -28,8 +28,28 @@ export type ChartPointOhlc = {
 
 type ChartGraph = 'line' | 'bar' | 'candlestick'
 
+/** Kite tick `v` is session cumulative volume — track it to add per-tick deltas onto the in-progress bar (see backend `LiveCandleTickSubscriber.ApplyTick`). */
+export type LiveTickVolumeAccumulator = { lastCumulativeVolume: number | null }
+
 function formatOhlc(o: number, h: number, l: number, c: number, v: number): string {
   return `O ${o}  H ${h}  L ${l}  C ${c}  V ${v}`
+}
+
+function applyKiteCumulativeVolumeDelta(
+  barVolume: number,
+  tickCumulative: number,
+  state: LiveTickVolumeAccumulator,
+): number {
+  if (!Number.isFinite(tickCumulative) || tickCumulative < 0) return barVolume
+  const cur = Number.isFinite(barVolume) && barVolume >= 0 ? barVolume : 0
+  if (state.lastCumulativeVolume == null) {
+    state.lastCumulativeVolume = tickCumulative
+    return cur
+  }
+  const prev = state.lastCumulativeVolume
+  const delta = tickCumulative >= prev ? tickCumulative - prev : 0
+  state.lastCumulativeVolume = tickCumulative
+  return cur + delta
 }
 
 export function intervalToMs(interval: ChartIntervalKey): number {
@@ -78,17 +98,20 @@ export function candleBucketStartUtc(ms: number, interval: ChartIntervalKey): nu
 }
 
 /**
- * Merges the latest SignalR tick into the trailing OHLC series for candlestick view (live, in-progress bar).
+ * Merges the latest SignalR tick into the trailing OHLC series (live, in-progress bar) for candles, line, and bar charts.
+ * When `volumeAccumulator` is supplied, bar {@link ChartPointOhlc.volume} is updated using Kite cumulative session volume deltas.
  */
 export function mergeLiveTickIntoOhlc(
   series: ChartPointOhlc[],
   lastTick: MarketTickBatchItem | null,
   interval: ChartIntervalKey,
-  graphType: ChartGraph,
+  _graphType: ChartGraph,
+  volumeAccumulator?: LiveTickVolumeAccumulator,
 ): ChartPointOhlc[] {
-  if (graphType !== 'candlestick' || !lastTick || series.length === 0) return series
+  if (!lastTick || series.length === 0) return series
 
   const price = lastTick.p
+  const tickVol = lastTick.v
   const tickMs = lastTick.t != null ? lastTick.t * 1000 : Date.now()
   const tickBucket = candleBucketStartUtc(tickMs, interval)
 
@@ -96,21 +119,34 @@ export function mergeLiveTickIntoOhlc(
   const lastMs = new Date(last.t).getTime()
   const lastBucket = candleBucketStartUtc(lastMs, interval)
 
-  if (tickBucket < lastBucket) return series
+  if (tickBucket < lastBucket) {
+    if (volumeAccumulator && Number.isFinite(tickVol) && tickVol >= 0) {
+      volumeAccumulator.lastCumulativeVolume = tickVol
+    }
+    return series
+  }
 
   if (tickBucket === lastBucket) {
     const hi = Math.max(last.high, price)
     const lo = Math.min(last.low, price)
+    const nextVol =
+      volumeAccumulator != null
+        ? applyKiteCumulativeVolumeDelta(last.volume, tickVol, volumeAccumulator)
+        : last.volume
     const updated: ChartPointOhlc = {
       ...last,
       high: hi,
       low: lo,
       close: price,
-      ohlc: formatOhlc(last.open, hi, lo, price, last.volume),
+      volume: nextVol,
+      ohlc: formatOhlc(last.open, hi, lo, price, nextVol),
     }
     return [...series.slice(0, -1), updated]
   }
 
+  const ncVolBase = 0
+  const ncVol =
+    volumeAccumulator != null ? applyKiteCumulativeVolumeDelta(ncVolBase, tickVol, volumeAccumulator) : 0
   const nc: ChartPointOhlc = {
     idx: last.idx + 1,
     t: new Date(tickBucket).toISOString(),
@@ -118,8 +154,8 @@ export function mergeLiveTickIntoOhlc(
     high: Math.max(last.close, price),
     low: Math.min(last.close, price),
     close: price,
-    volume: 0,
-    ohlc: formatOhlc(last.close, Math.max(last.close, price), Math.min(last.close, price), price, 0),
+    volume: ncVol,
+    ohlc: formatOhlc(last.close, Math.max(last.close, price), Math.min(last.close, price), price, ncVol),
   }
   return [...series, nc]
 }
