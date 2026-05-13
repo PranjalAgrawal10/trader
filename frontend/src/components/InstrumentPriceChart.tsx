@@ -134,21 +134,30 @@ const ML_MARKER_COL = {
   neutral: '#f59e0b',
 } as const
 
-const ML_MARKER_SIZE = 0.25
+const ML_MARKER_SIZE = 0.2
 
-/** Stack markers vertically in price space so every model prediction stays visible above the candle. */
-function mlMarkerStackHigh(bar: ChartPointWithMa, stackIndex: number): number {
-  const spread = Math.max(bar.high - bar.low, Math.abs(bar.close) * 0.0005, 1e-9)
-  const step = spread * 0.16
-  return bar.high + step * (stackIndex + 1)
+/** Narrow space — keeps per-model glyphs on one readable row above the bar. */
+const ML_MARKER_TEXT_JOINER = '\u2005'
+
+/** LW gives one X per bar; multiple series markers stack vertically. For a horizontal cue, use `text`. */
+function mlDominantMarkerSpec(
+  entries: readonly MlPredictionLogEntry[],
+): { shape: 'arrowUp' | 'arrowDown' | 'square'; color: string } {
+  let up = 0
+  let down = 0
+  for (const e of entries) {
+    if (e.direction === 'up') up++
+    else if (e.direction === 'down') down++
+  }
+  if (up > down) return { shape: 'arrowUp', color: ML_MARKER_COL.up }
+  if (down > up) return { shape: 'arrowDown', color: ML_MARKER_COL.down }
+  return { shape: 'square', color: ML_MARKER_COL.neutral }
 }
 
-function mlEntryMarkerAttrs(
-  e: MlPredictionLogEntry,
-): Pick<SeriesMarker<Time>, 'shape' | 'color'> {
-  if (e.direction === 'up') return { shape: 'arrowUp', color: ML_MARKER_COL.up }
-  if (e.direction === 'down') return { shape: 'arrowDown', color: ML_MARKER_COL.down }
-  return { shape: 'square', color: ML_MARKER_COL.neutral }
+function mlHorizontalDirectionsText(entries: readonly MlPredictionLogEntry[]): string {
+  const sorted = sortMlRibbonEntries(entries)
+  const glyphs = sorted.map((e) => (e.direction === 'up' ? '↑' : e.direction === 'down' ? '↓' : '◇'))
+  return glyphs.join(ML_MARKER_TEXT_JOINER)
 }
 
 const ML_HOVER_DETAIL_MAX_CHARS = 180
@@ -876,20 +885,21 @@ function syncSeriesData(st: Internals, p: SyncPack) {
   for (let i = 0; i < p.data.length; i++) {
     const preds = tgt.get(i)
     if (!preds?.length) continue
-    const bar = p.data[i]
-    const sorted = sortMlRibbonEntries(preds)
-    for (let j = 0; j < sorted.length; j++) {
-      const e = sorted[j]
-      const attrs = mlEntryMarkerAttrs(e)
-      markersArr.push({
-        time: p.times[i],
-        position: 'atPriceTop',
-        shape: attrs.shape,
-        color: attrs.color,
-        price: mlMarkerStackHigh(bar, j),
-        size: ML_MARKER_SIZE,
-      })
-    }
+    const unanimous =
+      preds.length > 0 &&
+      (preds.every((e) => e.direction === 'up') ||
+        preds.every((e) => e.direction === 'down') ||
+        preds.every((e) => e.direction === 'neutral'))
+    const spec = unanimous ? mlDominantMarkerSpec(preds) : ({ shape: 'square', color: '#94a3b8' } as const)
+    const text = mlHorizontalDirectionsText(preds)
+    markersArr.push({
+      time: p.times[i],
+      position: 'aboveBar',
+      shape: spec.shape,
+      color: unanimous ? spec.color : '#94a3b8',
+      size: ML_MARKER_SIZE,
+      text,
+    })
   }
 
   for (const idx of p.paperBuyDataIndices) {
