@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { CHART_RIGHT_EDGE_GAP_FRACT } from '../constants/chartLayout'
+import { CHART_CANDLE_MAX_SLOT_PX, CHART_RIGHT_EDGE_GAP_FRACT } from '../constants/chartLayout'
 import type { ChartPointWithMaAndTrend } from '../utils/closeLinearTrend'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
@@ -27,9 +27,6 @@ const VOL_PRICE_GAP_PX = 4
 /** Padding inside the volume histogram band (pixels). */
 const VOL_BAR_INSET_TOP = 4
 const VOL_BAR_INSET_BOTTOM = 2
-
-/** When zoomed to few bars, avoid stretching candles across the full plot — keep a max pitch and center the cluster (latest bar in the middle). */
-const MAX_CANDLE_SLOT_PX = 28
 
 /** Bullish / bearish candle colors (typical trading terminal green / red). */
 const CANDLE = {
@@ -126,7 +123,18 @@ function useContainerPixelSize<T extends HTMLElement>() {
     const el = ref.current
     if (!el) return
 
-    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight })
+    const update = () => {
+      const nw = el.clientWidth
+      const nh = el.clientHeight
+      setSize({ w: nw, h: nh })
+      if ((nw <= 1 || nh <= 1) && typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+          const inner = ref.current
+          if (!inner) return
+          setSize({ w: inner.clientWidth, h: inner.clientHeight })
+        })
+      }
+    }
 
     const ro = new ResizeObserver(update)
     ro.observe(el)
@@ -291,7 +299,7 @@ export function CandlestickChart({
     const n = data.length
 
     const ghostSlots = Math.max(0, Math.min(512, Math.floor(newerGhostSlots)))
-    const slotGuess = n > 0 ? Math.min(plotW / n, MAX_CANDLE_SLOT_PX) : MAX_CANDLE_SLOT_PX
+    const slotGuess = n > 0 ? Math.min(plotW / n, CHART_CANDLE_MAX_SLOT_PX) : CHART_CANDLE_MAX_SLOT_PX
     const ghostReservePx =
       ghostSlots > 0 && n > 0 ? Math.min(Math.max(0, plotW - 40), ghostSlots * slotGuess) : 0
     const candlePlotW = Math.max(32, plotW - ghostReservePx)
@@ -299,8 +307,8 @@ export function CandlestickChart({
     const naturalSlotW = candlePlotW / n
     let slotW = naturalSlotW
     let clusterStartX = PAD.left
-    if (naturalSlotW > MAX_CANDLE_SLOT_PX) {
-      slotW = MAX_CANDLE_SLOT_PX
+    if (naturalSlotW > CHART_CANDLE_MAX_SLOT_PX) {
+      slotW = CHART_CANDLE_MAX_SLOT_PX
       const clusterW = n * slotW
       if (clusterW > candlePlotW) {
         slotW = candlePlotW / n
@@ -711,8 +719,13 @@ export function CandlestickChart({
             onMouseMove={(e) => {
               const svg = e.currentTarget.ownerSVGElement
               if (!svg || !ref.current) return
-              const svgR = svg.getBoundingClientRect()
-              const sx = ((e.clientX - svgR.left) / Math.max(svgR.width, 1)) * w
+              const ctm = svg.getScreenCTM()
+              if (!ctm) return
+              const pt = svg.createSVGPoint()
+              pt.x = e.clientX
+              pt.y = e.clientY
+              const sp = pt.matrixTransform(ctm.inverse())
+              const sx = sp.x
               const rel = sx - layout.clusterStartX
               const idx = Math.max(0, Math.min(data.length - 1, Math.floor(rel / layout.slotW)))
               const box = ref.current.getBoundingClientRect()
