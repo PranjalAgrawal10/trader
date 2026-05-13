@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
 } from 'react'
-import { CHART_CANDLE_MAX_SLOT_PX } from '../constants/chartLayout'
 import { maxChartPanOffsetBars } from '../utils/chartZoom'
 
 /** Beyond hard pan limits, scrub into elastic px. */
@@ -84,10 +83,8 @@ export function useChartPanPointerHandlers(options: {
       const rect = e.currentTarget.getBoundingClientRect()
       const w = rect.width > 0 ? rect.width : 1
       const vis = visibleBarCount ?? totalBars
-      /** Match {@link CandlestickChart}: clustered candles cap pitch at CHART_CANDLE_MAX_SLOT_PX on wide layouts. */
-      const naturalPxPerBar = w / Math.max(vis, 1)
-      const pxPerBar =
-        naturalPxPerBar > CHART_CANDLE_MAX_SLOT_PX ? CHART_CANDLE_MAX_SLOT_PX : naturalPxPerBar
+      /** Full chart width ÷ visible bars: a full-width drag ≈ one viewport of history (clustered candle pitch is visual only). */
+      const pxPerBar = w / Math.max(vis, 1)
       const dx = e.clientX - sessionRef.current.pointerStartX
       const rawPan = sessionRef.current.panAtStart + dx / pxPerBar
       const maxP = maxChartPanOffsetBars(totalBars, visibleBarCount)
