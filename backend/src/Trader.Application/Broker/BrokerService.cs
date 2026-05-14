@@ -1187,7 +1187,7 @@ public sealed class BrokerService : IBrokerService
                         graph,
                         null,
                         null,
-                        settings.MlAutomationEnabled,
+                        FavoriteMlAutomationEnabled: true,
                         TrendAnalysisIntervalsJson: trendJson),
                     ct)
                 .ConfigureAwait(false);
@@ -1249,7 +1249,7 @@ public sealed class BrokerService : IBrokerService
         await _kiteChartSettings
             .SaveFavoriteMlAutomationPreferencesAsync(
                 userId,
-                body.Enabled,
+                enabled: true,
                 intervalToStore,
                 pollToStore,
                 minAfterOpenToStore,

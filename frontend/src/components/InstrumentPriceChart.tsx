@@ -26,12 +26,7 @@ import {
   LineType,
 } from 'lightweight-charts'
 import type { UTCTimestamp } from 'lightweight-charts'
-import {
-  CHART_DEFAULT_VISIBLE_BARS,
-  CHART_LOAD_OLDER_VISIBLE_THRESHOLD,
-  CHART_LW_MAX_BAR_SPACING_PX,
-  CHART_LW_MIN_BAR_SPACING_PX,
-} from '../constants/chartLayout'
+import { CHART_DEFAULT_VISIBLE_BARS, CHART_LOAD_OLDER_VISIBLE_THRESHOLD } from '../constants/chartLayout'
 import { attachLinearTrendToChartPoints, LINEAR_CLOSE_TREND_COLOR } from '../utils/closeLinearTrend'
 import type { ChartPointWithMaAndTrend } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
@@ -210,8 +205,6 @@ function lwChartOptions(bg: string, showScales: boolean) {
       borderVisible: showScales,
       timeVisible: true,
       secondsVisible: false,
-      minBarSpacing: CHART_LW_MIN_BAR_SPACING_PX,
-      maxBarSpacing: CHART_LW_MAX_BAR_SPACING_PX,
     },
     crosshair: {
       mode: CrosshairMode.MagnetOHLC,
@@ -653,8 +646,6 @@ export function InstrumentPriceChart({
       paperBuyDataIndices,
     })
 
-    stAlive.chart.applyOptions(lwChartOptions(bgMemo, showScales))
-
     applyInstrumentChartViewport(stAlive.chart, {
       enableInitialViewportClip,
       defaultVisibleBars,
@@ -744,6 +735,13 @@ export function InstrumentPriceChart({
       stRef.current = null
     }
   }, [])
+
+  /** Theme / scale chrome only — avoid merging full chart options on every OHLC/tick update (that can reset horizontal zoom). */
+  useLayoutEffect(() => {
+    const st = stRef.current
+    if (!st?.chart) return
+    st.chart.applyOptions(lwChartOptions(bgMemo, showScales))
+  }, [bgMemo, showScales])
 
   return (
     <div className="position-relative w-100 h-100 d-flex flex-column">

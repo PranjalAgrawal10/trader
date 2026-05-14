@@ -94,6 +94,9 @@ import {
   type MaLineVisibility,
 } from '../utils/movingAverages'
 
+/** When true, chart-settings saves and favorite-ML automation always persist background automation as enabled (see `BrokerService` policy). */
+const FAVORITE_ML_AUTOMATION_ALWAYS_ON = true
+
 interface BrokerStatusResponse {
   connected: boolean
   connectedAt: string | null
@@ -4274,7 +4277,6 @@ export function KiteInstrumentsPage() {
   }, [trendAnalysisSelections])
 
   const [chartPrefsHydrated, setChartPrefsHydrated] = useState(false)
-  const [favoriteMlAutomationEnabled, setFavoriteMlAutomationEnabled] = useState(false)
   const [favoriteMlAutomationBarInterval, setFavoriteMlAutomationBarInterval] = useState('')
   const [favoriteMlAutomationPollInput, setFavoriteMlAutomationPollInput] = useState('')
   const mlAutomationPollTouchedRef = useRef(false)
@@ -4627,7 +4629,6 @@ export function KiteInstrumentsPage() {
       } else {
         setTrendAnalysisSelections(loadTrendAnalysisSelections())
       }
-      setFavoriteMlAutomationEnabled(Boolean(data.mlAutomationEnabled))
       const rawAutoIv = typeof data.mlAutomationInterval === 'string' ? data.mlAutomationInterval.trim() : ''
       setFavoriteMlAutomationBarInterval(
         rawAutoIv && (CHART_INTERVALS as readonly string[]).includes(rawAutoIv) ? rawAutoIv : '',
@@ -4954,7 +4955,7 @@ export function KiteInstrumentsPage() {
           interval: chartInterval,
           rangePreset: chartRangePreset,
           graphType: chartGraphType,
-          mlAutomationEnabled: favoriteMlAutomationEnabled,
+          mlAutomationEnabled: FAVORITE_ML_AUTOMATION_ALWAYS_ON,
           trendAnalysisIntervals: orderTrendSelections(trendAnalysisSelections),
         })
         .catch(() => {
@@ -4967,7 +4968,6 @@ export function KiteInstrumentsPage() {
     chartRangePreset,
     chartGraphType,
     chartPrefsHydrated,
-    favoriteMlAutomationEnabled,
     trendAnalysisSelections,
   ])
 
@@ -5087,7 +5087,7 @@ export function KiteInstrumentsPage() {
         pollIntervalMinutes?: number
         minSecondsAfterBarOpenForAutomation?: number | null
       } = {
-        enabled: favoriteMlAutomationEnabled,
+        enabled: FAVORITE_ML_AUTOMATION_ALWAYS_ON,
         interval: intervalNorm,
       }
       if (mlAutomationPollTouchedRef.current) {
@@ -5129,7 +5129,6 @@ export function KiteInstrumentsPage() {
       setMlAutomationSaving(false)
     }
   }, [
-    favoriteMlAutomationEnabled,
     favoriteMlAutomationBarInterval,
     favoriteMlAutomationPollInput,
     favoriteMlAutomationMinSecAfterOpenInput,
@@ -5369,45 +5368,19 @@ export function KiteInstrumentsPage() {
                   <Row className="g-4 align-items-stretch">
                     <Col xs={12} xl={4}>
                       <div className="h-100 p-3 rounded-3 border border-secondary-subtle bg-body d-flex flex-column">
-                        <Form.Check
-                          type="switch"
-                          id="favorite-ml-automation-switch"
-                          className="mb-2"
-                          label={
-                            <span className="fw-semibold">
-                              Auto ML for favorites
-                              <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
-                                Runs on the server for starred instruments when host automation is enabled.
-                              </span>
-                            </span>
-                          }
-                          checked={favoriteMlAutomationEnabled}
-                          disabled={!chartPrefsHydrated || mlAutomationSaving}
-                          onChange={(e) => {
-                            const v = e.target.checked
-                            setFavoriteMlAutomationEnabled(v)
-                            setMlAutomationSaving(true)
-                            setMlAutomationError(null)
-                            void api
-                              .put('/broker/kite/instruments/favorite-ml-automation', { enabled: v })
-                              .then(() => {
-                                void loadChartSettings()
-                                void loadAutomationRecent()
-                              })
-                              .catch((err) => setMlAutomationError(problemDetail(err)))
-                              .finally(() => setMlAutomationSaving(false))
-                          }}
-                        />
+                        <div className="mb-2">
+                          <span className="fw-semibold d-block" id="favorite-ml-automation-heading">
+                            Auto ML for favorites
+                          </span>
+                          <span className="d-block small fw-normal text-secondary mt-1 lh-sm">
+                            Runs on the server for starred instruments when host automation is enabled. Remains enabled
+                            for your account; schedule below controls bar size and timing.
+                          </span>
+                        </div>
                         <div className="mt-auto pt-2">
-                          {favoriteMlAutomationEnabled ? (
-                            <Badge bg="success" pill>
-                              On
-                            </Badge>
-                          ) : (
-                            <Badge bg="secondary" pill>
-                              Off
-                            </Badge>
-                          )}
+                          <Badge bg="success" pill>
+                            Always on
+                          </Badge>
                         </div>
                       </div>
                     </Col>
@@ -6907,8 +6880,7 @@ export function KiteInstrumentsPage() {
                             Demo / automation flags
                           </Col>
                           <Col xs={6} sm={8}>
-                            demo {demoFullReport.demoAutoTradeEnabled ? 'on' : 'off'} · favorites ML{' '}
-                            {demoFullReport.favoriteMlAutomationEnabled ? 'on' : 'off'}
+                            demo {demoFullReport.demoAutoTradeEnabled ? 'on' : 'off'} · favorites ML on
                           </Col>
                           <Col xs={6} sm={4} className="text-secondary">
                             Locked instruments (demo)
