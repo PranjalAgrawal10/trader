@@ -78,7 +78,7 @@ public sealed class MlNetPriceDirectionPredictionEngine : IPriceDirectionPredict
                 return Heuristic(closes);
 
             var pred = engine.Predict(feat);
-            var pUp = _calibrator.CalibratePUp(pred.Probability);
+            var pUp = _calibrator.CalibratePUp(pred.Probability, profileKey: "sdca");
             var confidence = (int)Math.Clamp(Math.Round(Math.Max(pUp, 1f - pUp) * 100), 0, 100);
 
             var isUp = pUp >= 0.5f;

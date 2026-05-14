@@ -122,6 +122,7 @@ public static class DependencyInjection
         services.AddHostedService<FavoriteMlAutomationBackgroundService>();
 
         services.AddSingleton<IPriceDirectionScoreCalibrator, JsonPiecewiseProbabilityCalibrator>();
+        services.AddSingleton<MlNetFnoMultiHorizonPredictionEngine>();
         services.AddSingleton<MlNetPriceDirectionPredictionEngine>();
         services.AddSingleton<MlNetLightGbmTripleBarrierPredictionEngine>();
         services.AddSingleton<MomentumPriceDirectionPredictionEngine>();
@@ -129,6 +130,7 @@ public static class DependencyInjection
             new PriceDirectionPredictionEngineRegistry(
                 new IPriceDirectionPredictionEngine[]
                 {
+                    sp.GetRequiredService<MlNetFnoMultiHorizonPredictionEngine>(),
                     sp.GetRequiredService<MlNetLightGbmTripleBarrierPredictionEngine>(),
                     sp.GetRequiredService<MlNetPriceDirectionPredictionEngine>(),
                     sp.GetRequiredService<MomentumPriceDirectionPredictionEngine>(),

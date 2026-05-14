@@ -4,4 +4,5 @@ namespace Trader.Application.Prediction;
 public static class PriceDirectionModelIds
 {
     public const string MlNetLightGbmTripleBarrierV1 = "mlnet-lightgbm-triple-barrier-v1";
+    public const string MlNetFnoMultiHorizonV1 = "mlnet-fno-multi-horizon-v1";
 }

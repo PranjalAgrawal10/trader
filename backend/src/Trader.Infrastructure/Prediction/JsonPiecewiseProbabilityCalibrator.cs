@@ -20,6 +20,7 @@ public sealed class JsonPiecewiseProbabilityCalibrator : IPriceDirectionScoreCal
     private readonly object _gate = new();
     private CalibrationMapDto? _map;
     private string? _configuredPathStamp;
+    private readonly Dictionary<string, CalibrationMapDto?> _mapByProfile = new(StringComparer.OrdinalIgnoreCase);
 
     public JsonPiecewiseProbabilityCalibrator(
         IHostEnvironment env,
@@ -36,12 +37,18 @@ public sealed class JsonPiecewiseProbabilityCalibrator : IPriceDirectionScoreCal
         {
             _map = null;
             _configuredPathStamp = null;
+            _mapByProfile.Clear();
         }
     }
 
     public float CalibratePUp(float rawPUp)
     {
-        var map = LoadMapCached();
+        return CalibratePUp(rawPUp, profileKey: null);
+    }
+
+    public float CalibratePUp(float rawPUp, string? profileKey)
+    {
+        var map = LoadMapCached(profileKey);
         if (map?.Xs.Length is not > 1 || map.Xs.Length != map.Ys.Length)
             return Clamp01(rawPUp);
 
@@ -68,27 +75,31 @@ public sealed class JsonPiecewiseProbabilityCalibrator : IPriceDirectionScoreCal
         return (float)ys[^1];
     }
 
-    private CalibrationMapDto? LoadMapCached()
+    private CalibrationMapDto? LoadMapCached(string? profileKey)
     {
-        var configured = (_options.CurrentValue.ScoreCalibrationJsonPath ?? "").Trim();
+        var configured = ResolveConfiguredPath(profileKey);
         if (string.IsNullOrEmpty(configured))
             return null;
 
         lock (_gate)
         {
-            if (_map is not null
-                && string.Equals(_configuredPathStamp, configured, StringComparison.Ordinal))
+            if (!string.IsNullOrWhiteSpace(profileKey))
+            {
+                if (_mapByProfile.TryGetValue(profileKey, out var profileMap))
+                    return profileMap;
+            }
+            else if (_map is not null && string.Equals(_configuredPathStamp, configured, StringComparison.Ordinal))
+            {
                 return _map;
+            }
 
             var path = Path.IsPathRooted(configured)
                 ? configured
                 : Path.GetFullPath(Path.Combine(_env.ContentRootPath, configured));
 
-            _configuredPathStamp = configured;
             if (!File.Exists(path))
             {
-                _map = null;
-                return null;
+                return StoreCached(profileKey, configured, value: null);
             }
 
             try
@@ -96,19 +107,41 @@ public sealed class JsonPiecewiseProbabilityCalibrator : IPriceDirectionScoreCal
                 var parsed = System.Text.Json.JsonSerializer.Deserialize<CalibrationMapDto>(File.ReadAllText(path));
                 if (parsed?.Xs is not { Length: > 1 } || parsed.Ys.Length != parsed.Xs.Length)
                 {
-                    _map = null;
-                    return null;
+                    return StoreCached(profileKey, configured, value: null);
                 }
 
-                _map = parsed;
-                return _map;
+                return StoreCached(profileKey, configured, parsed);
             }
             catch
             {
-                _map = null;
-                return null;
+                return StoreCached(profileKey, configured, value: null);
             }
         }
+    }
+
+    private string ResolveConfiguredPath(string? profileKey)
+    {
+        if (!string.IsNullOrWhiteSpace(profileKey) &&
+            _options.CurrentValue.ScoreCalibrationJsonPathByInterval.TryGetValue(profileKey, out var profilePath) &&
+            !string.IsNullOrWhiteSpace(profilePath))
+        {
+            return profilePath.Trim();
+        }
+
+        return (_options.CurrentValue.ScoreCalibrationJsonPath ?? "").Trim();
+    }
+
+    private CalibrationMapDto? StoreCached(string? profileKey, string configuredPath, CalibrationMapDto? value)
+    {
+        if (!string.IsNullOrWhiteSpace(profileKey))
+        {
+            _mapByProfile[profileKey] = value;
+            return value;
+        }
+
+        _configuredPathStamp = configuredPath;
+        _map = value;
+        return _map;
     }
 
     private static float Clamp01(float v) => v <= 0f ? 0f : v >= 1f ? 1f : v;

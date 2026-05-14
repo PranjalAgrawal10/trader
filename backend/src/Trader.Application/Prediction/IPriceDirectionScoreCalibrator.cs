@@ -4,4 +4,10 @@ namespace Trader.Application.Prediction;
 public interface IPriceDirectionScoreCalibrator
 {
     float CalibratePUp(float rawPUp);
+
+    /// <summary>
+    /// Calibrates with an optional profile key (for example interval profile <c>1m</c>/<c>5m</c>/<c>15m</c>).
+    /// Implementations may fall back to global calibration when key-specific maps are absent.
+    /// </summary>
+    float CalibratePUp(float rawPUp, string? profileKey);
 }
