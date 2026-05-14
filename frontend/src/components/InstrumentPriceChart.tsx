@@ -77,7 +77,10 @@ export type InstrumentPriceChartProps = {
    * When null/omit: defaults to {@link CHART_DEFAULT_VISIBLE_BARS}.
    */
   defaultVisibleBars?: number | null
-  /** When false, fit entire series horizontally on first layout (still allows pan/zoom afterward). */
+  /**
+   * When false, fit entire series horizontally on first layout (user can still LW-pan afterward; pinch / wheel /
+   * axis scale gestures remain disabled on the main chart).
+   */
   enableInitialViewportClip?: boolean
   /** Show price + time axes (readable scale). Default true for OHLC. */
   showScales?: boolean
@@ -183,8 +186,9 @@ function lwChartOptions(bg: string, showScales: boolean) {
   return {
     attributionLogo: false,
     autoSize: true,
+    /** Keep horizontal candle density fixed (no wheel/pinch/axis zoom); drag still pans the series. */
     handleScroll: true,
-    handleScale: true,
+    handleScale: false,
     grid: {
       vertLines: { color: 'rgba(173,181,189,0.18)', style: LineStyle.Dotted },
       horzLines: { color: 'rgba(173,181,189,0.22)', style: LineStyle.LargeDashed },

@@ -329,11 +329,11 @@ export function ManualTradeScalperView({
         </Row>
 
         <p className="small text-muted mb-2 mb-md-3">
-          <strong>Chart</strong> loads the last <strong>3 calendar days</strong> of candles; it starts zoomed on about the{' '}
+          <strong>Chart</strong> loads the last <strong>3 calendar days</strong> of candles; the opening view spans about the{' '}
           <strong>{CHART_DEFAULT_VISIBLE_BARS} newest</strong> bars (pan left for more inside the window — at the left edge
-          it fetches older candles). <strong>Interval</strong>, line/bar/candle mode, and <strong>MA / S&amp;R</strong> toggles
-          stay synced with <strong>Browse</strong> / <strong>All favorites</strong> (toolbar: <strong>refresh</strong> +{' '}
-          <strong>fullscreen</strong>; range is fixed for scalper speed).
+          it fetches older candles; pinch / wheel zoom is off). <strong>Interval</strong>, line/bar/candle mode, and{' '}
+          <strong>MA / S&amp;R</strong> toggles stay synced with <strong>Browse</strong> / <strong>All favorites</strong>{' '}
+          (toolbar: <strong>refresh</strong> + <strong>fullscreen</strong>; range is fixed for scalper speed).
         </p>
 
         {chartFullscreenToolbar && !fullscreenActive ? (
