@@ -394,7 +394,7 @@ public sealed class FavoriteMlAutomationService
         var suppressNewPredictions = suppressNewAutomationPredictions;
         if (!suppressNewPredictions && user.FavoriteMlAutomationPollIntervalSeconds is int pollS && pollS > 0)
         {
-            var sec = Math.Clamp(pollS, 60, 86400);
+            var sec = Math.Clamp(pollS, 1, 86400);
             if (user.FavoriteMlAutomationLastNewPassUtc is DateTimeOffset last
                 && DateTimeOffset.UtcNow - last < TimeSpan.FromSeconds(sec))
             {

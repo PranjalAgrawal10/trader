@@ -58,8 +58,8 @@ public sealed partial class EmailOtpService : IEmailOtpService
     }
 
     /// <remarks>
-    /// HTML clients cannot reliably run JavaScript Clipboard APIs; we include a selectable code block plus a prominent
-    /// "Copy OTP" style treatment with touch-friendly selection hints.
+    /// HTML clients cannot reliably run JavaScript Clipboard APIs; we avoid fake copy buttons and render clearly
+    /// selectable OTP blocks with touch-friendly selection hints.
     /// </remarks>
     private static string BuildLoginSecondFactorHtmlBody(string plainCode, int expiryMinutes)
     {
@@ -82,18 +82,18 @@ public sealed partial class EmailOtpService : IEmailOtpService
             + codeEsc + "</div>"
             + "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin:0 0 24px;"
             + "border-collapse:separate;border-spacing:0;\">"
-            + "<tr><td aria-label=\"Sign-in OTP for copy\""
+            + "<tr><td aria-label=\"Sign-in OTP (select and copy)\""
             + " style=\"-webkit-touch-callout:default;-webkit-user-select:text;user-select:text;"
             + "padding:14px 22px;border-radius:9999px;text-align:center;"
             + "background-color:#0f172a;background-image:linear-gradient(#1e293b,#0f172a);\">"
             + "<span style=\"color:#e2e8f0;font-size:13px;font-weight:700;"
-            + "letter-spacing:0.18em;text-transform:uppercase;\">Copy OTP&nbsp;&nbsp;</span>"
+            + "letter-spacing:0.18em;text-transform:uppercase;\">OTP code&nbsp;&nbsp;</span>"
             + "<span style=\"color:#f8fafc;font-size:22px;font-weight:800;"
             + "letter-spacing:0.32em;font-family:Consolas,Menlo,'Courier New',monospace;\">" + codeEsc + "</span>"
             + "</td></tr></table>"
             + "<p style=\"margin:-4px 0 16px;color:#64748b;font-size:13px;\">"
-            + "To copy quickly: tap the code or dark <strong style=\"color:#334155;\">COPY OTP</strong> bar, then "
-            + "<strong>Select All</strong> and <strong>Copy</strong> from the menu.</p>"
+            + "To copy quickly: tap and hold either code block, then use <strong>Select All</strong> and "
+            + "<strong>Copy</strong> from your mail app menu.</p>"
             + "<p style=\"margin:0 0 8px;color:#64748b;font-size:14px;\">Expires in "
             + $"<strong style=\"color:#334155;\">{expiryEsc}</strong> minute(s).</p>"
             + "<p style=\"margin:0;color:#64748b;font-size:13px;\">If you didn't attempt to sign in, change"

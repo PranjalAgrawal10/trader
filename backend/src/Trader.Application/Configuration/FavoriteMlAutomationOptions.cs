@@ -12,7 +12,7 @@ public sealed class FavoriteMlAutomationOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// When &gt; 0, delay this many seconds between automation cycles (clamped 15–3600).
+    /// When &gt; 0, delay this many seconds between automation cycles (clamped 1–3600).
     /// When 0 (default), <see cref="PollIntervalMinutes"/> is used instead.
     /// </summary>
     public int PollIntervalSeconds { get; set; }
