@@ -1,6 +1,6 @@
 import { Button, Spinner } from 'react-bootstrap'
 
-/** Refresh + fullscreen only (horizontal/vertical candle zoom controls removed). */
+/** Chart utility controls (refresh/fullscreen); zoom gestures are handled directly on the chart surface. */
 export function ChartZoomControls({
   idPrefix,
   compact,
