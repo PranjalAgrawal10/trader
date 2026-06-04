@@ -968,31 +968,32 @@ export function ScalperPage() {
                         >
                           Trend analysis intervals
                         </div>
-                        <div className="d-flex align-items-center gap-1 flex-nowrap overflow-auto ms-auto pb-1">
-                        {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
-                          const active = trendIntervals.includes(iv)
-                          return (
-                            <Button
-                              key={`scalper-trend-${iv}`}
-                              size="sm"
-                              variant={active ? 'secondary' : 'outline-secondary'}
-                              style={{
-                                padding: '0.12rem 0.38rem',
-                                fontSize: '0.68rem',
-                                lineHeight: 1.1,
-                                borderRadius: '0.32rem',
-                                whiteSpace: 'nowrap',
-                              }}
-                              onClick={() =>
-                                setTrendIntervals((prev) =>
-                                  prev.includes(iv) ? prev.filter((x) => x !== iv) : [...prev, iv],
-                                )
-                              }
-                            >
-                              {iv}
-                            </Button>
-                          )
-                        })}
+                        <div className="d-flex align-items-center flex-nowrap overflow-auto ms-auto pb-1">
+                          <ButtonGroup size="sm" className="flex-nowrap">
+                            {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
+                              const active = trendIntervals.includes(iv)
+                              return (
+                                <Button
+                                  key={`scalper-trend-${iv}`}
+                                  size="sm"
+                                  variant={active ? 'secondary' : 'outline-secondary'}
+                                  style={{
+                                    padding: '0.12rem 0.38rem',
+                                    fontSize: '0.68rem',
+                                    lineHeight: 1.1,
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  onClick={() =>
+                                    setTrendIntervals((prev) =>
+                                      prev.includes(iv) ? prev.filter((x) => x !== iv) : [...prev, iv],
+                                    )
+                                  }
+                                >
+                                  {iv}
+                                </Button>
+                              )
+                            })}
+                          </ButtonGroup>
                         </div>
                       </div>
                     </div>
