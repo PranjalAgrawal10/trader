@@ -798,6 +798,14 @@ interface IndexAtmSnapshot {
   spotQuote: KiteInstrumentLiveQuoteResponse | null
   optionExpiry: string | null
   atmStrike: number | null
+  chainRows: {
+    strike: number
+    isAtm: boolean
+    ceRow: KiteInstrumentRow | null
+    peRow: KiteInstrumentRow | null
+    ceQuote: KiteInstrumentLiveQuoteResponse | null
+    peQuote: KiteInstrumentLiveQuoteResponse | null
+  }[]
   ceRow: KiteInstrumentRow | null
   peRow: KiteInstrumentRow | null
   ceQuote: KiteInstrumentLiveQuoteResponse | null
@@ -1077,6 +1085,34 @@ function pickAtmLegs(
   const ce = strikeRows.find((r) => (r.instrumentType ?? '').toUpperCase() === 'CE' || r.tradingsymbol.toUpperCase().endsWith('CE')) ?? null
   const pe = strikeRows.find((r) => (r.instrumentType ?? '').toUpperCase() === 'PE' || r.tradingsymbol.toUpperCase().endsWith('PE')) ?? null
   return { expiry: expiryIso, strike, ce, pe }
+}
+
+function buildAtmChainRows(
+  options: KiteInstrumentRow[],
+  expiryIso: string | null,
+  atmStrike: number | null,
+  strikesEachSide: number,
+): Array<{ strike: number; isAtm: boolean; ceRow: KiteInstrumentRow | null; peRow: KiteInstrumentRow | null }> {
+  if (!expiryIso || atmStrike == null) return []
+  const expiryMs = Date.parse(expiryIso)
+  if (!Number.isFinite(expiryMs)) return []
+  const bucket = options.filter((r) => parseExpiryIsoToMs(r.expiry) === expiryMs && r.strike != null)
+  const strikes = [...new Set(bucket.map((r) => Number(r.strike)).filter(Number.isFinite))].sort((a, b) => a - b)
+  if (strikes.length === 0) return []
+  const atmIdx = strikes.reduce(
+    (bestIdx, s, i) => (Math.abs(s - atmStrike) < Math.abs(strikes[bestIdx]! - atmStrike) ? i : bestIdx),
+    0,
+  )
+  const from = Math.max(0, atmIdx - strikesEachSide)
+  const to = Math.min(strikes.length - 1, atmIdx + strikesEachSide)
+  return strikes.slice(from, to + 1).map((strike) => {
+    const strikeRows = bucket.filter((r) => Number(r.strike) === strike)
+    const ceRow =
+      strikeRows.find((r) => (r.instrumentType ?? '').toUpperCase() === 'CE' || r.tradingsymbol.toUpperCase().endsWith('CE')) ?? null
+    const peRow =
+      strikeRows.find((r) => (r.instrumentType ?? '').toUpperCase() === 'PE' || r.tradingsymbol.toUpperCase().endsWith('PE')) ?? null
+    return { strike, isAtm: strike === strikes[atmIdx], ceRow, peRow }
+  })
 }
 
 function InstrumentListPanel({
@@ -4370,6 +4406,7 @@ export function KiteInstrumentsPage() {
       spotQuote: null,
       optionExpiry: null,
       atmStrike: null,
+      chainRows: [],
       ceRow: null,
       peRow: null,
       ceQuote: null,
@@ -5385,7 +5422,29 @@ export function KiteInstrumentsPage() {
           const spotQuote = await fetchQuote(spotRow)
           const options = atmOptionsRef.current[target.key] ?? []
           const atm = pickAtmLegs(options, spotQuote?.lastPrice ?? Number.NaN)
-          const [ceQuote, peQuote] = await Promise.all([fetchQuote(atm.ce), fetchQuote(atm.pe)])
+          const chainRowsSeed = buildAtmChainRows(options, atm.expiry, atm.strike, 3)
+          const uniqueRows = new Map<string, KiteInstrumentRow>()
+          for (const row of chainRowsSeed) {
+            if (row.ceRow) uniqueRows.set(`ce:${row.ceRow.instrumentToken}`, row.ceRow)
+            if (row.peRow) uniqueRows.set(`pe:${row.peRow.instrumentToken}`, row.peRow)
+          }
+          if (atm.ce) uniqueRows.set(`ce:${atm.ce.instrumentToken}`, atm.ce)
+          if (atm.pe) uniqueRows.set(`pe:${atm.pe.instrumentToken}`, atm.pe)
+          const quoteEntries = await Promise.all(
+            [...uniqueRows.values()].map(async (r) => ({ token: r.instrumentToken, quote: await fetchQuote(r) })),
+          )
+          const quoteByToken = new Map<string, KiteInstrumentLiveQuoteResponse | null>()
+          for (const q of quoteEntries) quoteByToken.set(q.token, q.quote)
+          const ceQuote = atm.ce ? quoteByToken.get(atm.ce.instrumentToken) ?? null : null
+          const peQuote = atm.pe ? quoteByToken.get(atm.pe.instrumentToken) ?? null : null
+          const chainRows = chainRowsSeed.map((row) => ({
+            strike: row.strike,
+            isAtm: row.isAtm,
+            ceRow: row.ceRow,
+            peRow: row.peRow,
+            ceQuote: row.ceRow ? quoteByToken.get(row.ceRow.instrumentToken) ?? null : null,
+            peQuote: row.peRow ? quoteByToken.get(row.peRow.instrumentToken) ?? null : null,
+          }))
           return {
             key: target.key,
             label: target.label,
@@ -5393,6 +5452,7 @@ export function KiteInstrumentsPage() {
             spotQuote,
             optionExpiry: atm.expiry,
             atmStrike: atm.strike,
+            chainRows,
             ceRow: atm.ce,
             peRow: atm.pe,
             ceQuote,
@@ -5481,7 +5541,7 @@ export function KiteInstrumentsPage() {
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Browse uses on-demand search only: press <strong>Enter</strong> / <strong>Search Kite</strong> for a combined
-                  F&amp;O + MCX scan (no preloaded list). On <strong>All favorites</strong> and <strong>Locked for trading</strong>, live search
+                  F&amp;O + MCX scan (no preloaded list). Spot has its own on-demand panel. On <strong>All favorites</strong> and <strong>Locked for trading</strong>, live search
                   still scans F&amp;O + Spot + MCX. Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
                   open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below.                   Scheduled
                   automation and the merged prediction log live on <strong>Auto predictions</strong>; hypothetical{' '}
@@ -7374,18 +7434,64 @@ export function KiteInstrumentsPage() {
                                   {snap.atmStrike != null ? snap.atmStrike.toFixed(2) : '—'}
                                 </span>
                               </div>
-                              <div className="small">
-                                CE:{' '}
-                                <span className="font-monospace">
-                                  {snap.ceRow ? `${snap.ceRow.tradingsymbol} @ ${snap.ceQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
-                                </span>
-                              </div>
-                              <div className="small">
-                                PE:{' '}
-                                <span className="font-monospace">
-                                  {snap.peRow ? `${snap.peRow.tradingsymbol} @ ${snap.peQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
-                                </span>
-                              </div>
+                              {snap.chainRows.length > 0 ? (
+                                <div className="table-responsive mt-2">
+                                  <Table size="sm" bordered hover className="mb-0 small align-middle">
+                                    <thead>
+                                      <tr>
+                                        <th className="text-end">Call LTP</th>
+                                        <th className="text-center">Strike</th>
+                                        <th className="text-start">Put LTP</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="font-monospace">
+                                      {snap.chainRows.map((row) => (
+                                        <tr key={`${snap.key}-${row.strike}`} className={row.isAtm ? 'table-warning' : undefined}>
+                                          <td
+                                            role={row.ceRow ? 'button' : undefined}
+                                            className={`text-end ${row.ceRow ? 'cursor-pointer' : ''}`}
+                                            onClick={() => {
+                                              if (!row.ceRow) return
+                                              setChartRow(row.ceRow)
+                                            }}
+                                          >
+                                            {row.ceQuote ? row.ceQuote.lastPrice.toFixed(2) : '—'}
+                                          </td>
+                                          <td className="text-center fw-semibold">
+                                            {row.strike.toFixed(2)}
+                                            {row.isAtm ? ' ★' : ''}
+                                          </td>
+                                          <td
+                                            role={row.peRow ? 'button' : undefined}
+                                            className={`text-start ${row.peRow ? 'cursor-pointer' : ''}`}
+                                            onClick={() => {
+                                              if (!row.peRow) return
+                                              setChartRow(row.peRow)
+                                            }}
+                                          >
+                                            {row.peQuote ? row.peQuote.lastPrice.toFixed(2) : '—'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </Table>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="small">
+                                    CE:{' '}
+                                    <span className="font-monospace">
+                                      {snap.ceRow ? `${snap.ceRow.tradingsymbol} @ ${snap.ceQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
+                                    </span>
+                                  </div>
+                                  <div className="small">
+                                    PE:{' '}
+                                    <span className="font-monospace">
+                                      {snap.peRow ? `${snap.peRow.tradingsymbol} @ ${snap.peQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
+                                    </span>
+                                  </div>
+                                </>
+                              )}
                               <div className="mt-2 d-flex flex-wrap gap-2">
                                 <Button
                                   type="button"
@@ -7551,6 +7657,21 @@ export function KiteInstrumentsPage() {
                   emptyHint="No preloaded rows. Type a symbol, strike, or expiry token, then press Enter or Search Kite for combined F&O + MCX results."
                   searchSegment="fno"
                   kiteLiveSegmentScope="fno_mcx"
+                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
+                  onSelectRow={setChartRow}
+                  favoriteKeySet={favoriteKeySet}
+                  onToggleFavorite={(r) => void toggleFavorite(r)}
+                  tradingLockKeySet={tradingLockKeySet}
+                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
+                />
+                <InstrumentListPanel
+                  title="Spot equity search (NSE / BSE cash)"
+                  rows={EMPTY_INSTRUMENTS}
+                  truncated={false}
+                  loading={false}
+                  emptyHint="No preloaded rows. Type a symbol/company and press Enter or Search Kite for Spot-only matches."
+                  searchSegment="spot"
+                  kiteLiveSegmentScope="panel"
                   selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
