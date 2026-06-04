@@ -2,15 +2,12 @@ import axios from 'axios'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
-  Badge,
   Button,
   ButtonGroup,
   Card,
   Col,
-  Collapse,
   Form,
   InputGroup,
-  ListGroup,
   Row,
   Spinner,
   Table,
@@ -46,6 +43,7 @@ import {
   type MaLineVisibility,
 } from '../utils/movingAverages'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
+import { isIstMarketLiveWindow } from '../utils/marketHours'
 
 const SCALPER_TREND_INTERVAL_OPTIONS: readonly string[] = ['1m', '2m', '3m', '5m', '10m', '15m', '30m', '1h']
 const SCALPER_ATM_POLL_MS = 5_000
@@ -90,14 +88,6 @@ interface KiteInstrumentRow {
   expiry: string | null
   strike: number | null
   lotSize: number | null
-}
-
-interface KiteFavoritesResponse {
-  items: KiteInstrumentRow[]
-}
-
-interface KiteTradingLocksResponse {
-  items: KiteInstrumentRow[]
 }
 
 interface InstrumentSearchResponse {
@@ -247,13 +237,6 @@ function buildAtmChainRows(
 
 export function ScalperPage() {
   const [broker, setBroker] = useState<BrokerStatusResponse | null>(null)
-  const [favorites, setFavorites] = useState<KiteInstrumentRow[]>([])
-  const [locks, setLocks] = useState<KiteInstrumentRow[]>([])
-  const [listsError, setListsError] = useState<string | null>(null)
-
-  const [watchSource, setWatchSource] = useState<'locks' | 'favorites'>('locks')
-  const [watchListMinimized, setWatchListMinimized] = useState(false)
-  const watchList = watchSource === 'locks' ? locks : favorites
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
   const [interval, setInterval] = useState<ScalperInterval>('1m')
@@ -292,6 +275,7 @@ export function ScalperPage() {
     peQuote: null,
     chainRows: [],
   })
+  const [isLivePullWindow, setIsLivePullWindow] = useState<boolean>(() => isIstMarketLiveWindow())
 
   const isZerodha = broker?.connected === true && (broker?.provider ?? '').toLowerCase() === 'zerodha'
   const atmTarget = useMemo(
@@ -299,29 +283,17 @@ export function ScalperPage() {
     [atmTargetKey],
   )
 
-  const live = useLiveMarketTick(selected?.instrumentToken ?? null, isZerodha && selected != null)
+  const live = useLiveMarketTick(
+    selected?.instrumentToken ?? null,
+    isZerodha && selected != null && isLivePullWindow,
+  )
 
-  const loadLists = useCallback(async () => {
-    if (!isZerodha) {
-      setFavorites([])
-      setLocks([])
-      setListsError(null)
-      return
-    }
-    setListsError(null)
-    try {
-      const [f, l] = await Promise.all([
-        api.get<KiteFavoritesResponse>('/broker/kite/favorites'),
-        api.get<KiteTradingLocksResponse>('/broker/kite/trading-locks'),
-      ])
-      setFavorites(f.data.items)
-      setLocks(l.data.items)
-    } catch (e) {
-      setListsError(problemDetail(e))
-      setFavorites([])
-      setLocks([])
-    }
-  }, [isZerodha])
+  useEffect(() => {
+    const refresh = () => setIsLivePullWindow(isIstMarketLiveWindow())
+    refresh()
+    const id = window.setInterval(refresh, 30_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   const loadAtmReferences = useCallback(async () => {
     if (!isZerodha) {
@@ -351,7 +323,7 @@ export function ScalperPage() {
   }, [atmTarget, isZerodha])
 
   const refreshAtmLive = useCallback(async () => {
-    if (!isZerodha || !atmSpotRow) return
+    if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
     setAtmLiveLoading(true)
     setAtmError(null)
     try {
@@ -427,7 +399,7 @@ export function ScalperPage() {
     } finally {
       setAtmLiveLoading(false)
     }
-  }, [atmOptionRows, atmSnapshot, atmSpotRow, isZerodha])
+  }, [atmOptionRows, atmSnapshot, atmSpotRow, isLivePullWindow, isZerodha])
 
   useEffect(() => {
     let cancelled = false
@@ -445,26 +417,18 @@ export function ScalperPage() {
   }, [])
 
   useEffect(() => {
-    void loadLists()
-  }, [loadLists])
-
-  useEffect(() => {
     if (!isZerodha) return
     void loadAtmReferences()
   }, [isZerodha, loadAtmReferences])
 
   useEffect(() => {
-    if (!isZerodha || !atmSpotRow) return
+    if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
     void refreshAtmLive()
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refreshAtmLive()
     }, SCALPER_ATM_POLL_MS)
     return () => window.clearInterval(id)
-  }, [atmSpotRow, isZerodha, refreshAtmLive])
-
-  useEffect(() => {
-    if (!selected && watchList.length > 0) setSelected(watchList[0] ?? null)
-  }, [watchList, selected])
+  }, [atmSpotRow, isZerodha, isLivePullWindow, refreshAtmLive])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -502,7 +466,7 @@ export function ScalperPage() {
   }, [isZerodha, selected?.instrumentToken, interval, rangePreset])
 
   useEffect(() => {
-    if (!isZerodha || !selected) return
+    if (!isZerodha || !selected || !isLivePullWindow) return
     const id = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return
       void (async () => {
@@ -522,7 +486,7 @@ export function ScalperPage() {
       })()
     }, SCALPER_POLL_MS)
     return () => window.clearInterval(id)
-  }, [isZerodha, selected, interval, rangePreset])
+  }, [isZerodha, selected, interval, rangePreset, isLivePullWindow])
 
   const displaySeries = useMemo(() => {
     if (rawSeriesRef.current !== rawSeries) {
@@ -604,16 +568,13 @@ export function ScalperPage() {
         <div>
           <h1 className="h3 mb-0">Scalper</h1>
           <p className="text-secondary small mb-0">
-            Tight-interval candles and live LTP for quick reads. Defaults to 3-day history; uses your trading locks or favorites as a watchlist.
+            Tight-interval candles and live LTP for quick reads. Defaults to 3-day history with quick symbol search.
           </p>
         </div>
         <div className="d-flex flex-wrap align-items-center gap-2">
           <Link to="/instruments" className="btn btn-sm btn-outline-secondary">
             Kite instruments
           </Link>
-          <Button type="button" variant="outline-primary" size="sm" disabled={!isZerodha} onClick={() => void loadLists()}>
-            Refresh list
-          </Button>
         </div>
       </div>
 
@@ -623,112 +584,8 @@ export function ScalperPage() {
         </Alert>
       ) : null}
 
-      {listsError ? <Alert variant="warning">{listsError}</Alert> : null}
-
       <Row className="g-3">
-        {!watchListMinimized ? (
-        <Col lg={4} xl={3}>
-          <Card className="border-secondary h-100">
-            <Card.Header className="py-2 small d-flex flex-wrap align-items-center justify-content-between gap-2">
-              <span className="fw-semibold">Watchlist</span>
-              <div className="d-flex flex-wrap align-items-center gap-2">
-                <ButtonGroup size="sm">
-                  <Button
-                    variant={watchSource === 'locks' ? 'info' : 'outline-info'}
-                    onClick={() => setWatchSource('locks')}
-                  >
-                    Locks <Badge bg="dark" className="ms-1">{locks.length}</Badge>
-                  </Button>
-                  <Button
-                    variant={watchSource === 'favorites' ? 'warning' : 'outline-warning'}
-                    onClick={() => setWatchSource('favorites')}
-                  >
-                    Fav <Badge bg="dark" className="ms-1">{favorites.length}</Badge>
-                  </Button>
-                </ButtonGroup>
-                <Button
-                  size="sm"
-                  variant="outline-secondary"
-                  onClick={() => setWatchListMinimized((v) => !v)}
-                  aria-expanded={!watchListMinimized}
-                  aria-controls="scalper-watchlist-panel"
-                  title="Minimize watchlist"
-                  aria-label="Minimize watchlist"
-                >
-                  🗕
-                </Button>
-              </div>
-            </Card.Header>
-            <Collapse in={!watchListMinimized}>
-              <Card.Body id="scalper-watchlist-panel" className="p-2">
-                <div className="position-relative mb-2">
-                  <InputGroup size="sm">
-                    <Form.Control
-                      type="search"
-                      placeholder="Search symbol…"
-                      value={searchQ}
-                      onChange={(e) => setSearchQ(e.target.value)}
-                      onFocus={() => setSearchOpen(true)}
-                      aria-label="Search instruments"
-                    />
-                    {searchBusy ? (
-                      <InputGroup.Text>
-                        <Spinner animation="border" size="sm" />
-                      </InputGroup.Text>
-                    ) : null}
-                  </InputGroup>
-                  {searchOpen && searchItems.length > 0 ? (
-                    <ListGroup className="position-absolute w-100 shadow-sm mt-1" style={{ zIndex: 10 }}>
-                      {searchItems.map((r) => (
-                        <ListGroup.Item
-                          key={`${r.exchange}:${r.instrumentToken}`}
-                          action
-                          className="small py-2"
-                          onClick={() => {
-                            setSelected(r)
-                            setSearchOpen(false)
-                            setSearchQ('')
-                          }}
-                        >
-                          <span className="font-monospace">{r.tradingsymbol}</span>
-                          <span className="text-muted"> · {r.exchange}</span>
-                        </ListGroup.Item>
-                      ))}
-                    </ListGroup>
-                  ) : null}
-                </div>
-
-                {watchList.length === 0 ? (
-                  <p className="small text-muted mb-0">
-                    No instruments in this list. Add them from{' '}
-                    <Link to="/instruments">Instruments</Link> (favorites / locks).
-                  </p>
-                ) : (
-                  <ListGroup variant="flush">
-                    {watchList.map((r) => {
-                      const active = selected?.instrumentToken === r.instrumentToken
-                      return (
-                        <ListGroup.Item
-                          key={r.instrumentToken}
-                          action
-                          active={active}
-                          className="small py-2 px-2 d-flex justify-content-between align-items-center"
-                          onClick={() => setSelected(r)}
-                        >
-                          <span className="font-monospace text-truncate me-2">{r.tradingsymbol}</span>
-                          <span className="text-muted text-nowrap">{r.exchange}</span>
-                        </ListGroup.Item>
-                      )
-                    })}
-                  </ListGroup>
-                )}
-              </Card.Body>
-            </Collapse>
-          </Card>
-        </Col>
-        ) : null}
-
-        <Col lg={watchListMinimized ? 12 : 8} xl={watchListMinimized ? 12 : 9}>
+        <Col lg={12} xl={12}>
           <Card className="border-secondary">
             <Card.Header className="py-2 d-flex flex-wrap align-items-center gap-2 justify-content-between">
               <div className="d-flex flex-wrap align-items-center gap-2">
@@ -748,8 +605,44 @@ export function ScalperPage() {
                     ) : null}
                   </>
                 ) : (
-                  <span className="text-muted small">Select a symbol from the list or search.</span>
+                  <span className="text-muted small">Search and pick a symbol to load the chart.</span>
                 )}
+              </div>
+              <div className="position-relative" style={{ minWidth: '16rem', maxWidth: '22rem', width: '100%' }}>
+                <InputGroup size="sm">
+                  <Form.Control
+                    type="search"
+                    placeholder="Search symbol..."
+                    value={searchQ}
+                    onChange={(e) => setSearchQ(e.target.value)}
+                    onFocus={() => setSearchOpen(true)}
+                    aria-label="Search instruments"
+                  />
+                  {searchBusy ? (
+                    <InputGroup.Text>
+                      <Spinner animation="border" size="sm" />
+                    </InputGroup.Text>
+                  ) : null}
+                </InputGroup>
+                {searchOpen && searchItems.length > 0 ? (
+                  <div className="position-absolute w-100 mt-1 border rounded bg-body shadow-sm" style={{ zIndex: 20 }}>
+                    {searchItems.map((r) => (
+                      <button
+                        key={`${r.exchange}:${r.instrumentToken}`}
+                        type="button"
+                        className="btn btn-link text-start text-decoration-none small w-100 py-2 px-2 border-bottom rounded-0"
+                        onClick={() => {
+                          setSelected(r)
+                          setSearchOpen(false)
+                          setSearchQ('')
+                        }}
+                      >
+                        <span className="font-monospace">{r.tradingsymbol}</span>
+                        <span className="text-muted"> · {r.exchange}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
               <ButtonGroup size="sm">
                 {SCALPER_INTERVALS.map((iv) => (
@@ -781,18 +674,6 @@ export function ScalperPage() {
               >
                 Vol {showVolume ? 'ON' : 'OFF'}
               </Button>
-              {watchListMinimized ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline-secondary"
-                  onClick={() => setWatchListMinimized(false)}
-                  title="Expand watchlist"
-                  aria-label="Expand watchlist"
-                >
-                  🗖
-                </Button>
-              ) : null}
             </Card.Header>
             <Card.Body className="p-2">
               {chartError ? <Alert variant="danger" className="py-2 small mb-2">{chartError}</Alert> : null}
@@ -829,7 +710,7 @@ export function ScalperPage() {
                       type="button"
                       size="sm"
                       variant="outline-secondary"
-                      disabled={atmReferenceLoading || atmLiveLoading}
+                      disabled={!isLivePullWindow || atmReferenceLoading || atmLiveLoading}
                       onClick={() => {
                         void loadAtmReferences()
                         void refreshAtmLive()
@@ -850,6 +731,9 @@ export function ScalperPage() {
                     </span>{' '}
                     {atmLastUpdatedAt ? `· updated ${formatLocalDateTime(atmLastUpdatedAt)}` : ''}
                   </div>
+                  {!isLivePullWindow ? (
+                    <div className="small text-muted mb-1">Live ATM pull resumes during market window (IST 09:10-15:30).</div>
+                  ) : null}
                   {atmSnapshot.chainRows.length > 0 ? (
                     <div className="table-responsive">
                       <Table size="sm" bordered hover className="mb-0 small align-middle">
