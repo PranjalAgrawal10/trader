@@ -87,6 +87,7 @@ export function ScalperPage() {
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
   const [interval, setInterval] = useState<ScalperInterval>('1m')
   const [rangePreset, setRangePreset] = useState<ScalperRange>('last3d')
+  const [showVolume, setShowVolume] = useState(true)
 
   const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
   const rawSeriesRef = useRef<ChartPointWithMa[] | null>(null)
@@ -423,6 +424,14 @@ export function ScalperPage() {
                   </Button>
                 ))}
               </ButtonGroup>
+              <Button
+                type="button"
+                size="sm"
+                variant={showVolume ? 'outline-success' : 'outline-secondary'}
+                onClick={() => setShowVolume((v) => !v)}
+              >
+                Vol {showVolume ? 'ON' : 'OFF'}
+              </Button>
             </Card.Header>
             <Card.Body className="p-2">
               {chartError ? <Alert variant="danger" className="py-2 small mb-2">{chartError}</Alert> : null}
@@ -446,6 +455,7 @@ export function ScalperPage() {
                     maLineVisibility={SCALPER_MA}
                     customEmaPeriod={null}
                     livePrice={live.lastPrice}
+                    showVolume={showVolume}
                     newerGhostBars={0}
                     onNeedOlderBars={loadOlderBars}
                     canLoadOlderBars={canLoadOlderBars}
