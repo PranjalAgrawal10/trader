@@ -2,3 +2,27 @@
 body {
   margin: 0;
 }
+
+/* Slim horizontal scrollbar for compact control strips in Scalper. */
+.scalper-compact-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+  padding-bottom: 0.1rem;
+}
+
+.scalper-compact-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+
+.scalper-compact-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scalper-compact-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.35);
+  border-radius: 999px;
+}
+
+.scalper-compact-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.65);
+}

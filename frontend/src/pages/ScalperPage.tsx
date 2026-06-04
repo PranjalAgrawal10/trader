@@ -735,7 +735,7 @@ export function ScalperPage() {
                         >
                           Indicators
                         </div>
-                        <div className="d-flex align-items-center gap-1 flex-nowrap overflow-auto ms-auto pb-1">
+                        <div className="d-flex align-items-center gap-1 flex-nowrap overflow-auto ms-auto scalper-compact-scrollbar">
                           <Button
                             size="sm"
                             variant={graphType === 'candlestick' ? 'secondary' : 'outline-secondary'}
@@ -968,7 +968,7 @@ export function ScalperPage() {
                         >
                           Trend analysis intervals
                         </div>
-                        <div className="d-flex align-items-center flex-nowrap overflow-auto ms-auto pb-1">
+                        <div className="d-flex align-items-center flex-nowrap overflow-auto ms-auto scalper-compact-scrollbar">
                           <ButtonGroup size="sm" className="flex-nowrap">
                             {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
                               const active = trendIntervals.includes(iv)
