@@ -115,13 +115,6 @@ interface KiteInstrumentRow {
   lotSize: number | null
 }
 
-interface InstrumentsResponse {
-  fno: KiteInstrumentRow[]
-  commodities: KiteInstrumentRow[]
-  fnoTruncated: boolean
-  commoditiesTruncated: boolean
-}
-
 interface InstrumentSearchResponse {
   items: KiteInstrumentRow[]
   scanTruncated: boolean
@@ -1108,8 +1101,8 @@ function InstrumentListPanel({
   loading: boolean
   emptyHint: string
   searchSegment: 'fno' | 'mcx' | 'spot'
-  /** `panel`: one server scan for this panel's segment. `all`: F&O + Spot + MCX (e.g. favorites). */
-  kiteLiveSegmentScope?: 'panel' | 'all'
+  /** `panel`: segment only; `fno_mcx`: combined derivatives + commodities; `all`: F&O + Spot + MCX. */
+  kiteLiveSegmentScope?: 'panel' | 'fno_mcx' | 'all'
   selectedRowKey: string | null
   onSelectRow: (row: KiteInstrumentRow) => void
   enableKiteLiveSearch?: boolean
@@ -1172,7 +1165,11 @@ function InstrumentListPanel({
     setLiveSearchError(null)
     try {
       const segments: Array<'fno' | 'mcx' | 'spot'> =
-        kiteLiveSegmentScope === 'all' ? ['fno', 'spot', 'mcx'] : [searchSegment]
+        kiteLiveSegmentScope === 'all'
+          ? ['fno', 'spot', 'mcx']
+          : kiteLiveSegmentScope === 'fno_mcx'
+            ? ['fno', 'mcx']
+            : [searchSegment]
       const responses = await Promise.all(
         segments.map((segment) =>
           api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', {
@@ -4356,9 +4353,6 @@ export function KiteInstrumentsPage() {
 
   const [provider, setProvider] = useState<string | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
-  const [instruments, setInstruments] = useState<InstrumentsResponse | null>(null)
-  const [instrumentsLoading, setInstrumentsLoading] = useState(false)
-  const [instrumentsError, setInstrumentsError] = useState<string | null>(null)
   const [todayTopPerformers, setTodayTopPerformers] = useState<TodayTopPerformerDto[]>([])
   const [todayTopVisibleCount, setTodayTopVisibleCount] = useState(TODAY_TOP_MOVERS_PAGE_SIZE)
   const [todayTopBasis, setTodayTopBasis] = useState('')
@@ -5301,30 +5295,6 @@ export function KiteInstrumentsPage() {
   const liveLtp = liveMarket.lastPrice
   const liveLastTick = liveMarket.lastTick
 
-  const loadInstruments = useCallback(async () => {
-    if (!isZerodha) {
-      setInstruments(null)
-      setInstrumentsError(null)
-      setInstrumentsLoading(false)
-      setTodayTopPerformers([])
-      setTodayTopVisibleCount(TODAY_TOP_MOVERS_PAGE_SIZE)
-      setTodayTopBasis('')
-      setTodayTopError(null)
-      return
-    }
-    setInstrumentsLoading(true)
-    setInstrumentsError(null)
-    try {
-      const { data } = await api.get<InstrumentsResponse>('/broker/kite/instruments/fno-commodities')
-      setInstruments(data)
-    } catch (err) {
-      setInstruments(null)
-      setInstrumentsError(problemDetail(err))
-    } finally {
-      setInstrumentsLoading(false)
-    }
-  }, [isZerodha])
-
   const loadTodayTopPerformers = useCallback(async () => {
     if (!isZerodha) {
       setTodayTopPerformers([])
@@ -5440,9 +5410,9 @@ export function KiteInstrumentsPage() {
   }, [isZerodha, mainTab])
 
   useEffect(() => {
-    if (!isZerodha || instrumentsLoading || !instruments || mainTab !== 'browse') return
+    if (!isZerodha || mainTab !== 'browse') return
     void loadTodayTopPerformers()
-  }, [isZerodha, instrumentsLoading, instruments, mainTab, loadTodayTopPerformers])
+  }, [isZerodha, mainTab, loadTodayTopPerformers])
 
   useEffect(() => {
     if (!isZerodha || mainTab !== 'browse') return
@@ -5465,10 +5435,6 @@ export function KiteInstrumentsPage() {
     }, 90_000)
     return () => window.clearInterval(id)
   }, [loadStatus])
-
-  useEffect(() => {
-    void loadInstruments()
-  }, [loadInstruments])
 
   useEffect(() => {
     if (!isZerodha) {
@@ -5514,8 +5480,9 @@ export function KiteInstrumentsPage() {
               <Col>
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
-                  Filter preview or press <strong>Enter</strong> / <strong>Search Kite</strong> for a full scan (on{' '}
-                  <strong>All favorites</strong> and <strong>Locked for trading</strong>, F&amp;O + Spot + MCX). Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
+                  Browse uses on-demand search only: press <strong>Enter</strong> / <strong>Search Kite</strong> for a combined
+                  F&amp;O + MCX scan (no preloaded list). On <strong>All favorites</strong> and <strong>Locked for trading</strong>, live search
+                  still scans F&amp;O + Spot + MCX. Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
                   open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below.                   Scheduled
                   automation and the merged prediction log live on <strong>Auto predictions</strong>; hypothetical{' '}
                   <strong>Demo auto-trade</strong> settings and reports live on that tab&apos;s sibling.
@@ -5524,10 +5491,10 @@ export function KiteInstrumentsPage() {
               <Col xs={12} md="auto">
                 <Button
                   variant="outline-secondary"
-                  disabled={instrumentsLoading}
-                  onClick={() => void loadInstruments()}
+                  disabled={todayTopLoading}
+                  onClick={() => void loadTodayTopPerformers()}
                 >
-                  {instrumentsLoading ? 'Refreshing…' : 'Refresh lists'}
+                  {todayTopLoading ? 'Refreshing…' : 'Refresh movers'}
                 </Button>
               </Col>
             </Row>
@@ -7338,12 +7305,6 @@ export function KiteInstrumentsPage() {
               </Alert>
             ) : null}
 
-            {instrumentsError ? (
-              <Alert variant="danger" className="mt-3 mb-0">
-                {instrumentsError}
-              </Alert>
-            ) : null}
-
             {mainTab === 'browse' ? (
               <>
                 <div className="mt-4">
@@ -7425,6 +7386,44 @@ export function KiteInstrumentsPage() {
                                   {snap.peRow ? `${snap.peRow.tradingsymbol} @ ${snap.peQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
                                 </span>
                               </div>
+                              <div className="mt-2 d-flex flex-wrap gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline-primary"
+                                  size="sm"
+                                  disabled={!snap.spotRow}
+                                  onClick={() => {
+                                    if (!snap.spotRow) return
+                                    setChartRow(snap.spotRow)
+                                  }}
+                                >
+                                  Show spot chart
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline-secondary"
+                                  size="sm"
+                                  disabled={!snap.ceRow}
+                                  onClick={() => {
+                                    if (!snap.ceRow) return
+                                    setChartRow(snap.ceRow)
+                                  }}
+                                >
+                                  CE chart
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline-secondary"
+                                  size="sm"
+                                  disabled={!snap.peRow}
+                                  onClick={() => {
+                                    if (!snap.peRow) return
+                                    setChartRow(snap.peRow)
+                                  }}
+                                >
+                                  PE chart
+                                </Button>
+                              </div>
                             </Card.Body>
                           </Card>
                         </Col>
@@ -7445,7 +7444,7 @@ export function KiteInstrumentsPage() {
                       type="button"
                       variant="outline-secondary"
                       size="sm"
-                      disabled={todayTopLoading || instrumentsLoading}
+                      disabled={todayTopLoading}
                       onClick={() => void loadTodayTopPerformers()}
                     >
                       {todayTopLoading ? 'Loading…' : 'Refresh movers'}
@@ -7545,40 +7544,13 @@ export function KiteInstrumentsPage() {
                   ) : null}
                 </div>
                 <InstrumentListPanel
-                  title="Futures & options (NFO / BFO)"
-                  rows={instruments?.fno ?? EMPTY_INSTRUMENTS}
-                  truncated={instruments?.fnoTruncated ?? false}
-                  loading={instrumentsLoading}
-                  emptyHint="No rows returned. Try Refresh or check your Kite session."
-                  searchSegment="fno"
-                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
-                  onSelectRow={setChartRow}
-                  favoriteKeySet={favoriteKeySet}
-                  onToggleFavorite={(r) => void toggleFavorite(r)}
-                  tradingLockKeySet={tradingLockKeySet}
-                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
-                />
-                <InstrumentListPanel
-                  title="Commodities (MCX)"
-                  rows={instruments?.commodities ?? EMPTY_INSTRUMENTS}
-                  truncated={instruments?.commoditiesTruncated ?? false}
-                  loading={instrumentsLoading}
-                  emptyHint="No rows returned. Try Refresh or check your Kite session."
-                  searchSegment="mcx"
-                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
-                  onSelectRow={setChartRow}
-                  favoriteKeySet={favoriteKeySet}
-                  onToggleFavorite={(r) => void toggleFavorite(r)}
-                  tradingLockKeySet={tradingLockKeySet}
-                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
-                />
-                <InstrumentListPanel
-                  title="Spot equity (NSE / BSE cash)"
+                  title="Combined search: Futures & options (NFO / BFO) + Commodities (MCX)"
                   rows={EMPTY_INSTRUMENTS}
                   truncated={false}
                   loading={false}
-                  emptyHint="Type a symbol or company name, then press Enter or Search Kite. Only equity cash (EQ segment) matches are returned."
-                  searchSegment="spot"
+                  emptyHint="No preloaded rows. Type a symbol, strike, or expiry token, then press Enter or Search Kite for combined F&O + MCX results."
+                  searchSegment="fno"
+                  kiteLiveSegmentScope="fno_mcx"
                   selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
