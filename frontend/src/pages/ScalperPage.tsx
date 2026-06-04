@@ -7,6 +7,7 @@ import {
   ButtonGroup,
   Card,
   Col,
+  Collapse,
   Form,
   InputGroup,
   ListGroup,
@@ -82,6 +83,7 @@ export function ScalperPage() {
   const [listsError, setListsError] = useState<string | null>(null)
 
   const [watchSource, setWatchSource] = useState<'locks' | 'favorites'>('locks')
+  const [watchListMinimized, setWatchListMinimized] = useState(false)
   const watchList = watchSource === 'locks' ? locks : favorites
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
@@ -298,84 +300,97 @@ export function ScalperPage() {
           <Card className="border-secondary h-100">
             <Card.Header className="py-2 small d-flex flex-wrap align-items-center justify-content-between gap-2">
               <span className="fw-semibold">Watchlist</span>
-              <ButtonGroup size="sm">
+              <div className="d-flex flex-wrap align-items-center gap-2">
+                <ButtonGroup size="sm">
+                  <Button
+                    variant={watchSource === 'locks' ? 'info' : 'outline-info'}
+                    onClick={() => setWatchSource('locks')}
+                  >
+                    Locks <Badge bg="dark" className="ms-1">{locks.length}</Badge>
+                  </Button>
+                  <Button
+                    variant={watchSource === 'favorites' ? 'warning' : 'outline-warning'}
+                    onClick={() => setWatchSource('favorites')}
+                  >
+                    Fav <Badge bg="dark" className="ms-1">{favorites.length}</Badge>
+                  </Button>
+                </ButtonGroup>
                 <Button
-                  variant={watchSource === 'locks' ? 'info' : 'outline-info'}
-                  onClick={() => setWatchSource('locks')}
+                  size="sm"
+                  variant="outline-secondary"
+                  onClick={() => setWatchListMinimized((v) => !v)}
+                  aria-expanded={!watchListMinimized}
+                  aria-controls="scalper-watchlist-panel"
                 >
-                  Locks <Badge bg="dark" className="ms-1">{locks.length}</Badge>
+                  {watchListMinimized ? 'Expand' : 'Minimize'}
                 </Button>
-                <Button
-                  variant={watchSource === 'favorites' ? 'warning' : 'outline-warning'}
-                  onClick={() => setWatchSource('favorites')}
-                >
-                  Fav <Badge bg="dark" className="ms-1">{favorites.length}</Badge>
-                </Button>
-              </ButtonGroup>
-            </Card.Header>
-            <Card.Body className="p-2">
-              <div className="position-relative mb-2">
-                <InputGroup size="sm">
-                  <Form.Control
-                    type="search"
-                    placeholder="Search symbol…"
-                    value={searchQ}
-                    onChange={(e) => setSearchQ(e.target.value)}
-                    onFocus={() => setSearchOpen(true)}
-                    aria-label="Search instruments"
-                  />
-                  {searchBusy ? (
-                    <InputGroup.Text>
-                      <Spinner animation="border" size="sm" />
-                    </InputGroup.Text>
-                  ) : null}
-                </InputGroup>
-                {searchOpen && searchItems.length > 0 ? (
-                  <ListGroup className="position-absolute w-100 shadow-sm mt-1" style={{ zIndex: 10 }}>
-                    {searchItems.map((r) => (
-                      <ListGroup.Item
-                        key={`${r.exchange}:${r.instrumentToken}`}
-                        action
-                        className="small py-2"
-                        onClick={() => {
-                          setSelected(r)
-                          setSearchOpen(false)
-                          setSearchQ('')
-                        }}
-                      >
-                        <span className="font-monospace">{r.tradingsymbol}</span>
-                        <span className="text-muted"> · {r.exchange}</span>
-                      </ListGroup.Item>
-                    ))}
-                  </ListGroup>
-                ) : null}
               </div>
+            </Card.Header>
+            <Collapse in={!watchListMinimized}>
+              <Card.Body id="scalper-watchlist-panel" className="p-2">
+                <div className="position-relative mb-2">
+                  <InputGroup size="sm">
+                    <Form.Control
+                      type="search"
+                      placeholder="Search symbol…"
+                      value={searchQ}
+                      onChange={(e) => setSearchQ(e.target.value)}
+                      onFocus={() => setSearchOpen(true)}
+                      aria-label="Search instruments"
+                    />
+                    {searchBusy ? (
+                      <InputGroup.Text>
+                        <Spinner animation="border" size="sm" />
+                      </InputGroup.Text>
+                    ) : null}
+                  </InputGroup>
+                  {searchOpen && searchItems.length > 0 ? (
+                    <ListGroup className="position-absolute w-100 shadow-sm mt-1" style={{ zIndex: 10 }}>
+                      {searchItems.map((r) => (
+                        <ListGroup.Item
+                          key={`${r.exchange}:${r.instrumentToken}`}
+                          action
+                          className="small py-2"
+                          onClick={() => {
+                            setSelected(r)
+                            setSearchOpen(false)
+                            setSearchQ('')
+                          }}
+                        >
+                          <span className="font-monospace">{r.tradingsymbol}</span>
+                          <span className="text-muted"> · {r.exchange}</span>
+                        </ListGroup.Item>
+                      ))}
+                    </ListGroup>
+                  ) : null}
+                </div>
 
-              {watchList.length === 0 ? (
-                <p className="small text-muted mb-0">
-                  No instruments in this list. Add them from{' '}
-                  <Link to="/instruments">Instruments</Link> (favorites / locks).
-                </p>
-              ) : (
-                <ListGroup variant="flush">
-                  {watchList.map((r) => {
-                    const active = selected?.instrumentToken === r.instrumentToken
-                    return (
-                      <ListGroup.Item
-                        key={r.instrumentToken}
-                        action
-                        active={active}
-                        className="small py-2 px-2 d-flex justify-content-between align-items-center"
-                        onClick={() => setSelected(r)}
-                      >
-                        <span className="font-monospace text-truncate me-2">{r.tradingsymbol}</span>
-                        <span className="text-muted text-nowrap">{r.exchange}</span>
-                      </ListGroup.Item>
-                    )
-                  })}
-                </ListGroup>
-              )}
-            </Card.Body>
+                {watchList.length === 0 ? (
+                  <p className="small text-muted mb-0">
+                    No instruments in this list. Add them from{' '}
+                    <Link to="/instruments">Instruments</Link> (favorites / locks).
+                  </p>
+                ) : (
+                  <ListGroup variant="flush">
+                    {watchList.map((r) => {
+                      const active = selected?.instrumentToken === r.instrumentToken
+                      return (
+                        <ListGroup.Item
+                          key={r.instrumentToken}
+                          action
+                          active={active}
+                          className="small py-2 px-2 d-flex justify-content-between align-items-center"
+                          onClick={() => setSelected(r)}
+                        >
+                          <span className="font-monospace text-truncate me-2">{r.tradingsymbol}</span>
+                          <span className="text-muted text-nowrap">{r.exchange}</span>
+                        </ListGroup.Item>
+                      )
+                    })}
+                  </ListGroup>
+                )}
+              </Card.Body>
+            </Collapse>
           </Card>
         </Col>
 

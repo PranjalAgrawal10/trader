@@ -817,7 +817,6 @@ function applyInstrumentChartViewport(
 ) {
   const nMain = p.dataLen
   const ts = chart.timeScale()
-  const logicalTo = Math.max(p.dataLen + p.ghostBars - 1, 0)
 
   if (nMain === 0) {
     p.viewportDidInitRef.current = false
@@ -850,26 +849,8 @@ function applyInstrumentChartViewport(
       }
     }
   } else if (!p.viewportDidInitRef.current && !p.userViewportTouchedRef.current) {
-    const rawCap =
-      p.defaultVisibleBars != null && Number.isFinite(p.defaultVisibleBars)
-        ? Math.floor(p.defaultVisibleBars as number)
-        : CHART_DEFAULT_VISIBLE_BARS
-    if (p.enableInitialViewportClip && rawCap > 0 && nMain > rawCap) {
-      const clip = Math.min(rawCap, nMain)
-      p.programmaticViewportUpdateRef.current = true
-      try {
-        ts.setVisibleLogicalRange({ from: nMain - clip, to: logicalTo })
-      } finally {
-        p.programmaticViewportUpdateRef.current = false
-      }
-    } else {
-      p.programmaticViewportUpdateRef.current = true
-      try {
-        ts.fitContent()
-      } finally {
-        p.programmaticViewportUpdateRef.current = false
-      }
-    }
+    // Do not auto-apply any horizontal viewport once data arrives.
+    // This prevents chart updates/re-renders from snapping users back to an initial range.
     p.viewportDidInitRef.current = true
   }
 
