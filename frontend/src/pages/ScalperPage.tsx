@@ -844,6 +844,17 @@ export function ScalperPage() {
                       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                         <div className="d-flex flex-wrap align-items-center gap-2">
                           <div className="small fw-semibold">Live ATM chain</div>
+                          {!isLivePullWindow ? (
+                            <span
+                              role="img"
+                              aria-label="Live ATM schedule info"
+                              title="Live ATM pull resumes during market window (IST 09:10-15:30)."
+                              className="text-muted"
+                              style={{ cursor: 'help', fontSize: '0.78rem', userSelect: 'none' }}
+                            >
+                              ⓘ
+                            </span>
+                          ) : null}
                           <Form.Select
                             size="sm"
                             value={atmTarget.key}
@@ -883,9 +894,6 @@ export function ScalperPage() {
                         </span>{' '}
                         {atmLastUpdatedAt ? `· updated ${formatLocalDateTime(atmLastUpdatedAt)}` : ''}
                       </div>
-                      {!isLivePullWindow ? (
-                        <div className="small text-muted mb-1">Live ATM pull resumes during market window (IST 09:10-15:30).</div>
-                      ) : null}
                       {atmSnapshot.chainRows.length > 0 ? (
                         <div className="table-responsive">
                           <Table size="sm" bordered hover className="mb-0 small align-middle">
