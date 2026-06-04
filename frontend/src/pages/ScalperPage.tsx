@@ -291,7 +291,7 @@ export function ScalperPage() {
   const [showVolume, setShowVolume] = useState(true)
   const [graphType, setGraphType] = useState<ChartGraphType>('candlestick')
   const [maLineVisibility, setMaLineVisibility] = useState<MaLineVisibility>(SCALPER_MA)
-  const [trendIntervals, setTrendIntervals] = useState<string[]>(['1m', '3m', '5m', '15m'])
+  const [trendIntervals, setTrendIntervals] = useState<string[]>(['1m', '2m', '3m', '5m', '10m', '15m', '30m', '1h', '4h'])
 
   const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
   const rawSeriesRef = useRef<ChartPointWithMa[] | null>(null)
