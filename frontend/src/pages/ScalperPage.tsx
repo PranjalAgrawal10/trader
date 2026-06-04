@@ -38,8 +38,6 @@ import type { LiveTickVolumeAccumulator } from '../utils/liveCandleMerge'
 import {
   addCustomEmaToChartPoints,
   CUSTOM_EMA_DEFAULT_PERIOD,
-  CUSTOM_EMA_PERIOD_MAX,
-  CUSTOM_EMA_PERIOD_MIN,
   type ChartPointWithMa,
   type MaLineVisibility,
 } from '../utils/movingAverages'
@@ -161,11 +159,9 @@ function problemDetail(err: unknown): string {
   return 'Request failed.'
 }
 
-function effectiveCustomEmaPeriod(visibility: MaLineVisibility, period: number): number | null {
+function effectiveCustomEmaPeriod(visibility: MaLineVisibility): number | null {
   if (!visibility.showCustomEma) return null
-  const n = Math.floor(period)
-  if (!Number.isFinite(n) || n < CUSTOM_EMA_PERIOD_MIN || n > CUSTOM_EMA_PERIOD_MAX) return null
-  return n
+  return CUSTOM_EMA_DEFAULT_PERIOD
 }
 
 function parseExpiryIsoToMs(expiryIso: string | null): number | null {
@@ -282,7 +278,6 @@ export function ScalperPage() {
   const [showVolume, setShowVolume] = useState(true)
   const [graphType, setGraphType] = useState<ChartGraphType>('candlestick')
   const [maLineVisibility, setMaLineVisibility] = useState<MaLineVisibility>(SCALPER_MA)
-  const [customEmaPeriod, setCustomEmaPeriod] = useState<number>(CUSTOM_EMA_DEFAULT_PERIOD)
   const [trendIntervals, setTrendIntervals] = useState<string[]>(['1m', '3m', '5m', '15m'])
 
   const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
@@ -539,10 +534,7 @@ export function ScalperPage() {
     return mergeScalperLiveIntoSeries(rawSeries, live.lastTick, interval, liveVolAccRef.current)
   }, [rawSeries, live.lastTick, interval])
 
-  const customEmaApplied = useMemo(
-    () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
-    [maLineVisibility, customEmaPeriod],
-  )
+  const customEmaApplied = useMemo(() => effectiveCustomEmaPeriod(maLineVisibility), [maLineVisibility])
 
   const displaySeriesWithCustom = useMemo(
     () => addCustomEmaToChartPoints(displaySeries, customEmaApplied),
@@ -736,103 +728,87 @@ export function ScalperPage() {
                   ) : null}
                   {selected ? (
                     <div className="border rounded border-secondary-subtle p-1 mb-2">
-                      <div className="small fw-semibold mb-1" style={{ fontSize: '0.72rem', letterSpacing: '0.02em' }}>
-                        Indicators
-                      </div>
-                      <div className="d-flex flex-wrap gap-1 mb-1">
-                        <Button
-                          size="sm"
-                          variant={graphType === 'candlestick' ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setGraphType('candlestick')}
+                      <div className="d-flex align-items-center gap-2">
+                        <div
+                          className="small fw-semibold text-nowrap"
+                          style={{ fontSize: '0.72rem', letterSpacing: '0.02em', minWidth: '4.8rem' }}
                         >
-                          Candles
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={graphType === 'line' ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setGraphType('line')}
-                        >
-                          Line
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={graphType === 'bar' ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setGraphType('bar')}
-                        >
-                          Bar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={maLineVisibility.showSma20 ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setMaLineVisibility((p) => ({ ...p, showSma20: !p.showSma20 }))}
-                        >
-                          SMA 20
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={maLineVisibility.showEma9 ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setMaLineVisibility((p) => ({ ...p, showEma9: !p.showEma9 }))}
-                        >
-                          EMA 9
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={maLineVisibility.showEma21 ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setMaLineVisibility((p) => ({ ...p, showEma21: !p.showEma21 }))}
-                        >
-                          EMA 21
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={maLineVisibility.showCustomEma ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setMaLineVisibility((p) => ({ ...p, showCustomEma: !p.showCustomEma }))}
-                        >
-                          Custom EMA
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={maLineVisibility.showSupportResistance ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setMaLineVisibility((p) => ({ ...p, showSupportResistance: !p.showSupportResistance }))}
-                        >
-                          S/R
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={maLineVisibility.showLinearCloseTrend ? 'secondary' : 'outline-secondary'}
-                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
-                          onClick={() => setMaLineVisibility((p) => ({ ...p, showLinearCloseTrend: !p.showLinearCloseTrend }))}
-                        >
-                          Trend LR
-                        </Button>
-                      </div>
-                      <div className="d-flex flex-wrap align-items-center gap-1">
-                        <Form.Label className="small mb-0" style={{ fontSize: '0.68rem' }}>Custom EMA period</Form.Label>
-                        <Form.Control
-                          type="number"
-                          size="sm"
-                          style={{ width: '5.2rem', padding: '0.08rem 0.3rem', fontSize: '0.68rem' }}
-                          min={CUSTOM_EMA_PERIOD_MIN}
-                          max={CUSTOM_EMA_PERIOD_MAX}
-                          step={1}
-                          value={customEmaPeriod}
-                          disabled={!maLineVisibility.showCustomEma}
-                          onChange={(e) => {
-                            const n = parseInt(e.target.value, 10)
-                            if (!Number.isFinite(n)) return
-                            setCustomEmaPeriod(Math.min(CUSTOM_EMA_PERIOD_MAX, Math.max(CUSTOM_EMA_PERIOD_MIN, n)))
-                          }}
-                        />
-                        <span className="small text-muted" style={{ fontSize: '0.66rem' }}>
-                          {CUSTOM_EMA_PERIOD_MIN}-{CUSTOM_EMA_PERIOD_MAX}
-                        </span>
+                          Indicators
+                        </div>
+                        <div className="d-flex align-items-center gap-1 flex-nowrap overflow-auto ms-auto pb-1">
+                          <Button
+                            size="sm"
+                            variant={graphType === 'candlestick' ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setGraphType('candlestick')}
+                          >
+                            Candles
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={graphType === 'line' ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setGraphType('line')}
+                          >
+                            Line
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={graphType === 'bar' ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setGraphType('bar')}
+                          >
+                            Bar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={maLineVisibility.showSma20 ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setMaLineVisibility((p) => ({ ...p, showSma20: !p.showSma20 }))}
+                          >
+                            SMA 20
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={maLineVisibility.showEma9 ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setMaLineVisibility((p) => ({ ...p, showEma9: !p.showEma9 }))}
+                          >
+                            EMA 9
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={maLineVisibility.showEma21 ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setMaLineVisibility((p) => ({ ...p, showEma21: !p.showEma21 }))}
+                          >
+                            EMA 21
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={maLineVisibility.showCustomEma ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setMaLineVisibility((p) => ({ ...p, showCustomEma: !p.showCustomEma }))}
+                          >
+                            Custom EMA
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={maLineVisibility.showSupportResistance ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setMaLineVisibility((p) => ({ ...p, showSupportResistance: !p.showSupportResistance }))}
+                          >
+                            S/R
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={maLineVisibility.showLinearCloseTrend ? 'secondary' : 'outline-secondary'}
+                            style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem', whiteSpace: 'nowrap' }}
+                            onClick={() => setMaLineVisibility((p) => ({ ...p, showLinearCloseTrend: !p.showLinearCloseTrend }))}
+                          >
+                            Trend LR
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ) : null}
@@ -976,14 +952,15 @@ export function ScalperPage() {
                     </div>
                   ) : null}
                   {selected ? (
-                    <div className="border rounded border-secondary-subtle p-2 mb-2">
-                      <div
-                        className="small fw-semibold mb-2"
-                        style={{ fontSize: '0.72rem', letterSpacing: '0.02em' }}
-                      >
-                        Trend analysis intervals
-                      </div>
-                      <div className="d-flex flex-wrap gap-1">
+                    <div className="border rounded border-secondary-subtle p-1 mb-2">
+                      <div className="d-flex align-items-center gap-2">
+                        <div
+                          className="small fw-semibold text-nowrap"
+                          style={{ fontSize: '0.72rem', letterSpacing: '0.02em', minWidth: '8.7rem' }}
+                        >
+                          Trend analysis intervals
+                        </div>
+                        <div className="d-flex align-items-center gap-1 flex-nowrap overflow-auto ms-auto pb-1">
                         {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
                           const active = trendIntervals.includes(iv)
                           return (
@@ -996,6 +973,7 @@ export function ScalperPage() {
                                 fontSize: '0.68rem',
                                 lineHeight: 1.1,
                                 borderRadius: '0.32rem',
+                                whiteSpace: 'nowrap',
                               }}
                               onClick={() =>
                                 setTrendIntervals((prev) =>
@@ -1007,6 +985,7 @@ export function ScalperPage() {
                             </Button>
                           )
                         })}
+                        </div>
                       </div>
                     </div>
                   ) : null}
