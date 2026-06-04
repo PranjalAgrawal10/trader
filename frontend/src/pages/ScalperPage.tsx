@@ -566,11 +566,17 @@ export function ScalperPage() {
   return (
     <Layout>
       <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-2">
-        <div>
+        <div className="d-flex align-items-center gap-2">
           <h1 className="h3 mb-0">Scalper</h1>
-          <p className="text-secondary small mb-0">
-            Tight-interval candles and live LTP for quick reads. Defaults to 3-day history with quick symbol search.
-          </p>
+          <span
+            role="img"
+            aria-label="Scalper help"
+            title="Scalper shows 3-day candles with live LTP/ticks, ATM chain shortcuts, and multi-interval trend panels."
+            className="text-secondary"
+            style={{ cursor: 'help', fontSize: '0.95rem', userSelect: 'none' }}
+          >
+            ⓘ
+          </span>
         </div>
         <div className="d-flex flex-wrap align-items-center gap-2">
           <Link to="/instruments" className="btn btn-sm btn-outline-secondary">
@@ -767,7 +773,7 @@ export function ScalperPage() {
                 </Col>
                 <Col lg={5} xl={4}>
                   {isZerodha ? (
-                    <div className="border rounded border-secondary-subtle p-2 bg-light text-dark mb-2">
+                    <div className="border rounded border-secondary-subtle p-2 bg-body text-body mb-2">
                       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                         <div className="d-flex flex-wrap align-items-center gap-2">
                           <div className="small fw-semibold">Live ATM chain</div>
@@ -880,8 +886,13 @@ export function ScalperPage() {
                   ) : null}
                   {selected ? (
                     <div className="border rounded border-secondary-subtle p-2 mb-2">
-                      <div className="small fw-semibold mb-2">Trend analysis intervals</div>
-                      <div className="d-flex flex-wrap gap-2">
+                      <div
+                        className="small fw-semibold mb-2"
+                        style={{ fontSize: '0.72rem', letterSpacing: '0.02em' }}
+                      >
+                        Trend analysis intervals
+                      </div>
+                      <div className="d-flex flex-wrap gap-1">
                         {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
                           const active = trendIntervals.includes(iv)
                           return (
@@ -889,6 +900,12 @@ export function ScalperPage() {
                               key={`scalper-trend-${iv}`}
                               size="sm"
                               variant={active ? 'secondary' : 'outline-secondary'}
+                              style={{
+                                padding: '0.12rem 0.38rem',
+                                fontSize: '0.68rem',
+                                lineHeight: 1.1,
+                                borderRadius: '0.32rem',
+                              }}
                               onClick={() =>
                                 setTrendIntervals((prev) =>
                                   prev.includes(iv) ? prev.filter((x) => x !== iv) : [...prev, iv],
@@ -903,13 +920,21 @@ export function ScalperPage() {
                     </div>
                   ) : null}
                   {selected && trendIntervalsOrdered.length > 0 ? (
-                    <TrendAnalysisMultiPanel
-                      instrumentToken={selected.instrumentToken}
-                      symbolLabel={`${selected.tradingsymbol} · ${selected.exchange}`}
-                      historicalQueryExtra={trendHistoricalExtra}
-                      selectedIntervalsOrdered={trendIntervalsOrdered}
-                      variant="browseAlways"
-                    />
+                    <div
+                      style={{
+                        fontFamily: '"Trebuchet MS", "Segoe UI", Arial, sans-serif',
+                        fontSize: '0.78rem',
+                        lineHeight: 1.2,
+                      }}
+                    >
+                      <TrendAnalysisMultiPanel
+                        instrumentToken={selected.instrumentToken}
+                        symbolLabel={`${selected.tradingsymbol} · ${selected.exchange}`}
+                        historicalQueryExtra={trendHistoricalExtra}
+                        selectedIntervalsOrdered={trendIntervalsOrdered}
+                        variant="browseAlways"
+                      />
+                    </div>
                   ) : null}
                 </Col>
               </Row>
