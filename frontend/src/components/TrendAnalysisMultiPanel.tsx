@@ -198,14 +198,21 @@ export function TrendAnalysisMultiPanel({
         </div>
       ) : null}
       <div className="table-responsive">
-        <Table striped bordered hover size="sm" className="mb-0 small font-monospace">
+        <Table
+          striped
+          bordered
+          hover
+          size="sm"
+          className="mb-0 small font-monospace"
+          style={{ whiteSpace: 'nowrap' }}
+        >
           <thead className="table-light">
             <tr>
-              <th>Interval</th>
-              <th>Bars</th>
-              <th title="Close last − first vs first close (%)">Window Δ%</th>
-              <th title="Least-squares on close vs bar index">LR tilt</th>
-              <th title="OHLC range from / to in Indian time (Asia/Kolkata)">
+              <th className="text-nowrap">Interval</th>
+              <th className="text-nowrap">Bars</th>
+              <th className="text-nowrap" title="Close last − first vs first close (%)">Window Δ%</th>
+              <th className="text-nowrap" title="Least-squares on close vs bar index">LR tilt</th>
+              <th className="text-nowrap" title="OHLC range from / to in Indian time (Asia/Kolkata)">
                 Fit window (IST)
               </th>
             </tr>
@@ -223,8 +230,8 @@ export function TrendAnalysisMultiPanel({
                   : ''
               return (
                 <tr key={`trend-analysis-${instrumentToken}-${iv}`}>
-                  <td className="fw-semibold">{iv}</td>
-                  <td>
+                  <td className="fw-semibold text-nowrap">{iv}</td>
+                  <td className="text-nowrap">
                     {loading && r === undefined ? (
                       <Spinner animation="border" size="sm" />
                     ) : r === 'error' ? (
@@ -235,13 +242,13 @@ export function TrendAnalysisMultiPanel({
                       '—'
                     )}
                   </td>
-                  <td>
+                  <td className="text-nowrap">
                     {r != null && r !== 'error' ? `${r.windowDeltaPct >= 0 ? '+' : ''}${r.windowDeltaPct.toFixed(2)}%` : '—'}
                   </td>
-                  <td className={dirClass}>
+                  <td className={`${dirClass} text-nowrap`}>
                     {r != null && r !== 'error' ? `${r.lrDir.toUpperCase()} (${r.lrSlopePerBar >= 0 ? '+' : ''}${r.lrSlopePerBar.toPrecision(4)}/bar)` : '—'}
                   </td>
-                  <td className="small text-muted" style={{ whiteSpace: 'nowrap' }}>
+                  <td className="small text-muted text-nowrap">
                     {r != null && typeof r !== 'string'
                       ? `${formatLocalDateTime(r.fromIso)} - ${formatLocalDateTime(r.toIso)}`
                       : '—'}
@@ -285,13 +292,20 @@ export function TrendAnalysisMultiPanel({
   if (shouldAutoRun) {
     return (
       <section className="mt-3" aria-labelledby="trend-multi-heading-browse">
-        <h4 id="trend-multi-heading-browse" className="h6 text-secondary mb-2">
-          Multi-interval trend ({symbolLabel}) — past data
-        </h4>
-        <p className="small text-muted mb-2" style={{ fontSize: '0.78rem' }}>
-          One row per checked timeframe uses the same <strong>Range</strong> query as the main chart (server OHLC series); LR tilt mirrors{' '}
-          <strong>Trend LR</strong> over that full downloaded window (before zoom).
-        </p>
+        <div className="d-flex align-items-center gap-2 mb-2">
+          <h4 id="trend-multi-heading-browse" className="h6 text-secondary mb-0">
+            Multi-interval trend ({symbolLabel}) — past data
+          </h4>
+          <span
+            role="img"
+            aria-label="Multi-interval trend info"
+            title="One row per checked timeframe uses the same Range query as the main chart (server OHLC series); LR tilt mirrors Trend LR over that full downloaded window (before zoom)."
+            className="text-muted"
+            style={{ cursor: 'help', fontSize: '0.78rem', userSelect: 'none' }}
+          >
+            ⓘ
+          </span>
+        </div>
         {body}
       </section>
     )
@@ -299,12 +313,20 @@ export function TrendAnalysisMultiPanel({
 
   return (
     <section className="mt-2" aria-labelledby="trend-multi-heading-favorite">
-      <h4 id="trend-multi-heading-favorite" className="h6 text-secondary mb-2">
-        Multi-interval trend ({symbolLabel}) — past Range
-      </h4>
-      <p className="small text-muted mb-2" style={{ fontSize: '0.72rem' }}>
-        Fetches OHLC once per checked timeframe using the favorites grid Range. LR tilt follows close regression over the returned bars.
-      </p>
+      <div className="d-flex align-items-center gap-2 mb-2">
+        <h4 id="trend-multi-heading-favorite" className="h6 text-secondary mb-0">
+          Multi-interval trend ({symbolLabel}) — past Range
+        </h4>
+        <span
+          role="img"
+          aria-label="Multi-interval trend info"
+          title="Fetches OHLC once per checked timeframe using the favorites grid Range. LR tilt follows close regression over the returned bars."
+          className="text-muted"
+          style={{ cursor: 'help', fontSize: '0.74rem', userSelect: 'none' }}
+        >
+          ⓘ
+        </span>
+      </div>
       {body}
     </section>
   )

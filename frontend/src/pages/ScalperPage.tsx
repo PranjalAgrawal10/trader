@@ -116,6 +116,43 @@ type ScalperAtmSnapshot = {
   chainRows: ScalperAtmChainRow[]
 }
 
+const EMPTY_ATM_SNAPSHOT: ScalperAtmSnapshot = {
+  spotQuote: null,
+  optionExpiry: null,
+  atmStrike: null,
+  ceRow: null,
+  peRow: null,
+  ceQuote: null,
+  peQuote: null,
+  chainRows: [],
+}
+
+const SCALPER_ATM_CACHE_PREFIX = 'scalper:atm:last:'
+
+function scalperAtmCacheKey(targetKey: string): string {
+  return `${SCALPER_ATM_CACHE_PREFIX}${targetKey}`
+}
+
+function loadScalperAtmFromCache(targetKey: string): { snapshot: ScalperAtmSnapshot; updatedAt: string | null } | null {
+  try {
+    const raw = window.localStorage.getItem(scalperAtmCacheKey(targetKey))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { snapshot?: ScalperAtmSnapshot; updatedAt?: string | null }
+    if (!parsed?.snapshot) return null
+    return { snapshot: parsed.snapshot, updatedAt: parsed.updatedAt ?? null }
+  } catch {
+    return null
+  }
+}
+
+function saveScalperAtmToCache(targetKey: string, snapshot: ScalperAtmSnapshot, updatedAt: string | null): void {
+  try {
+    window.localStorage.setItem(scalperAtmCacheKey(targetKey), JSON.stringify({ snapshot, updatedAt }))
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
 function problemDetail(err: unknown): string {
   if (axios.isAxiosError(err)) {
     const body = err.response?.data as { detail?: string; title?: string } | undefined
@@ -266,16 +303,7 @@ export function ScalperPage() {
   const [atmLastUpdatedAt, setAtmLastUpdatedAt] = useState<string | null>(null)
   const [atmSpotRow, setAtmSpotRow] = useState<KiteInstrumentRow | null>(null)
   const [atmOptionRows, setAtmOptionRows] = useState<KiteInstrumentRow[]>([])
-  const [atmSnapshot, setAtmSnapshot] = useState<ScalperAtmSnapshot>({
-    spotQuote: null,
-    optionExpiry: null,
-    atmStrike: null,
-    ceRow: null,
-    peRow: null,
-    ceQuote: null,
-    peQuote: null,
-    chainRows: [],
-  })
+  const [atmSnapshot, setAtmSnapshot] = useState<ScalperAtmSnapshot>(EMPTY_ATM_SNAPSHOT)
   const [isLivePullWindow, setIsLivePullWindow] = useState<boolean>(() => isIstMarketLiveWindow())
 
   const isZerodha = broker?.connected === true && (broker?.provider ?? '').toLowerCase() === 'zerodha'
@@ -378,7 +406,7 @@ export function ScalperPage() {
         }
       })
 
-      setAtmSnapshot({
+      const nextSnapshot: ScalperAtmSnapshot = {
         spotQuote: spotQuote ?? previous.spotQuote ?? null,
         optionExpiry: atm.expiry ?? previous.optionExpiry ?? null,
         atmStrike: atm.strike ?? previous.atmStrike ?? null,
@@ -393,14 +421,17 @@ export function ScalperPage() {
             ? quoteByToken.get(atm.pe.instrumentToken) ?? null
             : previous.peQuote ?? null,
         chainRows: chainRows.length > 0 ? chainRows : previous.chainRows,
-      })
-      setAtmLastUpdatedAt(new Date().toISOString())
+      }
+      const updatedAt = new Date().toISOString()
+      setAtmSnapshot(nextSnapshot)
+      setAtmLastUpdatedAt(updatedAt)
+      saveScalperAtmToCache(atmTarget.key, nextSnapshot, updatedAt)
     } catch (err) {
       setAtmError(problemDetail(err))
     } finally {
       setAtmLiveLoading(false)
     }
-  }, [atmOptionRows, atmSnapshot, atmSpotRow, isLivePullWindow, isZerodha])
+  }, [atmOptionRows, atmSnapshot, atmSpotRow, atmTarget.key, isLivePullWindow, isZerodha])
 
   useEffect(() => {
     let cancelled = false
@@ -421,6 +452,17 @@ export function ScalperPage() {
     if (!isZerodha) return
     void loadAtmReferences()
   }, [isZerodha, loadAtmReferences])
+
+  useEffect(() => {
+    const cached = loadScalperAtmFromCache(atmTarget.key)
+    if (cached) {
+      setAtmSnapshot(cached.snapshot)
+      setAtmLastUpdatedAt(cached.updatedAt)
+      return
+    }
+    setAtmSnapshot(EMPTY_ATM_SNAPSHOT)
+    setAtmLastUpdatedAt(null)
+  }, [atmTarget.key])
 
   useEffect(() => {
     if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
@@ -693,43 +735,90 @@ export function ScalperPage() {
                     </div>
                   ) : null}
                   {selected ? (
-                    <div className="border rounded border-secondary-subtle p-2 mb-2">
-                      <div className="small fw-semibold mb-2">Indicators</div>
-                      <div className="d-flex flex-wrap gap-2 mb-2">
-                        <Button size="sm" variant={graphType === 'candlestick' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('candlestick')}>
+                    <div className="border rounded border-secondary-subtle p-1 mb-2">
+                      <div className="small fw-semibold mb-1" style={{ fontSize: '0.72rem', letterSpacing: '0.02em' }}>
+                        Indicators
+                      </div>
+                      <div className="d-flex flex-wrap gap-1 mb-1">
+                        <Button
+                          size="sm"
+                          variant={graphType === 'candlestick' ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setGraphType('candlestick')}
+                        >
                           Candles
                         </Button>
-                        <Button size="sm" variant={graphType === 'line' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('line')}>
+                        <Button
+                          size="sm"
+                          variant={graphType === 'line' ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setGraphType('line')}
+                        >
                           Line
                         </Button>
-                        <Button size="sm" variant={graphType === 'bar' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('bar')}>
+                        <Button
+                          size="sm"
+                          variant={graphType === 'bar' ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setGraphType('bar')}
+                        >
                           Bar
                         </Button>
-                        <Button size="sm" variant={maLineVisibility.showSma20 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showSma20: !p.showSma20 }))}>
+                        <Button
+                          size="sm"
+                          variant={maLineVisibility.showSma20 ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setMaLineVisibility((p) => ({ ...p, showSma20: !p.showSma20 }))}
+                        >
                           SMA 20
                         </Button>
-                        <Button size="sm" variant={maLineVisibility.showEma9 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showEma9: !p.showEma9 }))}>
+                        <Button
+                          size="sm"
+                          variant={maLineVisibility.showEma9 ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setMaLineVisibility((p) => ({ ...p, showEma9: !p.showEma9 }))}
+                        >
                           EMA 9
                         </Button>
-                        <Button size="sm" variant={maLineVisibility.showEma21 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showEma21: !p.showEma21 }))}>
+                        <Button
+                          size="sm"
+                          variant={maLineVisibility.showEma21 ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setMaLineVisibility((p) => ({ ...p, showEma21: !p.showEma21 }))}
+                        >
                           EMA 21
                         </Button>
-                        <Button size="sm" variant={maLineVisibility.showCustomEma ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showCustomEma: !p.showCustomEma }))}>
+                        <Button
+                          size="sm"
+                          variant={maLineVisibility.showCustomEma ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setMaLineVisibility((p) => ({ ...p, showCustomEma: !p.showCustomEma }))}
+                        >
                           Custom EMA
                         </Button>
-                        <Button size="sm" variant={maLineVisibility.showSupportResistance ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showSupportResistance: !p.showSupportResistance }))}>
+                        <Button
+                          size="sm"
+                          variant={maLineVisibility.showSupportResistance ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setMaLineVisibility((p) => ({ ...p, showSupportResistance: !p.showSupportResistance }))}
+                        >
                           S/R
                         </Button>
-                        <Button size="sm" variant={maLineVisibility.showLinearCloseTrend ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showLinearCloseTrend: !p.showLinearCloseTrend }))}>
+                        <Button
+                          size="sm"
+                          variant={maLineVisibility.showLinearCloseTrend ? 'secondary' : 'outline-secondary'}
+                          style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                          onClick={() => setMaLineVisibility((p) => ({ ...p, showLinearCloseTrend: !p.showLinearCloseTrend }))}
+                        >
                           Trend LR
                         </Button>
                       </div>
-                      <div className="d-flex flex-wrap align-items-center gap-2">
-                        <Form.Label className="small mb-0">Custom EMA period</Form.Label>
+                      <div className="d-flex flex-wrap align-items-center gap-1">
+                        <Form.Label className="small mb-0" style={{ fontSize: '0.68rem' }}>Custom EMA period</Form.Label>
                         <Form.Control
                           type="number"
                           size="sm"
-                          style={{ width: '6.5rem' }}
+                          style={{ width: '5.2rem', padding: '0.08rem 0.3rem', fontSize: '0.68rem' }}
                           min={CUSTOM_EMA_PERIOD_MIN}
                           max={CUSTOM_EMA_PERIOD_MAX}
                           step={1}
@@ -741,7 +830,9 @@ export function ScalperPage() {
                             setCustomEmaPeriod(Math.min(CUSTOM_EMA_PERIOD_MAX, Math.max(CUSTOM_EMA_PERIOD_MIN, n)))
                           }}
                         />
-                        <span className="small text-muted">{CUSTOM_EMA_PERIOD_MIN}-{CUSTOM_EMA_PERIOD_MAX}</span>
+                        <span className="small text-muted" style={{ fontSize: '0.66rem' }}>
+                          {CUSTOM_EMA_PERIOD_MIN}-{CUSTOM_EMA_PERIOD_MAX}
+                        </span>
                       </div>
                     </div>
                   ) : null}
