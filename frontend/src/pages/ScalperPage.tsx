@@ -626,7 +626,8 @@ export function ScalperPage() {
       {listsError ? <Alert variant="warning">{listsError}</Alert> : null}
 
       <Row className="g-3">
-        <Col lg={watchListMinimized ? 2 : 4} xl={watchListMinimized ? 2 : 3}>
+        {!watchListMinimized ? (
+        <Col lg={4} xl={3}>
           <Card className="border-secondary h-100">
             <Card.Header className="py-2 small d-flex flex-wrap align-items-center justify-content-between gap-2">
               <span className="fw-semibold">Watchlist</span>
@@ -651,8 +652,10 @@ export function ScalperPage() {
                   onClick={() => setWatchListMinimized((v) => !v)}
                   aria-expanded={!watchListMinimized}
                   aria-controls="scalper-watchlist-panel"
+                  title="Minimize watchlist"
+                  aria-label="Minimize watchlist"
                 >
-                  {watchListMinimized ? 'Expand' : 'Minimize'}
+                  🗕
                 </Button>
               </div>
             </Card.Header>
@@ -723,8 +726,9 @@ export function ScalperPage() {
             </Collapse>
           </Card>
         </Col>
+        ) : null}
 
-        <Col lg={watchListMinimized ? 10 : 8} xl={watchListMinimized ? 10 : 9}>
+        <Col lg={watchListMinimized ? 12 : 8} xl={watchListMinimized ? 12 : 9}>
           <Card className="border-secondary">
             <Card.Header className="py-2 d-flex flex-wrap align-items-center gap-2 justify-content-between">
               <div className="d-flex flex-wrap align-items-center gap-2">
@@ -777,6 +781,18 @@ export function ScalperPage() {
               >
                 Vol {showVolume ? 'ON' : 'OFF'}
               </Button>
+              {watchListMinimized ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline-secondary"
+                  onClick={() => setWatchListMinimized(false)}
+                  title="Expand watchlist"
+                  aria-label="Expand watchlist"
+                >
+                  🗖
+                </Button>
+              ) : null}
             </Card.Header>
             <Card.Body className="p-2">
               {chartError ? <Alert variant="danger" className="py-2 small mb-2">{chartError}</Alert> : null}
@@ -787,7 +803,11 @@ export function ScalperPage() {
                 </div>
               ) : null}
               {isZerodha ? (
-                <div className="border rounded border-secondary-subtle p-2 mb-2">
+                <div className="d-flex justify-content-end mb-2">
+                <div
+                  className="border rounded border-secondary-subtle p-2 bg-light text-dark"
+                  style={{ width: 'min(100%, 26rem)' }}
+                >
                   <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                     <div className="d-flex flex-wrap align-items-center gap-2">
                       <div className="small fw-semibold">Live ATM chain</div>
@@ -893,6 +913,7 @@ export function ScalperPage() {
                       PE chart
                     </Button>
                   </div>
+                </div>
                 </div>
               ) : null}
               {selected ? (
