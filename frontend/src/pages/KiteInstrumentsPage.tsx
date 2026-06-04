@@ -3533,128 +3533,6 @@ function CompactPriceChart({
   )
 }
 
-const FAVORITE_TILE_AUTOMATION_ROWS_MAX = 8
-
-/** Per-tile strip: latest automation ML rows for one instrument (same payload as Auto predictions tab). */
-function FavoriteTileAutomationMlPanel({
-  instrumentToken,
-  automationRecent,
-  automationRecentLoading,
-  automationPriceModels,
-}: {
-  instrumentToken: string
-  automationRecent: readonly MlAutomationRecentRow[]
-  automationRecentLoading: boolean
-  automationPriceModels: PriceDirectionModelsApiResponse | null
-}) {
-  const [automationPanelOpen, setAutomationPanelOpen] = useState(false)
-  const rowsForSymbol = useMemo(() => {
-    const t = instrumentToken.trim()
-    return sortByPredictedAtNewestFirst(
-      automationRecent.filter((r) => r.instrumentToken.trim() === t),
-    ).slice(0, FAVORITE_TILE_AUTOMATION_ROWS_MAX)
-  }, [instrumentToken, automationRecent])
-
-  const descByEngineId = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const x of automationPriceModels?.models ?? []) {
-      const id = x.id?.trim()
-      if (id) m.set(id, x.description?.trim() ?? '')
-    }
-    return m
-  }, [automationPriceModels])
-
-  return (
-    <div className="mt-2 rounded-3 border border-secondary-subtle overflow-hidden shadow-sm">
-      <button
-        type="button"
-        className="w-100 text-start px-2 py-1 border-0 bg-body-secondary border-bottom border-secondary-subtle d-flex align-items-center justify-content-between gap-2"
-        onClick={() => setAutomationPanelOpen((o) => !o)}
-        aria-expanded={automationPanelOpen}
-      >
-        <span className="small text-secondary text-uppercase mb-0" style={{ fontSize: '0.65rem' }}>
-          Auto ML predictions
-        </span>
-        <span className="d-flex align-items-center gap-2 flex-shrink-0">
-          {automationRecentLoading && rowsForSymbol.length === 0 ? (
-            <Spinner animation="border" size="sm" role="status" />
-          ) : (
-            <span className="text-muted font-monospace" style={{ fontSize: '0.65rem' }}>
-              {rowsForSymbol.length} row{rowsForSymbol.length === 1 ? '' : 's'}
-            </span>
-          )}
-          <span className="text-secondary user-select-none" style={{ fontSize: '0.65rem' }}>
-            {automationPanelOpen ? '▼' : '▶'}
-          </span>
-        </span>
-      </button>
-      <Collapse in={automationPanelOpen}>
-        <div>
-          <div className="p-2 bg-body-tertiary bg-opacity-25">
-            <p className="text-muted mb-2" style={{ fontSize: '0.62rem' }}>
-              Same time range as the <strong>Auto predictions</strong> tab (adjust there to change this list).
-            </p>
-            {automationRecentLoading && rowsForSymbol.length === 0 ? (
-              <div className="d-flex align-items-center gap-2 text-muted" style={{ fontSize: '0.7rem' }}>
-                <Spinner animation="border" size="sm" role="status" />
-                Loading…
-              </div>
-            ) : rowsForSymbol.length === 0 ? (
-              <p className="text-muted mb-0 fst-italic" style={{ fontSize: '0.68rem' }}>
-                No automation rows in range for this symbol yet.
-              </p>
-            ) : (
-              <div className="table-responsive" style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                <Table striped bordered size="sm" className="mb-0 align-middle font-monospace" style={{ fontSize: '0.63rem' }}>
-                  <thead className="table-light text-nowrap">
-                    <tr>
-                      <th>Time</th>
-                      <th>Iv</th>
-                      <th>Engine</th>
-                      <th>Dir</th>
-                      <th>%</th>
-                      <th>Out</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rowsForSymbol.map((r) => {
-                      const eng = r.engineModelId?.trim() ?? ''
-                      const short = eng.length > 18 ? `${eng.slice(0, 16)}…` : eng
-                      const desc = descByEngineId.get(eng)
-                      return (
-                        <tr key={r.id}>
-                          <td className="text-nowrap">{formatLocalDateTime(r.predictedAt)}</td>
-                          <td>{r.interval}</td>
-                          <td className="text-truncate" style={{ maxWidth: '5.5rem' }} title={desc ? `${eng} — ${desc}` : eng || '—'}>
-                            {short || '—'}
-                          </td>
-                          <td>{r.direction}</td>
-                          <td>{r.confidence}%</td>
-                          <td
-                            className={
-                              r.outcome === 'correct'
-                                ? 'text-success'
-                                : r.outcome === 'wrong'
-                                  ? 'text-danger'
-                                  : 'text-muted'
-                            }
-                          >
-                            {r.outcome}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </Table>
-              </div>
-            )}
-          </div>
-        </div>
-      </Collapse>
-    </div>
-  )
-}
-
 function FavoritesChartsGrid({
   favorites,
   rangePreset,
@@ -3675,9 +3553,6 @@ function FavoritesChartsGrid({
   listTilePrimaryLabel,
   tradingLockKeySet,
   onToggleTradingLock,
-  automationRecent,
-  automationRecentLoading,
-  automationPriceModels,
   zerodhaConnected,
   demoPaperOpenBuysByInstrumentToken,
   demoPaperLastBuyPriceByInstrumentToken,
@@ -3701,9 +3576,6 @@ function FavoritesChartsGrid({
   listTilePrimaryLabel: string
   tradingLockKeySet?: Set<string>
   onToggleTradingLock?: (r: KiteInstrumentRow) => void
-  automationRecent: readonly MlAutomationRecentRow[]
-  automationRecentLoading: boolean
-  automationPriceModels: PriceDirectionModelsApiResponse | null
   zerodhaConnected: boolean
   demoPaperOpenBuysByInstrumentToken: Readonly<Record<string, DemoPaperOpenBuyMarkerDto[]>>
   demoPaperLastBuyPriceByInstrumentToken: Readonly<Record<string, number>>
@@ -3734,9 +3606,7 @@ function FavoritesChartsGrid({
         <strong>Trend analysis</strong> checkboxes choose which candle sizes participate in{' '}
         <strong>Multi-interval trend</strong> panels (least-squares on past closes — same{' '}
         <strong>Range</strong> as charts). Use <strong>Interval</strong> to set bar size on every tile (clears symbol
-        drops).         Per-user <strong>Auto ML bar interval</strong> lives on the <strong>Auto predictions</strong> tab; otherwise the
-        server may use <span className="font-monospace text-body-secondary">FavoriteMlAutomation:PredictionIntervalOverride</span>{' '}
-        or your chart interval.
+        drops).
       </p>
       <Row className="g-3">
         {favorites.map((row) => (
@@ -3816,14 +3686,6 @@ function FavoritesChartsGrid({
                   selectedIntervalsOrdered={orderTrendSelections(trendAnalysisSelections)}
                   variant="favoriteLazy"
                 />
-                {zerodhaConnected ? (
-                  <FavoriteTileAutomationMlPanel
-                    instrumentToken={row.instrumentToken}
-                    automationRecent={automationRecent}
-                    automationRecentLoading={automationRecentLoading}
-                    automationPriceModels={automationPriceModels}
-                  />
-                ) : null}
               </Card.Body>
             </Card>
           </Col>
@@ -7877,9 +7739,6 @@ export function KiteInstrumentsPage() {
                   listTilePrimaryLabel="★ Remove"
                   tradingLockKeySet={tradingLockKeySet}
                   onToggleTradingLock={(r) => void toggleTradingLock(r)}
-                  automationRecent={automationRecent}
-                  automationRecentLoading={automationRecentLoading}
-                  automationPriceModels={automationPriceModels}
                   zerodhaConnected={isZerodha}
                   demoPaperOpenBuysByInstrumentToken={demoPaperOpenBuysByInstrumentToken}
                   demoPaperLastBuyPriceByInstrumentToken={demoPaperLastBuyPriceByInstrumentToken}
@@ -7920,9 +7779,6 @@ export function KiteInstrumentsPage() {
                   onTrendAnalysisSelectionsChange={setTrendAnalysisSelections}
                   listTilePrimaryAction={(r) => void toggleTradingLock(r)}
                   listTilePrimaryLabel="🔒 Remove lock"
-                  automationRecent={automationRecent}
-                  automationRecentLoading={automationRecentLoading}
-                  automationPriceModels={automationPriceModels}
                   zerodhaConnected={isZerodha}
                   demoPaperOpenBuysByInstrumentToken={demoPaperOpenBuysByInstrumentToken}
                   demoPaperLastBuyPriceByInstrumentToken={demoPaperLastBuyPriceByInstrumentToken}

@@ -101,6 +101,7 @@ type Internals = {
   priceLines: IPriceLine[]
   unsubscribeVisibleLogicalRange?: () => void
   unsubscribeCrosshairMove?: () => void
+  unsubscribeViewportTouch?: () => void
 }
 
 const LIVE_LTP = '#38bdf8'
@@ -495,6 +496,8 @@ export function InstrumentPriceChart({
   const loadingOlderRef = useRef(loadingOlderBars)
   const olderThrottleUntilRef = useRef(0)
   const viewportDidInitRef = useRef(false)
+  const userViewportTouchedRef = useRef(false)
+  const programmaticViewportUpdateRef = useRef(false)
   const lastVpFirstBarTRef = useRef<string | undefined>(undefined)
   const lastVpLenRef = useRef(0)
 
@@ -567,6 +570,7 @@ export function InstrumentPriceChart({
 
     if (!el || data.length === 0) {
       viewportDidInitRef.current = false
+      userViewportTouchedRef.current = false
       lastVpLenRef.current = 0
       lastVpFirstBarTRef.current = undefined
       disposeInternals(stRef.current)
@@ -608,6 +612,7 @@ export function InstrumentPriceChart({
         priceLines: [],
         unsubscribeVisibleLogicalRange: undefined,
         unsubscribeCrosshairMove: undefined,
+        unsubscribeViewportTouch: undefined,
       }
       stRef.current = st
       chart.applyOptions({
@@ -654,6 +659,8 @@ export function InstrumentPriceChart({
       ghostBars: ghost,
       firstBarIso: data[0]?.t,
       viewportDidInitRef,
+      userViewportTouchedRef,
+      programmaticViewportUpdateRef,
       lastVpLenRef,
       lastVpFirstBarTRef,
     })
@@ -664,6 +671,12 @@ export function InstrumentPriceChart({
       /* noop */
     }
     stAlive.unsubscribeVisibleLogicalRange = undefined
+    try {
+      stAlive.unsubscribeViewportTouch?.()
+    } catch {
+      /* noop */
+    }
+    stAlive.unsubscribeViewportTouch = undefined
 
     try {
       stAlive.unsubscribeCrosshairMove?.()
@@ -675,6 +688,21 @@ export function InstrumentPriceChart({
     stAlive.unsubscribeCrosshairMove = () => {
       try {
         stAlive.chart.unsubscribeCrosshairMove(applyCrosshairFlyoutFromMove)
+      } catch {
+        /* noop */
+      }
+    }
+
+    const tsTouch = stAlive.chart.timeScale()
+    const viewportTouchHandler = () => {
+      if (programmaticViewportUpdateRef.current) return
+      if (!viewportDidInitRef.current) return
+      userViewportTouchedRef.current = true
+    }
+    tsTouch.subscribeVisibleLogicalRangeChange(viewportTouchHandler)
+    stAlive.unsubscribeViewportTouch = () => {
+      try {
+        tsTouch.unsubscribeVisibleLogicalRangeChange(viewportTouchHandler)
       } catch {
         /* noop */
       }
@@ -781,6 +809,8 @@ function applyInstrumentChartViewport(
     ghostBars: number
     firstBarIso: string | undefined
     viewportDidInitRef: MutableRefObject<boolean>
+    userViewportTouchedRef: MutableRefObject<boolean>
+    programmaticViewportUpdateRef: MutableRefObject<boolean>
     lastVpLenRef: MutableRefObject<number>
     lastVpFirstBarTRef: MutableRefObject<string | undefined>
   },
@@ -812,18 +842,33 @@ function applyInstrumentChartViewport(
     const grow = nMain - prevLen
     const vis = ts.getVisibleLogicalRange()
     if (vis !== null && Number.isFinite(vis.from) && Number.isFinite(vis.to)) {
-      ts.setVisibleLogicalRange({ from: vis.from + grow, to: vis.to + grow })
+      p.programmaticViewportUpdateRef.current = true
+      try {
+        ts.setVisibleLogicalRange({ from: vis.from + grow, to: vis.to + grow })
+      } finally {
+        p.programmaticViewportUpdateRef.current = false
+      }
     }
-  } else if (!p.viewportDidInitRef.current) {
+  } else if (!p.viewportDidInitRef.current && !p.userViewportTouchedRef.current) {
     const rawCap =
       p.defaultVisibleBars != null && Number.isFinite(p.defaultVisibleBars)
         ? Math.floor(p.defaultVisibleBars as number)
         : CHART_DEFAULT_VISIBLE_BARS
     if (p.enableInitialViewportClip && rawCap > 0 && nMain > rawCap) {
       const clip = Math.min(rawCap, nMain)
-      ts.setVisibleLogicalRange({ from: nMain - clip, to: logicalTo })
+      p.programmaticViewportUpdateRef.current = true
+      try {
+        ts.setVisibleLogicalRange({ from: nMain - clip, to: logicalTo })
+      } finally {
+        p.programmaticViewportUpdateRef.current = false
+      }
     } else {
-      ts.fitContent()
+      p.programmaticViewportUpdateRef.current = true
+      try {
+        ts.fitContent()
+      } finally {
+        p.programmaticViewportUpdateRef.current = false
+      }
     }
     p.viewportDidInitRef.current = true
   }
