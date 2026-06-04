@@ -205,8 +205,8 @@ export function TrendAnalysisMultiPanel({
               <th>Bars</th>
               <th title="Close last − first vs first close (%)">Window Δ%</th>
               <th title="Least-squares on close vs bar index">LR tilt</th>
-              <th title={`OHLC range from / to in your timezone (${Intl.DateTimeFormat().resolvedOptions().timeZone})`}>
-                Fit window (local)
+              <th title="OHLC range from / to in Indian time (Asia/Kolkata)">
+                Fit window (IST)
               </th>
             </tr>
           </thead>

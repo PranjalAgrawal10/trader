@@ -86,7 +86,7 @@ export function ScalperPage() {
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
   const [interval, setInterval] = useState<ScalperInterval>('1m')
-  const [rangePreset, setRangePreset] = useState<ScalperRange>('last30m')
+  const [rangePreset, setRangePreset] = useState<ScalperRange>('last3d')
 
   const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
   const rawSeriesRef = useRef<ChartPointWithMa[] | null>(null)
@@ -271,7 +271,7 @@ export function ScalperPage() {
         <div>
           <h1 className="h3 mb-0">Scalper</h1>
           <p className="text-secondary small mb-0">
-            Tight-interval candles and live LTP for quick reads. Uses your trading locks or favorites as a watchlist.
+            Tight-interval candles and live LTP for quick reads. Defaults to 3-day history; uses your trading locks or favorites as a watchlist.
           </p>
         </div>
         <div className="d-flex flex-wrap align-items-center gap-2">

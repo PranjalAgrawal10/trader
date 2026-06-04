@@ -1576,7 +1576,7 @@ function ChartSettingsToolbar({
                   ? 'Server default window per candle size'
                   : id === 'last1mo'
                     ? 'Last calendar month'
-                    : 'History window; candle range captions use your local timezone'
+                    : 'History window; candle range captions use Indian timezone (IST)'
               }
             >
               {CHART_RANGE_LABEL[id]}

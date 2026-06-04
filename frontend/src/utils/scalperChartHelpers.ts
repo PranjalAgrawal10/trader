@@ -14,7 +14,7 @@ import {
 } from './movingAverages'
 
 export type ScalperInterval = Extract<ChartIntervalKey, '1m' | '3m' | '5m'>
-export type ScalperRange = 'last15m' | 'last30m' | 'last1h' | 'last5h'
+export type ScalperRange = 'last15m' | 'last30m' | 'last1h' | 'last5h' | 'last1d' | 'last3d'
 
 export const SCALPER_INTERVALS: ScalperInterval[] = ['1m', '3m', '5m']
 export const SCALPER_RANGES: { id: ScalperRange; label: string }[] = [
@@ -22,6 +22,8 @@ export const SCALPER_RANGES: { id: ScalperRange; label: string }[] = [
   { id: 'last30m', label: '30m' },
   { id: 'last1h', label: '1h' },
   { id: 'last5h', label: '5h' },
+  { id: 'last1d', label: '1d' },
+  { id: 'last3d', label: '3d' },
 ]
 
 export const SCALPER_POLL_MS = 15_000
@@ -50,6 +52,12 @@ export function scalperRangeQueryParams(preset: ScalperRange): { from: string; t
       break
     case 'last5h':
       from.setUTCHours(from.getUTCHours() - 5)
+      break
+    case 'last1d':
+      from.setUTCDate(from.getUTCDate() - 1)
+      break
+    case 'last3d':
+      from.setUTCDate(from.getUTCDate() - 3)
       break
   }
   return { from: from.toISOString(), to: to.toISOString() }
