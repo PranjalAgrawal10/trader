@@ -676,242 +676,242 @@ export function ScalperPage() {
               </Button>
             </Card.Header>
             <Card.Body className="p-2">
-              {chartError ? <Alert variant="danger" className="py-2 small mb-2">{chartError}</Alert> : null}
-              {candleMeta ? (
-                <div className="small text-muted mb-2 font-monospace">
-                  {candleMeta.interval} · {formatLocalDateTime(candleMeta.from)} → {formatLocalDateTime(candleMeta.to)} ·
-                  refresh ~{SCALPER_POLL_MS / 1000}s + ticks
-                </div>
-              ) : null}
-              {isZerodha ? (
-                <div className="d-flex justify-content-end mb-2">
-                <div
-                  className="border rounded border-secondary-subtle p-2 bg-light text-dark"
-                  style={{ width: 'min(100%, 26rem)' }}
-                >
-                  <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-                    <div className="d-flex flex-wrap align-items-center gap-2">
-                      <div className="small fw-semibold">Live ATM chain</div>
-                      <Form.Select
-                        size="sm"
-                        value={atmTarget.key}
-                        style={{ width: '11rem' }}
-                        onChange={(e) => setAtmTargetKey(e.target.value)}
-                        aria-label="Scalper ATM underlying"
-                      >
-                        {SCALPER_ATM_TARGETS.map((t) => (
-                          <option key={t.key} value={t.key}>
-                            {t.label}
-                          </option>
-                        ))}
-                      </Form.Select>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline-secondary"
-                      disabled={!isLivePullWindow || atmReferenceLoading || atmLiveLoading}
-                      onClick={() => {
-                        void loadAtmReferences()
-                        void refreshAtmLive()
-                      }}
-                    >
-                      {atmReferenceLoading || atmLiveLoading ? 'Refreshing…' : 'Refresh ATM'}
-                    </Button>
-                  </div>
-                  {atmError ? <Alert variant="warning" className="py-1 small mb-2">{atmError}</Alert> : null}
-                  <div className="small text-muted mb-1">
-                    Spot:{' '}
-                    <span className="font-monospace fw-semibold">
-                      {atmSnapshot.spotQuote ? atmSnapshot.spotQuote.lastPrice.toFixed(2) : '—'}
-                    </span>{' '}
-                    ATM:{' '}
-                    <span className="font-monospace fw-semibold">
-                      {atmSnapshot.atmStrike != null ? atmSnapshot.atmStrike.toFixed(2) : '—'}
-                    </span>{' '}
-                    {atmLastUpdatedAt ? `· updated ${formatLocalDateTime(atmLastUpdatedAt)}` : ''}
-                  </div>
-                  {!isLivePullWindow ? (
-                    <div className="small text-muted mb-1">Live ATM pull resumes during market window (IST 09:10-15:30).</div>
-                  ) : null}
-                  {atmSnapshot.chainRows.length > 0 ? (
-                    <div className="table-responsive">
-                      <Table size="sm" bordered hover className="mb-0 small align-middle">
-                        <thead>
-                          <tr>
-                            <th className="text-end">Call LTP</th>
-                            <th className="text-center">Strike</th>
-                            <th className="text-start">Put LTP</th>
-                          </tr>
-                        </thead>
-                        <tbody className="font-monospace">
-                          {atmSnapshot.chainRows.map((row) => (
-                            <tr key={`scalper-atm-${atmTarget.key}-${row.strike}`} className={row.isAtm ? 'table-warning' : undefined}>
-                              <td
-                                role={row.ceRow ? 'button' : undefined}
-                                className={`text-end ${row.ceRow ? 'cursor-pointer' : ''}`}
-                                onClick={() => row.ceRow && setSelected(row.ceRow)}
-                              >
-                                {row.ceQuote ? row.ceQuote.lastPrice.toFixed(2) : '—'}
-                              </td>
-                              <td className="text-center fw-semibold">{row.strike.toFixed(2)}{row.isAtm ? ' ★' : ''}</td>
-                              <td
-                                role={row.peRow ? 'button' : undefined}
-                                className={`text-start ${row.peRow ? 'cursor-pointer' : ''}`}
-                                onClick={() => row.peRow && setSelected(row.peRow)}
-                              >
-                                {row.peQuote ? row.peQuote.lastPrice.toFixed(2) : '—'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </Table>
+              <Row className="g-2">
+                <Col lg={7} xl={8}>
+                  {chartError ? <Alert variant="danger" className="py-2 small mb-2">{chartError}</Alert> : null}
+                  {candleMeta ? (
+                    <div className="small text-muted mb-2 font-monospace">
+                      {candleMeta.interval} · {formatLocalDateTime(candleMeta.from)} → {formatLocalDateTime(candleMeta.to)} ·
+                      refresh ~{SCALPER_POLL_MS / 1000}s + ticks
                     </div>
                   ) : null}
-                  <div className="mt-2 d-flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline-primary"
-                      disabled={!atmSpotRow}
-                      onClick={() => atmSpotRow && setSelected(atmSpotRow)}
-                    >
-                      Spot chart
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline-secondary"
-                      disabled={!atmSnapshot.ceRow}
-                      onClick={() => atmSnapshot.ceRow && setSelected(atmSnapshot.ceRow)}
-                    >
-                      CE chart
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline-secondary"
-                      disabled={!atmSnapshot.peRow}
-                      onClick={() => atmSnapshot.peRow && setSelected(atmSnapshot.peRow)}
-                    >
-                      PE chart
-                    </Button>
-                  </div>
-                </div>
-                </div>
-              ) : null}
-              {selected ? (
-                <div className="border rounded border-secondary-subtle p-2 mb-2">
-                  <div className="small fw-semibold mb-2">Indicators</div>
-                  <div className="d-flex flex-wrap gap-2 mb-2">
-                    <Button size="sm" variant={graphType === 'candlestick' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('candlestick')}>
-                      Candles
-                    </Button>
-                    <Button size="sm" variant={graphType === 'line' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('line')}>
-                      Line
-                    </Button>
-                    <Button size="sm" variant={graphType === 'bar' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('bar')}>
-                      Bar
-                    </Button>
-                    <Button size="sm" variant={maLineVisibility.showSma20 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showSma20: !p.showSma20 }))}>
-                      SMA 20
-                    </Button>
-                    <Button size="sm" variant={maLineVisibility.showEma9 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showEma9: !p.showEma9 }))}>
-                      EMA 9
-                    </Button>
-                    <Button size="sm" variant={maLineVisibility.showEma21 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showEma21: !p.showEma21 }))}>
-                      EMA 21
-                    </Button>
-                    <Button size="sm" variant={maLineVisibility.showCustomEma ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showCustomEma: !p.showCustomEma }))}>
-                      Custom EMA
-                    </Button>
-                    <Button size="sm" variant={maLineVisibility.showSupportResistance ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showSupportResistance: !p.showSupportResistance }))}>
-                      S/R
-                    </Button>
-                    <Button size="sm" variant={maLineVisibility.showLinearCloseTrend ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showLinearCloseTrend: !p.showLinearCloseTrend }))}>
-                      Trend LR
-                    </Button>
-                  </div>
-                  <div className="d-flex flex-wrap align-items-center gap-2">
-                    <Form.Label className="small mb-0">Custom EMA period</Form.Label>
-                    <Form.Control
-                      type="number"
-                      size="sm"
-                      style={{ width: '6.5rem' }}
-                      min={CUSTOM_EMA_PERIOD_MIN}
-                      max={CUSTOM_EMA_PERIOD_MAX}
-                      step={1}
-                      value={customEmaPeriod}
-                      disabled={!maLineVisibility.showCustomEma}
-                      onChange={(e) => {
-                        const n = parseInt(e.target.value, 10)
-                        if (!Number.isFinite(n)) return
-                        setCustomEmaPeriod(Math.min(CUSTOM_EMA_PERIOD_MAX, Math.max(CUSTOM_EMA_PERIOD_MIN, n)))
-                      }}
-                    />
-                    <span className="small text-muted">{CUSTOM_EMA_PERIOD_MIN}-{CUSTOM_EMA_PERIOD_MAX}</span>
-                  </div>
-                </div>
-              ) : null}
-              {selected ? (
-                <div className="border rounded border-secondary-subtle p-2 mb-2">
-                  <div className="small fw-semibold mb-2">Trend analysis intervals</div>
-                  <div className="d-flex flex-wrap gap-2">
-                    {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
-                      const active = trendIntervals.includes(iv)
-                      return (
-                        <Button
-                          key={`scalper-trend-${iv}`}
-                          size="sm"
-                          variant={active ? 'secondary' : 'outline-secondary'}
-                          onClick={() =>
-                            setTrendIntervals((prev) =>
-                              prev.includes(iv) ? prev.filter((x) => x !== iv) : [...prev, iv],
-                            )
-                          }
-                        >
-                          {iv}
+                  {selected ? (
+                    <div className="border rounded border-secondary-subtle p-2 mb-2">
+                      <div className="small fw-semibold mb-2">Indicators</div>
+                      <div className="d-flex flex-wrap gap-2 mb-2">
+                        <Button size="sm" variant={graphType === 'candlestick' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('candlestick')}>
+                          Candles
                         </Button>
-                      )
-                    })}
-                  </div>
-                </div>
-              ) : null}
-
-              {chartLoading && rawSeries.length === 0 ? (
-                <div className="text-center py-5 text-secondary">
-                  <Spinner animation="border" className="me-2" />
-                  Loading candles…
-                </div>
-              ) : selected && displaySeriesWithCustom.length > 0 ? (
-                <div style={{ height: 'min(62vh, 560px)', minHeight: '320px' }}>
-                  <InstrumentPriceChart
-                    graphType={graphType}
-                    data={displaySeriesWithCustom}
-                    maLineVisibility={maLineVisibility}
-                    customEmaPeriod={customEmaApplied}
-                    livePrice={live.lastPrice}
-                    showVolume={showVolume}
-                    newerGhostBars={0}
-                    onNeedOlderBars={loadOlderBars}
-                    canLoadOlderBars={canLoadOlderBars}
-                    loadingOlderBars={loadingOlderBars}
-                  />
-                </div>
-              ) : selected && !chartLoading ? (
-                <p className="text-muted small mb-0">No candle data returned for this range.</p>
-              ) : !selected ? (
-                <p className="text-muted small mb-0">Choose an instrument to load the chart.</p>
-              ) : null}
-              {selected && trendIntervalsOrdered.length > 0 ? (
-                <TrendAnalysisMultiPanel
-                  instrumentToken={selected.instrumentToken}
-                  symbolLabel={`${selected.tradingsymbol} · ${selected.exchange}`}
-                  historicalQueryExtra={trendHistoricalExtra}
-                  selectedIntervalsOrdered={trendIntervalsOrdered}
-                  variant="browseAlways"
-                />
-              ) : null}
+                        <Button size="sm" variant={graphType === 'line' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('line')}>
+                          Line
+                        </Button>
+                        <Button size="sm" variant={graphType === 'bar' ? 'secondary' : 'outline-secondary'} onClick={() => setGraphType('bar')}>
+                          Bar
+                        </Button>
+                        <Button size="sm" variant={maLineVisibility.showSma20 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showSma20: !p.showSma20 }))}>
+                          SMA 20
+                        </Button>
+                        <Button size="sm" variant={maLineVisibility.showEma9 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showEma9: !p.showEma9 }))}>
+                          EMA 9
+                        </Button>
+                        <Button size="sm" variant={maLineVisibility.showEma21 ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showEma21: !p.showEma21 }))}>
+                          EMA 21
+                        </Button>
+                        <Button size="sm" variant={maLineVisibility.showCustomEma ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showCustomEma: !p.showCustomEma }))}>
+                          Custom EMA
+                        </Button>
+                        <Button size="sm" variant={maLineVisibility.showSupportResistance ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showSupportResistance: !p.showSupportResistance }))}>
+                          S/R
+                        </Button>
+                        <Button size="sm" variant={maLineVisibility.showLinearCloseTrend ? 'secondary' : 'outline-secondary'} onClick={() => setMaLineVisibility((p) => ({ ...p, showLinearCloseTrend: !p.showLinearCloseTrend }))}>
+                          Trend LR
+                        </Button>
+                      </div>
+                      <div className="d-flex flex-wrap align-items-center gap-2">
+                        <Form.Label className="small mb-0">Custom EMA period</Form.Label>
+                        <Form.Control
+                          type="number"
+                          size="sm"
+                          style={{ width: '6.5rem' }}
+                          min={CUSTOM_EMA_PERIOD_MIN}
+                          max={CUSTOM_EMA_PERIOD_MAX}
+                          step={1}
+                          value={customEmaPeriod}
+                          disabled={!maLineVisibility.showCustomEma}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10)
+                            if (!Number.isFinite(n)) return
+                            setCustomEmaPeriod(Math.min(CUSTOM_EMA_PERIOD_MAX, Math.max(CUSTOM_EMA_PERIOD_MIN, n)))
+                          }}
+                        />
+                        <span className="small text-muted">{CUSTOM_EMA_PERIOD_MIN}-{CUSTOM_EMA_PERIOD_MAX}</span>
+                      </div>
+                    </div>
+                  ) : null}
+                  {chartLoading && rawSeries.length === 0 ? (
+                    <div className="text-center py-5 text-secondary">
+                      <Spinner animation="border" className="me-2" />
+                      Loading candles…
+                    </div>
+                  ) : selected && displaySeriesWithCustom.length > 0 ? (
+                    <div style={{ height: 'min(58vh, 520px)', minHeight: '320px' }}>
+                      <InstrumentPriceChart
+                        graphType={graphType}
+                        data={displaySeriesWithCustom}
+                        maLineVisibility={maLineVisibility}
+                        customEmaPeriod={customEmaApplied}
+                        livePrice={live.lastPrice}
+                        showVolume={showVolume}
+                        newerGhostBars={0}
+                        onNeedOlderBars={loadOlderBars}
+                        canLoadOlderBars={canLoadOlderBars}
+                        loadingOlderBars={loadingOlderBars}
+                      />
+                    </div>
+                  ) : selected && !chartLoading ? (
+                    <p className="text-muted small mb-0">No candle data returned for this range.</p>
+                  ) : !selected ? (
+                    <p className="text-muted small mb-0">Choose an instrument to load the chart.</p>
+                  ) : null}
+                </Col>
+                <Col lg={5} xl={4}>
+                  {isZerodha ? (
+                    <div className="border rounded border-secondary-subtle p-2 bg-light text-dark mb-2">
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                        <div className="d-flex flex-wrap align-items-center gap-2">
+                          <div className="small fw-semibold">Live ATM chain</div>
+                          <Form.Select
+                            size="sm"
+                            value={atmTarget.key}
+                            style={{ width: '11rem' }}
+                            onChange={(e) => setAtmTargetKey(e.target.value)}
+                            aria-label="Scalper ATM underlying"
+                          >
+                            {SCALPER_ATM_TARGETS.map((t) => (
+                              <option key={t.key} value={t.key}>
+                                {t.label}
+                              </option>
+                            ))}
+                          </Form.Select>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline-secondary"
+                          disabled={!isLivePullWindow || atmReferenceLoading || atmLiveLoading}
+                          onClick={() => {
+                            void loadAtmReferences()
+                            void refreshAtmLive()
+                          }}
+                        >
+                          {atmReferenceLoading || atmLiveLoading ? 'Refreshing…' : 'Refresh ATM'}
+                        </Button>
+                      </div>
+                      {atmError ? <Alert variant="warning" className="py-1 small mb-2">{atmError}</Alert> : null}
+                      <div className="small text-muted mb-1">
+                        Spot:{' '}
+                        <span className="font-monospace fw-semibold">
+                          {atmSnapshot.spotQuote ? atmSnapshot.spotQuote.lastPrice.toFixed(2) : '—'}
+                        </span>{' '}
+                        ATM:{' '}
+                        <span className="font-monospace fw-semibold">
+                          {atmSnapshot.atmStrike != null ? atmSnapshot.atmStrike.toFixed(2) : '—'}
+                        </span>{' '}
+                        {atmLastUpdatedAt ? `· updated ${formatLocalDateTime(atmLastUpdatedAt)}` : ''}
+                      </div>
+                      {!isLivePullWindow ? (
+                        <div className="small text-muted mb-1">Live ATM pull resumes during market window (IST 09:10-15:30).</div>
+                      ) : null}
+                      {atmSnapshot.chainRows.length > 0 ? (
+                        <div className="table-responsive">
+                          <Table size="sm" bordered hover className="mb-0 small align-middle">
+                            <thead>
+                              <tr>
+                                <th className="text-end">Call LTP</th>
+                                <th className="text-center">Strike</th>
+                                <th className="text-start">Put LTP</th>
+                              </tr>
+                            </thead>
+                            <tbody className="font-monospace">
+                              {atmSnapshot.chainRows.map((row) => (
+                                <tr key={`scalper-atm-${atmTarget.key}-${row.strike}`} className={row.isAtm ? 'table-warning' : undefined}>
+                                  <td
+                                    role={row.ceRow ? 'button' : undefined}
+                                    className={`text-end ${row.ceRow ? 'cursor-pointer' : ''}`}
+                                    onClick={() => row.ceRow && setSelected(row.ceRow)}
+                                  >
+                                    {row.ceQuote ? row.ceQuote.lastPrice.toFixed(2) : '—'}
+                                  </td>
+                                  <td className="text-center fw-semibold">{row.strike.toFixed(2)}{row.isAtm ? ' ★' : ''}</td>
+                                  <td
+                                    role={row.peRow ? 'button' : undefined}
+                                    className={`text-start ${row.peRow ? 'cursor-pointer' : ''}`}
+                                    onClick={() => row.peRow && setSelected(row.peRow)}
+                                  >
+                                    {row.peQuote ? row.peQuote.lastPrice.toFixed(2) : '—'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </Table>
+                        </div>
+                      ) : null}
+                      <div className="mt-2 d-flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline-primary"
+                          disabled={!atmSpotRow}
+                          onClick={() => atmSpotRow && setSelected(atmSpotRow)}
+                        >
+                          Spot chart
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline-secondary"
+                          disabled={!atmSnapshot.ceRow}
+                          onClick={() => atmSnapshot.ceRow && setSelected(atmSnapshot.ceRow)}
+                        >
+                          CE chart
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline-secondary"
+                          disabled={!atmSnapshot.peRow}
+                          onClick={() => atmSnapshot.peRow && setSelected(atmSnapshot.peRow)}
+                        >
+                          PE chart
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {selected ? (
+                    <div className="border rounded border-secondary-subtle p-2 mb-2">
+                      <div className="small fw-semibold mb-2">Trend analysis intervals</div>
+                      <div className="d-flex flex-wrap gap-2">
+                        {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
+                          const active = trendIntervals.includes(iv)
+                          return (
+                            <Button
+                              key={`scalper-trend-${iv}`}
+                              size="sm"
+                              variant={active ? 'secondary' : 'outline-secondary'}
+                              onClick={() =>
+                                setTrendIntervals((prev) =>
+                                  prev.includes(iv) ? prev.filter((x) => x !== iv) : [...prev, iv],
+                                )
+                              }
+                            >
+                              {iv}
+                            </Button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                  {selected && trendIntervalsOrdered.length > 0 ? (
+                    <TrendAnalysisMultiPanel
+                      instrumentToken={selected.instrumentToken}
+                      symbolLabel={`${selected.tradingsymbol} · ${selected.exchange}`}
+                      historicalQueryExtra={trendHistoricalExtra}
+                      selectedIntervalsOrdered={trendIntervalsOrdered}
+                      variant="browseAlways"
+                    />
+                  ) : null}
+                </Col>
+              </Row>
             </Card.Body>
           </Card>
         </Col>
