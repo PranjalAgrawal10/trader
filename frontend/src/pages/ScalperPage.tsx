@@ -21,7 +21,7 @@ import { Layout } from '../components/Layout'
 import { TrendAnalysisMultiPanel } from '../components/TrendAnalysisMultiPanel'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
 import { useChartOlderBars } from '../hooks/useChartOlderBars'
-import { CHART_INTERVALS, type ChartGraphType } from '../utils/kiteInstrumentChartShared'
+import { type ChartGraphType } from '../utils/kiteInstrumentChartShared'
 import {
   chartPointsFromHistorical,
   mergeScalperLiveIntoSeries,
@@ -44,7 +44,20 @@ import {
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
 import { isIstMarketLiveWindow } from '../utils/marketHours'
 
-const SCALPER_TREND_INTERVAL_OPTIONS: readonly string[] = ['1m', '2m', '3m', '5m', '10m', '15m', '30m', '1h']
+const SCALPER_TREND_INTERVAL_OPTIONS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: '1m', label: '1m' },
+  { id: '2m', label: '2m' },
+  { id: '3m', label: '3m' },
+  { id: '5m', label: '5m' },
+  { id: '10m', label: '10m' },
+  { id: '15m', label: '15m' },
+  { id: '30m', label: '30m' },
+  { id: '1h', label: '1h' },
+  { id: '90m', label: '1.5h' },
+  { id: '2h', label: '2h' },
+  { id: '4h', label: '4h' },
+  { id: '8h', label: '8h' },
+]
 const SCALPER_ATM_POLL_MS = 5_000
 
 interface KiteInstrumentLiveQuoteResponse {
@@ -543,7 +556,7 @@ export function ScalperPage() {
 
   const trendHistoricalExtra = useMemo(() => scalperRangeQueryParams(rangePreset), [rangePreset])
   const trendIntervalsOrdered = useMemo(
-    () => CHART_INTERVALS.filter((iv) => trendIntervals.includes(iv)),
+    () => SCALPER_TREND_INTERVAL_OPTIONS.map((opt) => opt.id).filter((id) => trendIntervals.includes(id)),
     [trendIntervals],
   )
 
@@ -961,40 +974,38 @@ export function ScalperPage() {
                   ) : null}
                   {selected ? (
                     <div className="border rounded border-secondary-subtle p-1 mb-2">
-                      <div className="d-flex align-items-center gap-2">
-                        <div
-                          className="small fw-semibold text-nowrap"
-                          style={{ fontSize: '0.72rem', letterSpacing: '0.02em', minWidth: '8.7rem' }}
-                        >
-                          Trend analysis intervals
-                        </div>
-                        <div className="d-flex align-items-center flex-nowrap overflow-auto ms-auto scalper-compact-scrollbar">
-                          <ButtonGroup size="sm" className="flex-nowrap">
-                            {SCALPER_TREND_INTERVAL_OPTIONS.map((iv) => {
-                              const active = trendIntervals.includes(iv)
-                              return (
-                                <Button
-                                  key={`scalper-trend-${iv}`}
-                                  size="sm"
-                                  variant={active ? 'secondary' : 'outline-secondary'}
-                                  style={{
-                                    padding: '0.12rem 0.38rem',
-                                    fontSize: '0.68rem',
-                                    lineHeight: 1.1,
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                  onClick={() =>
-                                    setTrendIntervals((prev) =>
-                                      prev.includes(iv) ? prev.filter((x) => x !== iv) : [...prev, iv],
-                                    )
-                                  }
-                                >
-                                  {iv}
-                                </Button>
-                              )
-                            })}
-                          </ButtonGroup>
-                        </div>
+                      <div
+                        className="small fw-semibold mb-1"
+                        style={{ fontSize: '0.72rem', letterSpacing: '0.02em' }}
+                      >
+                        Trend analysis intervals
+                      </div>
+                      <div className="d-flex align-items-center flex-nowrap overflow-auto scalper-compact-scrollbar">
+                        <ButtonGroup size="sm" className="flex-nowrap">
+                          {SCALPER_TREND_INTERVAL_OPTIONS.map((opt) => {
+                            const active = trendIntervals.includes(opt.id)
+                            return (
+                              <Button
+                                key={`scalper-trend-${opt.id}`}
+                                size="sm"
+                                variant={active ? 'secondary' : 'outline-secondary'}
+                                style={{
+                                  padding: '0.12rem 0.38rem',
+                                  fontSize: '0.68rem',
+                                  lineHeight: 1.1,
+                                  whiteSpace: 'nowrap',
+                                }}
+                                onClick={() =>
+                                  setTrendIntervals((prev) =>
+                                    prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id],
+                                  )
+                                }
+                              >
+                                {opt.label}
+                              </Button>
+                            )
+                          })}
+                        </ButtonGroup>
                       </div>
                     </div>
                   ) : null}
