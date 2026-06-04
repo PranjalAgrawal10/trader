@@ -4398,6 +4398,7 @@ export function KiteInstrumentsPage() {
   const [atmLiveLoading, setAtmLiveLoading] = useState(false)
   const [atmError, setAtmError] = useState<string | null>(null)
   const [atmLastUpdatedAt, setAtmLastUpdatedAt] = useState<string | null>(null)
+  const [atmActiveKey, setAtmActiveKey] = useState<string | null>(null)
   const [atmSnapshots, setAtmSnapshots] = useState<IndexAtmSnapshot[]>(
     INDEX_ATM_TARGETS.map((t) => ({
       key: t.key,
@@ -5404,24 +5405,49 @@ export function KiteInstrumentsPage() {
   }, [isZerodha])
 
   const refreshAtmLive = useCallback(async () => {
-    if (!isZerodha || mainTab !== 'browse') return
+    if (!isZerodha) return
+    if (!atmActiveKey) return
     if (INDEX_ATM_TARGETS.every((t) => !atmSpotRef.current[t.key])) return
     setAtmLiveLoading(true)
     setAtmError(null)
     try {
       const fetchQuote = async (row: KiteInstrumentRow | null): Promise<KiteInstrumentLiveQuoteResponse | null> => {
         if (!row) return null
-        const { data } = await api.get<KiteInstrumentLiveQuoteResponse>('/broker/kite/chart/live-quote', {
-          params: { exchange: row.exchange, tradingsymbol: row.tradingsymbol },
-        })
-        return data
+        try {
+          const { data } = await api.get<KiteInstrumentLiveQuoteResponse>('/broker/kite/chart/live-quote', {
+            params: { exchange: row.exchange, tradingsymbol: row.tradingsymbol },
+          })
+          return data
+        } catch {
+          // Keep last known quote in UI when this tick fails.
+          return null
+        }
       }
+      const previousByKey = new Map(atmSnapshots.map((s) => [s.key, s]))
       const snapshots = await Promise.all(
         INDEX_ATM_TARGETS.map(async (target): Promise<IndexAtmSnapshot> => {
           const spotRow = atmSpotRef.current[target.key] ?? null
+          const previous = previousByKey.get(target.key) ?? null
+          if (target.key !== atmActiveKey) {
+            return previous
+              ? { ...previous, spotRow }
+              : {
+                  key: target.key,
+                  label: target.label,
+                  spotRow,
+                  spotQuote: null,
+                  optionExpiry: null,
+                  atmStrike: null,
+                  chainRows: [],
+                  ceRow: null,
+                  peRow: null,
+                  ceQuote: null,
+                  peQuote: null,
+                }
+          }
           const spotQuote = await fetchQuote(spotRow)
           const options = atmOptionsRef.current[target.key] ?? []
-          const atm = pickAtmLegs(options, spotQuote?.lastPrice ?? Number.NaN)
+          const atm = pickAtmLegs(options, spotQuote?.lastPrice ?? previous?.spotQuote?.lastPrice ?? Number.NaN)
           const chainRowsSeed = buildAtmChainRows(options, atm.expiry, atm.strike, 3)
           const uniqueRows = new Map<string, KiteInstrumentRow>()
           for (const row of chainRowsSeed) {
@@ -5435,24 +5461,40 @@ export function KiteInstrumentsPage() {
           )
           const quoteByToken = new Map<string, KiteInstrumentLiveQuoteResponse | null>()
           for (const q of quoteEntries) quoteByToken.set(q.token, q.quote)
-          const ceQuote = atm.ce ? quoteByToken.get(atm.ce.instrumentToken) ?? null : null
-          const peQuote = atm.pe ? quoteByToken.get(atm.pe.instrumentToken) ?? null : null
-          const chainRows = chainRowsSeed.map((row) => ({
+          const previousChainByStrike = new Map(previous?.chainRows.map((r) => [r.strike, r]) ?? [])
+          const ceQuote =
+            atm.ce && quoteByToken.get(atm.ce.instrumentToken) != null
+              ? quoteByToken.get(atm.ce.instrumentToken) ?? null
+              : previous?.ceQuote ?? null
+          const peQuote =
+            atm.pe && quoteByToken.get(atm.pe.instrumentToken) != null
+              ? quoteByToken.get(atm.pe.instrumentToken) ?? null
+              : previous?.peQuote ?? null
+          const chainRows = chainRowsSeed.map((row) => {
+            const prevRow = previousChainByStrike.get(row.strike) ?? null
+            return {
             strike: row.strike,
             isAtm: row.isAtm,
             ceRow: row.ceRow,
             peRow: row.peRow,
-            ceQuote: row.ceRow ? quoteByToken.get(row.ceRow.instrumentToken) ?? null : null,
-            peQuote: row.peRow ? quoteByToken.get(row.peRow.instrumentToken) ?? null : null,
-          }))
+            ceQuote:
+              row.ceRow && quoteByToken.get(row.ceRow.instrumentToken) != null
+                ? quoteByToken.get(row.ceRow.instrumentToken) ?? null
+                : prevRow?.ceQuote ?? null,
+            peQuote:
+              row.peRow && quoteByToken.get(row.peRow.instrumentToken) != null
+                ? quoteByToken.get(row.peRow.instrumentToken) ?? null
+                : prevRow?.peQuote ?? null,
+          }})
+          const resolvedChainRows = chainRows.length > 0 ? chainRows : (previous?.chainRows ?? [])
           return {
             key: target.key,
             label: target.label,
             spotRow,
-            spotQuote,
-            optionExpiry: atm.expiry,
-            atmStrike: atm.strike,
-            chainRows,
+            spotQuote: spotQuote ?? previous?.spotQuote ?? null,
+            optionExpiry: atm.expiry ?? previous?.optionExpiry ?? null,
+            atmStrike: atm.strike ?? previous?.atmStrike ?? null,
+            chainRows: resolvedChainRows,
             ceRow: atm.ce,
             peRow: atm.pe,
             ceQuote,
@@ -5467,7 +5509,7 @@ export function KiteInstrumentsPage() {
     } finally {
       setAtmLiveLoading(false)
     }
-  }, [isZerodha, mainTab])
+  }, [atmActiveKey, atmSnapshots, isZerodha])
 
   useEffect(() => {
     if (!isZerodha || mainTab !== 'browse') return
@@ -5475,18 +5517,19 @@ export function KiteInstrumentsPage() {
   }, [isZerodha, mainTab, loadTodayTopPerformers])
 
   useEffect(() => {
-    if (!isZerodha || mainTab !== 'browse') return
+    if (!isZerodha) return
     void loadAtmReferences()
-  }, [isZerodha, mainTab, loadAtmReferences])
+  }, [isZerodha, loadAtmReferences])
 
   useEffect(() => {
-    if (!isZerodha || mainTab !== 'browse') return
+    if (!isZerodha) return
+    if (!atmActiveKey) return
     void refreshAtmLive()
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void refreshAtmLive()
     }, ATM_TRACKER_POLL_MS)
     return () => window.clearInterval(id)
-  }, [isZerodha, mainTab, refreshAtmLive])
+  }, [atmActiveKey, isZerodha, refreshAtmLive])
 
   useEffect(() => {
     void loadStatus()
@@ -7365,6 +7408,185 @@ export function KiteInstrumentsPage() {
               </Alert>
             ) : null}
 
+            {mainTab !== 'browse' ? (
+              <div className="mt-4">
+                <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
+                  <div className="me-2">
+                    <h2 className="h6 mb-1">Live ATM (all major index underlyings)</h2>
+                    <p className="small text-secondary mb-0" style={{ maxWidth: '44rem' }}>
+                      Spot LTP and nearest-expiry ATM CE/PE candidates from Kite search + live quote snapshots.
+                      Load is lazy: data refresh starts only for the instrument you open via <strong>Show spot chart</strong>.
+                      {atmLastUpdatedAt ? ` Last update: ${formatLocalDateTime(atmLastUpdatedAt)}.` : ''}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline-secondary"
+                    size="sm"
+                    disabled={atmReferenceLoading || atmLiveLoading}
+                    onClick={() => {
+                      void loadAtmReferences()
+                      void refreshAtmLive()
+                    }}
+                  >
+                    {atmReferenceLoading || atmLiveLoading ? 'Refreshing…' : 'Refresh ATM'}
+                  </Button>
+                </div>
+                {atmError ? (
+                  <Alert variant="warning" className="py-2 small mb-2">
+                    {atmError}
+                  </Alert>
+                ) : null}
+                {atmSnapshots.length === 0 && !atmReferenceLoading && !atmLiveLoading ? (
+                  <p className="small text-secondary mb-0">
+                    No index ATM candidates resolved from current Kite search results.
+                  </p>
+                ) : null}
+                <Row className="g-2">
+                  {atmSnapshots.map((snap) => {
+                    const spotPct = snap.spotQuote?.previousClose
+                      ? ((snap.spotQuote.lastPrice - snap.spotQuote.previousClose) / snap.spotQuote.previousClose) * 100
+                      : null
+                    return (
+                      <Col key={snap.key} xs={12} lg={6}>
+                        <Card className="border-secondary-subtle">
+                          <Card.Body className="py-2 px-3">
+                            <div className="d-flex justify-content-between align-items-start gap-2 mb-1">
+                              <div className="fw-semibold">{snap.label}</div>
+                              {snap.optionExpiry ? (
+                                <Badge bg="secondary" className="font-monospace">
+                                  exp {snap.optionExpiry.slice(0, 10)}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <div className="small mb-1">
+                              Spot:{' '}
+                              <span className="font-monospace fw-semibold">
+                                {snap.spotQuote ? snap.spotQuote.lastPrice.toFixed(2) : '—'}
+                              </span>{' '}
+                              {spotPct != null ? (
+                                <span className={spotPct >= 0 ? 'text-success' : 'text-danger'}>
+                                  ({spotPct >= 0 ? '+' : ''}
+                                  {spotPct.toFixed(2)}%)
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="small mb-1">
+                              ATM strike:{' '}
+                              <span className="font-monospace fw-semibold">
+                                {snap.atmStrike != null ? snap.atmStrike.toFixed(2) : '—'}
+                              </span>
+                            </div>
+                            {snap.chainRows.length > 0 ? (
+                              <div className="table-responsive mt-2">
+                                <Table size="sm" bordered hover className="mb-0 small align-middle">
+                                  <thead>
+                                    <tr>
+                                      <th className="text-end">Call LTP</th>
+                                      <th className="text-center">Strike</th>
+                                      <th className="text-start">Put LTP</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="font-monospace">
+                                    {snap.chainRows.map((row) => (
+                                      <tr key={`${snap.key}-${row.strike}`} className={row.isAtm ? 'table-warning' : undefined}>
+                                        <td
+                                          role={row.ceRow ? 'button' : undefined}
+                                          className={`text-end ${row.ceRow ? 'cursor-pointer' : ''}`}
+                                          onClick={() => {
+                                            if (!row.ceRow) return
+                                            setAtmActiveKey(snap.key)
+                                            setChartRow(row.ceRow)
+                                          }}
+                                        >
+                                          {row.ceQuote ? row.ceQuote.lastPrice.toFixed(2) : '—'}
+                                        </td>
+                                        <td className="text-center fw-semibold">
+                                          {row.strike.toFixed(2)}
+                                          {row.isAtm ? ' ★' : ''}
+                                        </td>
+                                        <td
+                                          role={row.peRow ? 'button' : undefined}
+                                          className={`text-start ${row.peRow ? 'cursor-pointer' : ''}`}
+                                          onClick={() => {
+                                            if (!row.peRow) return
+                                            setAtmActiveKey(snap.key)
+                                            setChartRow(row.peRow)
+                                          }}
+                                        >
+                                          {row.peQuote ? row.peQuote.lastPrice.toFixed(2) : '—'}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </Table>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="small">
+                                  CE:{' '}
+                                  <span className="font-monospace">
+                                    {snap.ceRow ? `${snap.ceRow.tradingsymbol} @ ${snap.ceQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
+                                  </span>
+                                </div>
+                                <div className="small">
+                                  PE:{' '}
+                                  <span className="font-monospace">
+                                    {snap.peRow ? `${snap.peRow.tradingsymbol} @ ${snap.peQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                            <div className="mt-2 d-flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline-primary"
+                                size="sm"
+                                disabled={!snap.spotRow}
+                                onClick={() => {
+                                  if (!snap.spotRow) return
+                                  setAtmActiveKey(snap.key)
+                                  setChartRow(snap.spotRow)
+                                }}
+                              >
+                                Show spot chart
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline-secondary"
+                                size="sm"
+                                disabled={!snap.ceRow}
+                                onClick={() => {
+                                  if (!snap.ceRow) return
+                                  setAtmActiveKey(snap.key)
+                                  setChartRow(snap.ceRow)
+                                }}
+                              >
+                                CE chart
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline-secondary"
+                                size="sm"
+                                disabled={!snap.peRow}
+                                onClick={() => {
+                                  if (!snap.peRow) return
+                                  setAtmActiveKey(snap.key)
+                                  setChartRow(snap.peRow)
+                                }}
+                              >
+                                PE chart
+                              </Button>
+                            </div>
+                          </Card.Body>
+                        </Card>
+                      </Col>
+                    )
+                  })}
+                </Row>
+              </div>
+            ) : null}
+
             {mainTab === 'browse' ? (
               <>
                 <div className="mt-4">
@@ -7373,6 +7595,7 @@ export function KiteInstrumentsPage() {
                       <h2 className="h6 mb-1">Live ATM (all major index underlyings)</h2>
                       <p className="small text-secondary mb-0" style={{ maxWidth: '44rem' }}>
                         Spot LTP and nearest-expiry ATM CE/PE candidates from Kite search + live quote snapshots.
+                        Load is lazy: data refresh starts only for the instrument you open via <strong>Show spot chart</strong>.
                         {atmLastUpdatedAt ? ` Last update: ${formatLocalDateTime(atmLastUpdatedAt)}.` : ''}
                       </p>
                     </div>
@@ -7452,6 +7675,7 @@ export function KiteInstrumentsPage() {
                                             className={`text-end ${row.ceRow ? 'cursor-pointer' : ''}`}
                                             onClick={() => {
                                               if (!row.ceRow) return
+                                              setAtmActiveKey(snap.key)
                                               setChartRow(row.ceRow)
                                             }}
                                           >
@@ -7466,6 +7690,7 @@ export function KiteInstrumentsPage() {
                                             className={`text-start ${row.peRow ? 'cursor-pointer' : ''}`}
                                             onClick={() => {
                                               if (!row.peRow) return
+                                              setAtmActiveKey(snap.key)
                                               setChartRow(row.peRow)
                                             }}
                                           >
@@ -7500,6 +7725,7 @@ export function KiteInstrumentsPage() {
                                   disabled={!snap.spotRow}
                                   onClick={() => {
                                     if (!snap.spotRow) return
+                                    setAtmActiveKey(snap.key)
                                     setChartRow(snap.spotRow)
                                   }}
                                 >
@@ -7512,6 +7738,7 @@ export function KiteInstrumentsPage() {
                                   disabled={!snap.ceRow}
                                   onClick={() => {
                                     if (!snap.ceRow) return
+                                    setAtmActiveKey(snap.key)
                                     setChartRow(snap.ceRow)
                                   }}
                                 >
@@ -7524,6 +7751,7 @@ export function KiteInstrumentsPage() {
                                   disabled={!snap.peRow}
                                   onClick={() => {
                                     if (!snap.peRow) return
+                                    setAtmActiveKey(snap.key)
                                     setChartRow(snap.peRow)
                                   }}
                                 >
