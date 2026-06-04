@@ -774,6 +774,28 @@ interface TodayTopPerformersResponse {
   basis: string
 }
 
+interface KiteInstrumentLiveQuoteResponse {
+  exchange: string
+  tradingsymbol: string
+  lastPrice: number
+  previousClose: number
+}
+
+type IndexAtmKey = 'nifty' | 'sensex'
+
+interface IndexAtmSnapshot {
+  key: IndexAtmKey
+  label: string
+  spotRow: KiteInstrumentRow | null
+  spotQuote: KiteInstrumentLiveQuoteResponse | null
+  optionExpiry: string | null
+  atmStrike: number | null
+  ceRow: KiteInstrumentRow | null
+  peRow: KiteInstrumentRow | null
+  ceQuote: KiteInstrumentLiveQuoteResponse | null
+  peQuote: KiteInstrumentLiveQuoteResponse | null
+}
+
 interface MlAutomationRecentRow {
   id: string
   predictedAt: string
@@ -971,6 +993,83 @@ function expandInstrumentSearchTokens(raw: string): string[] {
 
 function rowMatchesInstrumentSearchTokens(haystackLower: string, tokens: string[]): boolean {
   return tokens.every((tok) => haystackLower.includes(tok))
+}
+
+function parseExpiryIsoToMs(expiryIso: string | null): number | null {
+  if (!expiryIso) return null
+  const ms = Date.parse(expiryIso)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function isOptionRow(row: KiteInstrumentRow): boolean {
+  const kind = (row.instrumentType ?? '').trim().toUpperCase()
+  if (kind === 'CE' || kind === 'PE') return true
+  const ts = row.tradingsymbol.trim().toUpperCase()
+  return ts.endsWith('CE') || ts.endsWith('PE')
+}
+
+function chooseAtmSpotRow(rows: KiteInstrumentRow[], key: IndexAtmKey): KiteInstrumentRow | null {
+  const norm = (s: string | null | undefined) => (s ?? '').replace(/\s+/g, '').toUpperCase()
+  const target = key === 'nifty' ? 'NIFTY50' : 'SENSEX'
+  const exact = rows.find((r) => norm(r.tradingsymbol) === target)
+  if (exact) return exact
+
+  const exactName = rows.find((r) => norm(r.name) === target)
+  if (exactName) return exactName
+
+  const preferredExchange = key === 'nifty' ? 'NSE' : 'BSE'
+  const fallback = rows.find((r) => r.exchange.trim().toUpperCase() === preferredExchange)
+  return fallback ?? rows[0] ?? null
+}
+
+function filterOptionsForUnderlying(rows: KiteInstrumentRow[], key: IndexAtmKey): KiteInstrumentRow[] {
+  const isSensex = key === 'sensex'
+  return rows.filter((r) => {
+    if (!isOptionRow(r) || r.strike == null || parseExpiryIsoToMs(r.expiry) == null) return false
+    const ts = r.tradingsymbol.trim().toUpperCase()
+    const nm = (r.name ?? '').trim().toUpperCase()
+    if (isSensex) {
+      return ts.includes('SENSEX') || nm === 'SENSEX'
+    }
+    if (ts.includes('BANKNIFTY') || ts.includes('FINNIFTY') || ts.includes('MIDCPNIFTY')) return false
+    return ts.startsWith('NIFTY') || nm === 'NIFTY' || nm === 'NIFTY 50'
+  })
+}
+
+function pickNearestFutureExpiry(options: KiteInstrumentRow[]): string | null {
+  const now = Date.now()
+  const futureMs = options
+    .map((r) => parseExpiryIsoToMs(r.expiry))
+    .filter((x): x is number => x != null && x >= now)
+    .sort((a, b) => a - b)
+  if (futureMs.length > 0) return new Date(futureMs[0]!).toISOString()
+
+  const anyMs = options
+    .map((r) => parseExpiryIsoToMs(r.expiry))
+    .filter((x): x is number => x != null)
+    .sort((a, b) => a - b)
+  return anyMs.length > 0 ? new Date(anyMs[0]!).toISOString() : null
+}
+
+function pickAtmLegs(
+  options: KiteInstrumentRow[],
+  spotLtp: number,
+): { expiry: string | null; strike: number | null; ce: KiteInstrumentRow | null; pe: KiteInstrumentRow | null } {
+  if (!Number.isFinite(spotLtp) || options.length === 0) {
+    return { expiry: null, strike: null, ce: null, pe: null }
+  }
+  const expiryIso = pickNearestFutureExpiry(options)
+  if (!expiryIso) return { expiry: null, strike: null, ce: null, pe: null }
+  const expiryMs = Date.parse(expiryIso)
+  const bucket = options.filter((r) => parseExpiryIsoToMs(r.expiry) === expiryMs && r.strike != null)
+  if (bucket.length === 0) return { expiry: expiryIso, strike: null, ce: null, pe: null }
+  const strikes = [...new Set(bucket.map((r) => Number(r.strike)).filter(Number.isFinite))]
+  if (strikes.length === 0) return { expiry: expiryIso, strike: null, ce: null, pe: null }
+  const strike = strikes.reduce((best, s) => (Math.abs(s - spotLtp) < Math.abs(best - spotLtp) ? s : best), strikes[0]!)
+  const strikeRows = bucket.filter((r) => Number(r.strike) === strike)
+  const ce = strikeRows.find((r) => (r.instrumentType ?? '').toUpperCase() === 'CE' || r.tradingsymbol.toUpperCase().endsWith('CE')) ?? null
+  const pe = strikeRows.find((r) => (r.instrumentType ?? '').toUpperCase() === 'PE' || r.tradingsymbol.toUpperCase().endsWith('PE')) ?? null
+  return { expiry: expiryIso, strike, ce, pe }
 }
 
 function InstrumentListPanel({
@@ -1358,6 +1457,7 @@ const ML_AUTOMATION_TABLE_MAX_HEIGHT = 'min(780px, 75vh)'
 /** Matches server max take for today-top-performers; Browse shows TODAY_TOP_MOVERS_PAGE_SIZE rows then Load more. */
 const TODAY_TOP_MOVERS_FETCH_TAKE = 30
 const TODAY_TOP_MOVERS_PAGE_SIZE = 5
+const ATM_TRACKER_POLL_MS = 5_000
 
 type CandleRangeMeta = { interval: string; from: string; to: string }
 
@@ -4250,6 +4350,38 @@ export function KiteInstrumentsPage() {
   const [todayTopBasis, setTodayTopBasis] = useState('')
   const [todayTopLoading, setTodayTopLoading] = useState(false)
   const [todayTopError, setTodayTopError] = useState<string | null>(null)
+  const [atmReferenceLoading, setAtmReferenceLoading] = useState(false)
+  const [atmLiveLoading, setAtmLiveLoading] = useState(false)
+  const [atmError, setAtmError] = useState<string | null>(null)
+  const [atmLastUpdatedAt, setAtmLastUpdatedAt] = useState<string | null>(null)
+  const [atmSnapshots, setAtmSnapshots] = useState<IndexAtmSnapshot[]>([
+    {
+      key: 'nifty',
+      label: 'NIFTY',
+      spotRow: null,
+      spotQuote: null,
+      optionExpiry: null,
+      atmStrike: null,
+      ceRow: null,
+      peRow: null,
+      ceQuote: null,
+      peQuote: null,
+    },
+    {
+      key: 'sensex',
+      label: 'SENSEX',
+      spotRow: null,
+      spotQuote: null,
+      optionExpiry: null,
+      atmStrike: null,
+      ceRow: null,
+      peRow: null,
+      ceQuote: null,
+      peQuote: null,
+    },
+  ])
+  const atmSpotRef = useRef<Record<IndexAtmKey, KiteInstrumentRow | null>>({ nifty: null, sensex: null })
+  const atmOptionsRef = useRef<Record<IndexAtmKey, KiteInstrumentRow[]>>({ nifty: [], sensex: [] })
   const [chartRow, setChartRow] = useState<KiteInstrumentRow | null>(null)
   const [chartInterval, setChartInterval] = useState<ChartInterval>('5m')
   const [trendAnalysisSelections, setTrendAnalysisSelections] =
@@ -5220,10 +5352,110 @@ export function KiteInstrumentsPage() {
     }
   }, [isZerodha])
 
+  const loadAtmReferences = useCallback(async () => {
+    if (!isZerodha) {
+      atmSpotRef.current = { nifty: null, sensex: null }
+      atmOptionsRef.current = { nifty: [], sensex: [] }
+      setAtmError(null)
+      return
+    }
+    setAtmReferenceLoading(true)
+    setAtmError(null)
+    try {
+      const [niftySpotRes, sensexSpotRes, niftyOptRes, sensexOptRes] = await Promise.all([
+        api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', { params: { q: 'NIFTY 50', segment: 'spot' } }),
+        api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', { params: { q: 'SENSEX', segment: 'spot' } }),
+        api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', { params: { q: 'NIFTY', segment: 'fno' } }),
+        api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', { params: { q: 'SENSEX', segment: 'fno' } }),
+      ])
+      atmSpotRef.current = {
+        nifty: chooseAtmSpotRow(niftySpotRes.data.items ?? [], 'nifty'),
+        sensex: chooseAtmSpotRow(sensexSpotRes.data.items ?? [], 'sensex'),
+      }
+      atmOptionsRef.current = {
+        nifty: filterOptionsForUnderlying(niftyOptRes.data.items ?? [], 'nifty'),
+        sensex: filterOptionsForUnderlying(sensexOptRes.data.items ?? [], 'sensex'),
+      }
+    } catch (err) {
+      setAtmError(problemDetail(err))
+    } finally {
+      setAtmReferenceLoading(false)
+    }
+  }, [isZerodha])
+
+  const refreshAtmLive = useCallback(async () => {
+    if (!isZerodha || mainTab !== 'browse') return
+    if (!atmSpotRef.current.nifty && !atmSpotRef.current.sensex) return
+    setAtmLiveLoading(true)
+    setAtmError(null)
+    try {
+      const fetchQuote = async (row: KiteInstrumentRow | null): Promise<KiteInstrumentLiveQuoteResponse | null> => {
+        if (!row) return null
+        const { data } = await api.get<KiteInstrumentLiveQuoteResponse>('/broker/kite/chart/live-quote', {
+          params: { exchange: row.exchange, tradingsymbol: row.tradingsymbol },
+        })
+        return data
+      }
+
+      const [niftySpotQuote, sensexSpotQuote] = await Promise.all([
+        fetchQuote(atmSpotRef.current.nifty),
+        fetchQuote(atmSpotRef.current.sensex),
+      ])
+
+      const buildSnapshot = async (
+        key: IndexAtmKey,
+        label: string,
+        spotRow: KiteInstrumentRow | null,
+        spotQuote: KiteInstrumentLiveQuoteResponse | null,
+      ): Promise<IndexAtmSnapshot> => {
+        const options = atmOptionsRef.current[key]
+        const atm = pickAtmLegs(options, spotQuote?.lastPrice ?? Number.NaN)
+        const [ceQuote, peQuote] = await Promise.all([fetchQuote(atm.ce), fetchQuote(atm.pe)])
+        return {
+          key,
+          label,
+          spotRow,
+          spotQuote,
+          optionExpiry: atm.expiry,
+          atmStrike: atm.strike,
+          ceRow: atm.ce,
+          peRow: atm.pe,
+          ceQuote,
+          peQuote,
+        }
+      }
+
+      const snapshots = await Promise.all([
+        buildSnapshot('nifty', 'NIFTY', atmSpotRef.current.nifty, niftySpotQuote),
+        buildSnapshot('sensex', 'SENSEX', atmSpotRef.current.sensex, sensexSpotQuote),
+      ])
+      setAtmSnapshots(snapshots)
+      setAtmLastUpdatedAt(new Date().toISOString())
+    } catch (err) {
+      setAtmError(problemDetail(err))
+    } finally {
+      setAtmLiveLoading(false)
+    }
+  }, [isZerodha, mainTab])
+
   useEffect(() => {
     if (!isZerodha || instrumentsLoading || !instruments || mainTab !== 'browse') return
     void loadTodayTopPerformers()
   }, [isZerodha, instrumentsLoading, instruments, mainTab, loadTodayTopPerformers])
+
+  useEffect(() => {
+    if (!isZerodha || mainTab !== 'browse') return
+    void loadAtmReferences()
+  }, [isZerodha, mainTab, loadAtmReferences])
+
+  useEffect(() => {
+    if (!isZerodha || mainTab !== 'browse') return
+    void refreshAtmLive()
+    const id = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshAtmLive()
+    }, ATM_TRACKER_POLL_MS)
+    return () => window.clearInterval(id)
+  }, [isZerodha, mainTab, refreshAtmLive])
 
   useEffect(() => {
     void loadStatus()
@@ -7113,6 +7345,87 @@ export function KiteInstrumentsPage() {
 
             {mainTab === 'browse' ? (
               <>
+                <div className="mt-4">
+                  <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
+                    <div className="me-2">
+                      <h2 className="h6 mb-1">Live ATM (NIFTY / SENSEX)</h2>
+                      <p className="small text-secondary mb-0" style={{ maxWidth: '44rem' }}>
+                        Spot LTP and nearest-expiry ATM CE/PE candidates from Kite search + live quote snapshots.
+                        {atmLastUpdatedAt ? ` Last update: ${formatLocalDateTime(atmLastUpdatedAt)}.` : ''}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline-secondary"
+                      size="sm"
+                      disabled={atmReferenceLoading || atmLiveLoading}
+                      onClick={() => {
+                        void loadAtmReferences()
+                        void refreshAtmLive()
+                      }}
+                    >
+                      {atmReferenceLoading || atmLiveLoading ? 'Refreshing…' : 'Refresh ATM'}
+                    </Button>
+                  </div>
+                  {atmError ? (
+                    <Alert variant="warning" className="py-2 small mb-2">
+                      {atmError}
+                    </Alert>
+                  ) : null}
+                  <Row className="g-2">
+                    {atmSnapshots.map((snap) => {
+                      const spotPct = snap.spotQuote?.previousClose
+                        ? ((snap.spotQuote.lastPrice - snap.spotQuote.previousClose) / snap.spotQuote.previousClose) * 100
+                        : null
+                      return (
+                        <Col key={snap.key} xs={12} lg={6}>
+                          <Card className="border-secondary-subtle">
+                            <Card.Body className="py-2 px-3">
+                              <div className="d-flex justify-content-between align-items-start gap-2 mb-1">
+                                <div className="fw-semibold">{snap.label}</div>
+                                {snap.optionExpiry ? (
+                                  <Badge bg="secondary" className="font-monospace">
+                                    exp {snap.optionExpiry.slice(0, 10)}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              <div className="small mb-1">
+                                Spot:{' '}
+                                <span className="font-monospace fw-semibold">
+                                  {snap.spotQuote ? snap.spotQuote.lastPrice.toFixed(2) : '—'}
+                                </span>{' '}
+                                {spotPct != null ? (
+                                  <span className={spotPct >= 0 ? 'text-success' : 'text-danger'}>
+                                    ({spotPct >= 0 ? '+' : ''}
+                                    {spotPct.toFixed(2)}%)
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="small mb-1">
+                                ATM strike:{' '}
+                                <span className="font-monospace fw-semibold">
+                                  {snap.atmStrike != null ? snap.atmStrike.toFixed(2) : '—'}
+                                </span>
+                              </div>
+                              <div className="small">
+                                CE:{' '}
+                                <span className="font-monospace">
+                                  {snap.ceRow ? `${snap.ceRow.tradingsymbol} @ ${snap.ceQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
+                                </span>
+                              </div>
+                              <div className="small">
+                                PE:{' '}
+                                <span className="font-monospace">
+                                  {snap.peRow ? `${snap.peRow.tradingsymbol} @ ${snap.peQuote?.lastPrice?.toFixed(2) ?? '—'}` : '—'}
+                                </span>
+                              </div>
+                            </Card.Body>
+                          </Card>
+                        </Col>
+                      )
+                    })}
+                  </Row>
+                </div>
                 <div className="mt-4">
                   <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
                     <div className="me-2">
