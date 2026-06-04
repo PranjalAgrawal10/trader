@@ -1137,8 +1137,8 @@ function InstrumentListPanel({
   loading: boolean
   emptyHint: string
   searchSegment: 'fno' | 'mcx' | 'spot'
-  /** `panel`: segment only; `fno_mcx`: combined derivatives + commodities; `all`: F&O + Spot + MCX. */
-  kiteLiveSegmentScope?: 'panel' | 'fno_mcx' | 'all'
+  /** `panel`: segment only; `fno_mcx`: derivatives + commodities; `spot_mcx`: spot + commodities; `all`: F&O + Spot + MCX. */
+  kiteLiveSegmentScope?: 'panel' | 'fno_mcx' | 'spot_mcx' | 'all'
   selectedRowKey: string | null
   onSelectRow: (row: KiteInstrumentRow) => void
   enableKiteLiveSearch?: boolean
@@ -1203,6 +1203,8 @@ function InstrumentListPanel({
       const segments: Array<'fno' | 'mcx' | 'spot'> =
         kiteLiveSegmentScope === 'all'
           ? ['fno', 'spot', 'mcx']
+          : kiteLiveSegmentScope === 'spot_mcx'
+            ? ['spot', 'mcx']
           : kiteLiveSegmentScope === 'fno_mcx'
             ? ['fno', 'mcx']
             : [searchSegment]
@@ -3932,11 +3934,7 @@ function InstrumentChartCard({
 
     chartFetchCtxRef.current = { token, interval, range: rangePreset }
 
-    if (contextChanged) {
-      setSeries([])
-      setCandleRange(null)
-      setError(null)
-    }
+    if (contextChanged) setError(null)
 
     setLoading(true)
 
@@ -3955,8 +3953,6 @@ function InstrumentChartCard({
       } catch (err: unknown) {
         if (axios.isAxiosError(err) && err.code === 'ERR_CANCELED') return
         if (initial) {
-          setSeries([])
-          setCandleRange(null)
           setError(problemDetail(err))
         }
       } finally {
@@ -4039,7 +4035,7 @@ function InstrumentChartCard({
     />
   )
 
-  const browseHasChartData = !error && displayWithMa.length > 0
+  const browseHasChartData = displayWithMa.length > 0
   const browseDetailMetaInFullscreen = fullscreenActive && browseHasChartData
 
   const browseDetailMeta =
@@ -4220,8 +4216,8 @@ function InstrumentChartCard({
               <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.
             </p>
             {error ? (
-              <Alert variant="danger" className="py-2 small mb-2">
-                {error}
+              <Alert variant={displayWithMa.length > 0 ? 'warning' : 'danger'} className="py-2 small mb-2">
+                {displayWithMa.length > 0 ? `Live refresh failed; showing previous chart snapshot. ${error}` : error}
               </Alert>
             ) : null}
             {displayWithMa.length === 0 ? (
@@ -5584,8 +5580,8 @@ export function KiteInstrumentsPage() {
                 <Card.Title className="h5 mb-0">Kite instruments</Card.Title>
                 <Card.Text className="text-secondary small mt-2 mb-0">
                   Browse uses on-demand search only: press <strong>Enter</strong> / <strong>Search Kite</strong> for a combined
-                  F&amp;O + MCX scan (no preloaded list). Spot has its own on-demand panel. On <strong>All favorites</strong> and <strong>Locked for trading</strong>, live search
-                  still scans F&amp;O + Spot + MCX. Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
+                  Spot + MCX scan (no preloaded list). On <strong>All favorites</strong> and <strong>Locked for trading</strong>, live search
+                  also scans Spot + MCX only. Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
                   open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below.                   Scheduled
                   automation and the merged prediction log live on <strong>Auto predictions</strong>; hypothetical{' '}
                   <strong>Demo auto-trade</strong> settings and reports live on that tab&apos;s sibling.
@@ -7408,7 +7404,7 @@ export function KiteInstrumentsPage() {
               </Alert>
             ) : null}
 
-            {mainTab !== 'browse' ? (
+            {mainTab !== 'browse' && mainTab !== 'favorites' && mainTab !== 'tradingLocks' ? (
               <div className="mt-4">
                 <div className="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-2">
                   <div className="me-2">
@@ -7878,28 +7874,13 @@ export function KiteInstrumentsPage() {
                   ) : null}
                 </div>
                 <InstrumentListPanel
-                  title="Combined search: Futures & options (NFO / BFO) + Commodities (MCX)"
+                  title="Spot equity search (NSE / BSE cash) + Commodities (MCX)"
                   rows={EMPTY_INSTRUMENTS}
                   truncated={false}
                   loading={false}
-                  emptyHint="No preloaded rows. Type a symbol, strike, or expiry token, then press Enter or Search Kite for combined F&O + MCX results."
-                  searchSegment="fno"
-                  kiteLiveSegmentScope="fno_mcx"
-                  selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
-                  onSelectRow={setChartRow}
-                  favoriteKeySet={favoriteKeySet}
-                  onToggleFavorite={(r) => void toggleFavorite(r)}
-                  tradingLockKeySet={tradingLockKeySet}
-                  onToggleTradingLock={(r) => void toggleTradingLock(r)}
-                />
-                <InstrumentListPanel
-                  title="Spot equity search (NSE / BSE cash)"
-                  rows={EMPTY_INSTRUMENTS}
-                  truncated={false}
-                  loading={false}
-                  emptyHint="No preloaded rows. Type a symbol/company and press Enter or Search Kite for Spot-only matches."
+                  emptyHint="No preloaded rows. Type a symbol/company/commodity and press Enter or Search Kite for combined Spot + MCX matches."
                   searchSegment="spot"
-                  kiteLiveSegmentScope="panel"
+                  kiteLiveSegmentScope="spot_mcx"
                   selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
@@ -7917,7 +7898,7 @@ export function KiteInstrumentsPage() {
                   loading={false}
                   emptyHint="No favorites yet. Open Browse and tap the star (☆) on any contract row."
                   searchSegment="fno"
-                  kiteLiveSegmentScope="all"
+                  kiteLiveSegmentScope="spot_mcx"
                   selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
@@ -7962,7 +7943,7 @@ export function KiteInstrumentsPage() {
                   loading={false}
                   emptyHint="No instruments locked yet. On Browse (or All favorites), use 🔓 to lock a row for trading."
                   searchSegment="fno"
-                  kiteLiveSegmentScope="all"
+                  kiteLiveSegmentScope="spot_mcx"
                   selectedRowKey={chartRow ? favoriteRowKey(chartRow) : null}
                   onSelectRow={setChartRow}
                   favoriteKeySet={favoriteKeySet}
