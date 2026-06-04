@@ -11,17 +11,14 @@ using Trader.Application.Streaming;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
-using Trader.Application.Prediction;
 using Trader.Application.Abstractions.Reporting;
 using Trader.Infrastructure.Broker;
 using Trader.Infrastructure.Email;
 using Trader.Infrastructure.Persistence;
 using Trader.Infrastructure.Persistence.Repositories;
-using Trader.Infrastructure.Prediction;
 using Trader.Infrastructure.Reporting;
 using Trader.Infrastructure.Security;
 using Microsoft.Extensions.Hosting;
-using Trader.Infrastructure.Hosting;
 using Trader.Infrastructure.Streaming;
 
 namespace Trader.Infrastructure;
@@ -38,9 +35,7 @@ public static class DependencyInjection
         // Kite ApiKey/ApiSecret/RedirectUrl: environment variables (ZerodhaKite__*) and Development .env — not committed appsettings.
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
         services.Configure<LiveCandlesOptions>(configuration.GetSection(LiveCandlesOptions.SectionName));
-        services.Configure<FavoriteMlAutomationOptions>(configuration.GetSection(FavoriteMlAutomationOptions.SectionName));
         services.Configure<DemoAutoTradeOptions>(configuration.GetSection(DemoAutoTradeOptions.SectionName));
-        services.Configure<PriceDirectionPredictionOptions>(configuration.GetSection(PriceDirectionPredictionOptions.SectionName));
 
         services.AddSingleton<IKiteOAuthStateCodec, KiteOAuthStateCodec>();
         services.AddSingleton<ITwoFactorTotpHelper>(sp =>
@@ -104,9 +99,6 @@ public static class DependencyInjection
         services.AddScoped<IDemoPaperTradeLogRepository, DemoPaperTradeLogRepository>();
         services.AddScoped<IKiteFavoriteInstrumentRepository, KiteFavoriteInstrumentRepository>();
         services.AddScoped<IKiteTradingLockInstrumentRepository, KiteTradingLockInstrumentRepository>();
-        services.AddScoped<IMlPriceDirectionPredictionRepository, MlPriceDirectionPredictionRepository>();
-        services.AddScoped<IMlLightGbmTripleBarrierPredictionRepository, MlLightGbmTripleBarrierPredictionRepository>();
-        services.AddScoped<IMlFavoriteEodReportSentRepository, MlFavoriteEodReportSentRepository>();
         services.AddScoped<IStrategyRepository, StrategyRepository>();
         services.AddScoped<IBotRepository, BotRepository>();
         services.AddScoped<ITradeRepository, TradeRepository>();
@@ -117,25 +109,6 @@ public static class DependencyInjection
         services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
-        services.AddSingleton<IMlOutcomePieChartPngGenerator, ImageSharpMlOutcomePieChartPngGenerator>();
-
-        services.AddHostedService<FavoriteMlAutomationBackgroundService>();
-
-        services.AddSingleton<IPriceDirectionScoreCalibrator, JsonPiecewiseProbabilityCalibrator>();
-        services.AddSingleton<MlNetFnoMultiHorizonPredictionEngine>();
-        services.AddSingleton<MlNetPriceDirectionPredictionEngine>();
-        services.AddSingleton<MlNetLightGbmTripleBarrierPredictionEngine>();
-        services.AddSingleton<MomentumPriceDirectionPredictionEngine>();
-        services.AddSingleton<IPriceDirectionPredictionEngineRegistry>(sp =>
-            new PriceDirectionPredictionEngineRegistry(
-                new IPriceDirectionPredictionEngine[]
-                {
-                    sp.GetRequiredService<MlNetFnoMultiHorizonPredictionEngine>(),
-                    sp.GetRequiredService<MlNetLightGbmTripleBarrierPredictionEngine>(),
-                    sp.GetRequiredService<MlNetPriceDirectionPredictionEngine>(),
-                    sp.GetRequiredService<MomentumPriceDirectionPredictionEngine>(),
-                },
-                sp.GetRequiredService<IOptions<PriceDirectionPredictionOptions>>()));
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 

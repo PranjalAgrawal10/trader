@@ -943,8 +943,8 @@ function mainTabFromSearchParams(params: URLSearchParams): MainTab {
     tab === 'auto-trading' ||
     tab === 'demo-trade'
   )
-    return 'autoTrading'
-  if (tab === 'automation' || tab === 'auto' || tab === 'auto-ml' || tab === 'automl') return 'automation'
+    return 'browse'
+  if (tab === 'automation' || tab === 'auto' || tab === 'auto-ml' || tab === 'automl') return 'browse'
   return 'browse'
 }
 
@@ -2729,6 +2729,7 @@ function MlPredictionHistoryTableWithFilter({
 }
 
 /** ML next-bar direction; classic vs LightGBM rows use separate server tables and history endpoints. */
+void MlNextBarBiasBar
 function MlNextBarBiasBar({
   instrumentToken,
   interval,
@@ -3286,7 +3287,6 @@ function CompactPriceChart({
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
-  const [mlPredictionOverlayEntries, setMlPredictionOverlayEntries] = useState<readonly MlPredictionLogEntry[]>([])
   const fetchCtxRef = useRef<{
     token: string | null
     interval: ChartInterval | null
@@ -3351,10 +3351,6 @@ function CompactPriceChart({
       ac.abort()
     }
   }, [row.instrumentToken, interval, rangePreset, chartRefreshTick])
-
-  useEffect(() => {
-    setMlPredictionOverlayEntries([])
-  }, [row.instrumentToken, interval])
 
   const customEmaApplied = useMemo(
     () => effectiveCustomEmaPeriod(maLineVisibility, customEmaPeriod),
@@ -3455,14 +3451,6 @@ function CompactPriceChart({
               toIso={candleRange.to}
             />
           ) : null}
-          <MlNextBarBiasBar
-            instrumentToken={row.instrumentToken}
-            interval={interval}
-            compact
-            collapseMlByDefault
-            candleSeries={seriesWithCustom}
-            onPredictionHistoryChange={setMlPredictionOverlayEntries}
-          />
         </>
       ) : null}
       {compactHasChart ? (
@@ -3491,14 +3479,6 @@ function CompactPriceChart({
                   toIso={candleRange.to}
                 />
               ) : null}
-              <MlNextBarBiasBar
-                instrumentToken={row.instrumentToken}
-                interval={interval}
-                compact
-                collapseMlByDefault
-                candleSeries={seriesWithCustom}
-                onPredictionHistoryChange={setMlPredictionOverlayEntries}
-              />
               {compactChartZoomToolbar}
             </div>
           ) : null}
@@ -3524,7 +3504,6 @@ function CompactPriceChart({
               livePrice={live.lastPrice ?? null}
               paperLastBuyPrice={paperLastBuyPrice ?? null}
               paperBuyDataIndices={paperBuyDataIndices}
-              mlPredictionEntries={mlPredictionOverlayEntries}
               rechartsYDomain={rechartsYDomain ?? undefined}
               density="compact"
               newerGhostBars={0}
@@ -3905,7 +3884,6 @@ function InstrumentChartCard({
   const [error, setError] = useState<string | null>(null)
   const [candleRange, setCandleRange] = useState<CandleRangeMeta | null>(null)
   const [chartRefreshTick, setChartRefreshTick] = useState(0)
-  const [mlPredictionOverlayEntries, setMlPredictionOverlayEntries] = useState<readonly MlPredictionLogEntry[]>([])
   const chartFetchCtxRef = useRef<{
     token: string | null
     interval: ChartInterval | null
@@ -3972,10 +3950,6 @@ function InstrumentChartCard({
       ac.abort()
     }
   }, [selection?.instrumentToken, interval, rangePreset, chartRefreshTick])
-
-  useEffect(() => {
-    setMlPredictionOverlayEntries([])
-  }, [selection?.instrumentToken, interval])
 
   const displaySeries = useMemo(() => {
     if (browseSeriesSourceRef.current !== series) {
@@ -4103,12 +4077,6 @@ function InstrumentChartCard({
           selectedIntervalsOrdered={orderTrendSelections(trendAnalysisSelections)}
           variant="browseAlways"
         />
-        <MlNextBarBiasBar
-          instrumentToken={selection.instrumentToken}
-          interval={interval}
-          candleSeries={displayWithMa}
-          onPredictionHistoryChange={setMlPredictionOverlayEntries}
-        />
       </>
     )
 
@@ -4186,7 +4154,6 @@ function InstrumentChartCard({
                     livePrice={liveLastPrice ?? null}
                     paperLastBuyPrice={paperLastBuyPrice ?? null}
                     paperBuyDataIndices={browsePaperBuyDataIndices}
-                    mlPredictionEntries={mlPredictionOverlayEntries}
                     rechartsYDomain={rechartsYDomain ?? undefined}
                     density="comfortable"
                     newerGhostBars={0}
@@ -4206,14 +4173,7 @@ function InstrumentChartCard({
               price on candles, line, and bar views when subscribed; live ticks also update the in-progress{' '}
               <strong>candle</strong> in Candles view. Lime dashed verticals mark candles where OPEN demo{' '}
               <strong>paper BUY</strong> legs started (FIFO: lines drop as you <strong>sell</strong> lots); an{' '}
-              <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold lots.{' '}
-              <strong>ML next-bar bias</strong>{' '}
-              shows above bars as a compact row of Font Awesome arrows—green for <strong>up</strong> and red for <strong>down</strong>
-              —one icon per model’s next-interval call for <em>that candle&apos;s interval</em>. Hover a candle or use the{' '}
-              <strong>ML history</strong> panel for full rows. Calls{' '}
-              <span className="font-monospace">/api/v1/predictions/price-direction</span> with an optional{' '}
-              <span className="font-monospace">model</span> query (see{' '}
-              <span className="font-monospace">/predictions/price-direction/models</span>); not financial advice.
+              <strong className="text-warning">amber dashed “Last buy”</strong> horizontal locks the latest demo BUY fill when you still hold lots.
             </p>
             {error ? (
               <Alert variant={displayWithMa.length > 0 ? 'warning' : 'danger'} className="py-2 small mb-2">
@@ -5298,15 +5258,14 @@ export function KiteInstrumentsPage() {
     loadAutomationRecent,
   ])
 
-  // Poll merged automation rows while Auto predictions, All favorites, or Locked is visible
-  // (favorite tiles show a per-symbol strip; Browse stays quiet to avoid extra API load).
+  // Poll merged automation rows only on Auto predictions.
   useEffect(() => {
     if (!isZerodha) {
       setAutomationRecent([])
       setAutomationPriceModels(null)
       return
     }
-    if (!(mainTab === 'automation' || mainTab === 'favorites' || mainTab === 'tradingLocks')) return
+    if (mainTab !== 'automation') return
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void loadAutomationRecent()
     }, 60_000)
@@ -5315,13 +5274,13 @@ export function KiteInstrumentsPage() {
 
   useEffect(() => {
     if (!isZerodha) return
-    if (!(mainTab === 'automation' || mainTab === 'favorites' || mainTab === 'tradingLocks')) return
+    if (mainTab !== 'automation') return
     void loadAutomationRecent()
   }, [isZerodha, mainTab, automationEmailReportRange.from, automationEmailReportRange.to, loadAutomationRecent])
 
   useEffect(() => {
     if (!isZerodha) return
-    if (!(mainTab === 'automation' || mainTab === 'favorites' || mainTab === 'tradingLocks')) return
+    if (mainTab !== 'automation') return
     void loadAutomationPriceModels()
   }, [isZerodha, mainTab, loadAutomationPriceModels])
 
@@ -5548,7 +5507,7 @@ export function KiteInstrumentsPage() {
   }, [isZerodha, loadFavorites, loadTradingLocks])
 
   useEffect(() => {
-    if (!(isZerodha && (mainTab === 'automation' || mainTab === 'autoTrading' || mainTab === 'manualTrade'))) return
+    if (!(isZerodha && mainTab === 'manualTrade')) return
     void loadTradingLocks()
   }, [mainTab, isZerodha, loadTradingLocks])
 
@@ -5582,9 +5541,7 @@ export function KiteInstrumentsPage() {
                   Browse uses on-demand search only: press <strong>Enter</strong> / <strong>Search Kite</strong> for a combined
                   Spot + MCX scan (no preloaded list). On <strong>All favorites</strong> and <strong>Locked for trading</strong>, live search
                   also scans Spot + MCX only. Favorites, locks, and chart settings sync to your account; use ☆/★ and 🔓/🔒 on browse rows;
-                  open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below.                   Scheduled
-                  automation and the merged prediction log live on <strong>Auto predictions</strong>; hypothetical{' '}
-                  <strong>Demo auto-trade</strong> settings and reports live on that tab&apos;s sibling.
+                  open <strong>All favorites</strong> or <strong>Locked for trading</strong> for multi-chart grids. On <strong>Browse</strong>, click a row for the chart below.
                 </Card.Text>
               </Col>
               <Col xs={12} md="auto">
@@ -5614,13 +5571,7 @@ export function KiteInstrumentsPage() {
                 <Nav.Link eventKey="tradingLocks">Locked for trading ({tradingLocks.length})</Nav.Link>
               </Nav.Item>
               <Nav.Item>
-                <Nav.Link eventKey="automation">Auto predictions</Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
                 <Nav.Link eventKey="manualTrade">Manual trade</Nav.Link>
-              </Nav.Item>
-              <Nav.Item>
-                <Nav.Link eventKey="autoTrading">Demo auto-trade</Nav.Link>
               </Nav.Item>
             </Nav>
 

@@ -56,30 +56,6 @@ export default function App() {
         }
       />
       <Route
-        path="/instruments/automation"
-        element={
-          <Protected>
-            <RequiresTwoFactor>
-              <RequiresBroker>
-                <Navigate to="/instruments?tab=automation" replace />
-              </RequiresBroker>
-            </RequiresTwoFactor>
-          </Protected>
-        }
-      />
-      <Route
-        path="/instruments/demo-auto-trade"
-        element={
-          <Protected>
-            <RequiresTwoFactor>
-              <RequiresBroker>
-                <Navigate to="/instruments?tab=demo-auto-trade" replace />
-              </RequiresBroker>
-            </RequiresTwoFactor>
-          </Protected>
-        }
-      />
-      <Route
         path="/instruments/manual-trade"
         element={
           <Protected>

@@ -19,7 +19,6 @@ import { fetchMergedHistoricalChartCandles } from '../api/kiteChartHistorical'
 import { InstrumentPriceChart } from '../components/InstrumentPriceChart'
 import { Layout } from '../components/Layout'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
-import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
 import { useChartOlderBars } from '../hooks/useChartOlderBars'
 import {
   chartPointsFromHistorical,
@@ -215,17 +214,6 @@ export function ScalperPage() {
     }
     return mergeScalperLiveIntoSeries(rawSeries, live.lastTick, interval, liveVolAccRef.current)
   }, [rawSeries, live.lastTick, interval])
-
-  const { entries: mlPredictionEntries, reloadHistory: reloadMlHistory } = useMlChartPredictionEntries(
-    selected?.instrumentToken ?? null,
-    interval,
-    displaySeries,
-  )
-
-  useEffect(() => {
-    if (!selected?.instrumentToken || rawSeries.length === 0) return
-    void reloadMlHistory()
-  }, [selected?.instrumentToken, interval, rawSeries, reloadMlHistory])
 
   const liveVsBar = useMemo(() => {
     const last = live.lastPrice
@@ -458,7 +446,6 @@ export function ScalperPage() {
                     maLineVisibility={SCALPER_MA}
                     customEmaPeriod={null}
                     livePrice={live.lastPrice}
-                    mlPredictionEntries={mlPredictionEntries}
                     newerGhostBars={0}
                     onNeedOlderBars={loadOlderBars}
                     canLoadOlderBars={canLoadOlderBars}

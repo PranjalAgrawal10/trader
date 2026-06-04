@@ -12,7 +12,6 @@ import {
 import { useChartFullscreen } from '../hooks/useChartFullscreen'
 import { useChartOlderBars } from '../hooks/useChartOlderBars'
 import { useLiveMarketTick } from '../hooks/useLiveMarketTick'
-import { useMlChartPredictionEntries } from '../hooks/useMlChartPredictionEntries'
 import { chartDataIndicesForPaperBuyMarkers } from '../utils/demoPaperBuyBarMarkers'
 import {
   CHART_LIVE_POLL_MS,
@@ -214,17 +213,6 @@ export function ManualTradeScalperView({
     return d
   }, [chartData, maLineVisibility, paperLastBuyPrice, live.lastPrice])
 
-  const { entries: mlPredictionEntries, reloadHistory: reloadMlHistory } = useMlChartPredictionEntries(
-    selected?.instrumentToken ?? null,
-    interval,
-    seriesWithCustom,
-  )
-
-  useEffect(() => {
-    if (!selected?.instrumentToken || series.length === 0) return
-    void reloadMlHistory()
-  }, [selected?.instrumentToken, interval, series, reloadMlHistory])
-
   const { panelRef, fullscreenActive, toggleFullscreen } = useChartFullscreen()
 
   const manualChartZoomToolbar =
@@ -414,7 +402,6 @@ export function ManualTradeScalperView({
                 livePrice={live.lastPrice ?? null}
                 paperLastBuyPrice={paperLastBuyPrice ?? null}
                 paperBuyDataIndices={paperBuyDataIndices}
-                mlPredictionEntries={mlPredictionEntries}
                 rechartsYDomain={rechartsYDomain ?? undefined}
                 density="compact"
                 newerGhostBars={0}

@@ -8,7 +8,6 @@ using System.Globalization;
 using Trader.Api.Extensions;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
-using Trader.Application.Prediction;
 
 namespace Trader.Api.Controllers.V1;
 
@@ -21,18 +20,15 @@ public sealed class BrokerController : ControllerBase
     private const string KiteOAuthStateCookie = "Trader.KiteOAuth.State";
 
     private readonly IBrokerService _broker;
-    private readonly IPriceDirectionPredictionService _priceDirectionPredictions;
     private readonly IOptions<ZerodhaKiteOptions> _kiteOptions;
     private readonly ILogger<BrokerController> _logger;
 
     public BrokerController(
         IBrokerService broker,
-        IPriceDirectionPredictionService priceDirectionPredictions,
         IOptions<ZerodhaKiteOptions> kiteOptions,
         ILogger<BrokerController> logger)
     {
         _broker = broker;
-        _priceDirectionPredictions = priceDirectionPredictions;
         _kiteOptions = kiteOptions;
         _logger = logger;
     }
@@ -481,98 +477,6 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
-    /// <summary>
-    /// Hypothetical demo legs for a calendar day (report TZ): one row per merged automation signal after trading-lock filter, with allocation status and per-leg P&amp;L when allocated.
-    /// </summary>
-    [Authorize]
-    [HttpGet("kite/instruments/demo-auto-trade/today-legs")]
-    public async Task<ActionResult<DemoAutoTradeTodayLegsDto>> GetDemoAutoTradeTodayLegs(
-        [FromQuery] string? date,
-        CancellationToken ct)
-    {
-        DateOnly? reportDate = null;
-        if (!string.IsNullOrWhiteSpace(date))
-        {
-            if (!DateOnly.TryParse(date.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-            {
-                return Problem(
-                    title: "Invalid date",
-                    detail: "Use optional query date=yyyy-MM-dd (calendar day in report timezone).",
-                    statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            reportDate = parsed;
-        }
-
-        try
-        {
-            var dto = await _priceDirectionPredictions.GetDemoAutoTradeTodayLegsAsync(User.GetUserId(), reportDate, ct);
-            return Ok(dto);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
-        }
-    }
-
-    /// <summary>
-    /// Hypothetical demo P&amp;L for a calendar day in <c>FavoriteMlAutomation:ReportTimeZoneId</c> (default IST) from merged automation predictions.
-    /// </summary>
-    [Authorize]
-    [HttpGet("kite/instruments/demo-auto-trade/eod-summary")]
-    public async Task<ActionResult<DemoAutoTradeEodSummaryDto>> GetDemoAutoTradeEodSummary(
-        [FromQuery] string? date,
-        CancellationToken ct)
-    {
-        DateOnly? reportDate = null;
-        if (!string.IsNullOrWhiteSpace(date))
-        {
-            if (!DateOnly.TryParse(date.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-            {
-                return Problem(
-                    title: "Invalid date",
-                    detail: "Use optional query date=yyyy-MM-dd (calendar day in report timezone).",
-                    statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            reportDate = parsed;
-        }
-
-        try
-        {
-            var dto = await _priceDirectionPredictions.GetDemoAutoTradeEodSummaryAsync(User.GetUserId(), reportDate, ct);
-            return Ok(dto);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
-        }
-    }
-
-    /// <summary>
-    /// Full hypothetical demo auto-trade report: per-day P&amp;L, aggregates, direction and outcome slices over merged automation rows.
-    /// Optional <c>fromUtc</c> + <c>toUtcExclusive</c> (PredictedAt half-open); omit both for last 7 local calendar days in report TZ. Max 93 days.
-    /// </summary>
-    [Authorize]
-    [HttpGet("kite/instruments/demo-auto-trade/full-report")]
-    public async Task<ActionResult<DemoAutoTradeFullReportDto>> GetDemoAutoTradeFullReport(
-        [FromQuery] DateTimeOffset? fromUtc = null,
-        [FromQuery] DateTimeOffset? toUtcExclusive = null,
-        CancellationToken ct = default)
-    {
-        try
-        {
-            var dto = await _priceDirectionPredictions
-                .GetDemoAutoTradeFullReportAsync(User.GetUserId(), fromUtc, toUtcExclusive, ct)
-                .ConfigureAwait(false);
-            return Ok(dto);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
-        }
-    }
-
     /// <summary>Open demo paper long positions (whole contracts) per locked instrument.</summary>
     [Authorize]
     [HttpGet("kite/instruments/demo-paper-positions")]
@@ -612,29 +516,6 @@ public sealed class BrokerController : ControllerBase
         {
             var dto = await _broker.ExecuteDemoPaperTradeAsync(User.GetUserId(), body, ct).ConfigureAwait(false);
             return Ok(dto);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
-        }
-    }
-
-    [Authorize]
-    [HttpPut("kite/instruments/favorite-ml-automation")]
-    public async Task<IActionResult> PutFavoriteMlAutomation([FromBody] FavoriteMlAutomationPutDto? body, CancellationToken ct)
-    {
-        if (body is null)
-        {
-            return Problem(
-                title: "Invalid body",
-                detail: "Send JSON { \"enabled\": bool }; optional \"interval\" (empty string clears per-user bar size) and \"pollIntervalMinutes\" (0 clears, 1–1440 sets min minutes after previous new pass started).",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
-        try
-        {
-            await _broker.SetFavoriteMlAutomationAsync(User.GetUserId(), body, ct);
-            return NoContent();
         }
         catch (InvalidOperationException ex)
         {
