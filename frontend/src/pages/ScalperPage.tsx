@@ -107,6 +107,16 @@ interface InstrumentSearchResponse {
   scanTruncated: boolean
 }
 
+interface KiteOrderActionResultResponse {
+  orderId: string
+  action: string
+  message: string
+}
+
+type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
+
+const SCALPER_TICKET_ORDER_TYPES: ReadonlyArray<ScalperTicketOrderType> = ['MARKET', 'LIMIT', 'SL', 'SL-M']
+
 type ScalperAtmChainRow = {
   strike: number
   isAtm: boolean
@@ -312,6 +322,16 @@ export function ScalperPage() {
   const [atmOptionRows, setAtmOptionRows] = useState<KiteInstrumentRow[]>([])
   const [atmSnapshot, setAtmSnapshot] = useState<ScalperAtmSnapshot>(EMPTY_ATM_SNAPSHOT)
   const [isLivePullWindow, setIsLivePullWindow] = useState<boolean>(() => isIstMarketLiveWindow())
+  const [tradeQty, setTradeQty] = useState('1')
+  const [tradeProduct, setTradeProduct] = useState<'MIS' | 'NRML'>('MIS')
+  const [tradeOrderType, setTradeOrderType] = useState<ScalperTicketOrderType>('MARKET')
+  const [tradePrice, setTradePrice] = useState('')
+  const [tradeTriggerPrice, setTradeTriggerPrice] = useState('')
+  const [tradeStopLossPrice, setTradeStopLossPrice] = useState('')
+  const [tradeBusy, setTradeBusy] = useState(false)
+  const [tradeInfo, setTradeInfo] = useState<string | null>(null)
+  const [tradeError, setTradeError] = useState<string | null>(null)
+  const [lastEntrySide, setLastEntrySide] = useState<'BUY' | 'SELL' | null>(null)
 
   const isZerodha = broker?.connected === true && (broker?.provider ?? '').toLowerCase() === 'zerodha'
   const atmTarget = useMemo(
@@ -322,6 +342,129 @@ export function ScalperPage() {
   const live = useLiveMarketTick(
     selected?.instrumentToken ?? null,
     isZerodha && selected != null && isLivePullWindow,
+  )
+
+  const parsePositiveNumber = (raw: string): number | null => {
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0) return null
+    return n
+  }
+
+  useEffect(() => {
+    if (!selected) return
+    const lot = selected.lotSize ?? 1
+    setTradeQty(String(Math.max(1, Math.floor(lot))))
+    setTradePrice('')
+    setTradeTriggerPrice('')
+    setTradeStopLossPrice('')
+    setTradeInfo(null)
+    setTradeError(null)
+    setLastEntrySide(null)
+  }, [selected?.instrumentToken, selected?.lotSize])
+
+  const placeScalperOrder = useCallback(
+    async (intent: 'BUY' | 'SELL' | 'EXIT') => {
+      if (!selected || !isZerodha) return
+      const qtyN = Number(tradeQty)
+      const quantity = Number.isFinite(qtyN) ? Math.max(1, Math.floor(qtyN)) : 0
+      if (quantity < 1) {
+        setTradeError('Quantity must be at least 1.')
+        return
+      }
+
+      const transactionType: 'BUY' | 'SELL' =
+        intent === 'EXIT'
+          ? lastEntrySide === 'BUY'
+            ? 'SELL'
+            : lastEntrySide === 'SELL'
+              ? 'BUY'
+              : 'SELL'
+          : intent
+
+      const price = parsePositiveNumber(tradePrice)
+      const trigger = parsePositiveNumber(tradeTriggerPrice)
+      if (tradeOrderType === 'LIMIT' && price == null) {
+        setTradeError('LIMIT order requires a valid price.')
+        return
+      }
+      if (tradeOrderType === 'SL' && (price == null || trigger == null)) {
+        setTradeError('SL order requires both price and trigger.')
+        return
+      }
+      if (tradeOrderType === 'SL-M' && trigger == null) {
+        setTradeError('SL-M order requires trigger price.')
+        return
+      }
+
+      const normalizedPrice =
+        tradeOrderType === 'LIMIT' || tradeOrderType === 'SL'
+          ? price
+          : null
+      const normalizedTrigger =
+        tradeOrderType === 'SL' || tradeOrderType === 'SL-M'
+          ? trigger
+          : null
+
+      setTradeBusy(true)
+      setTradeError(null)
+      setTradeInfo(null)
+      try {
+        const placeRes = await api.post<KiteOrderActionResultResponse>('/broker/kite/orders/place', {
+          variety: 'regular',
+          exchange: selected.exchange,
+          tradingsymbol: selected.tradingsymbol,
+          transactionType,
+          quantity,
+          product: tradeProduct,
+          orderType: tradeOrderType,
+          validity: 'DAY',
+          price: normalizedPrice,
+          triggerPrice: normalizedTrigger,
+          tag: 'scalper',
+        })
+
+        const notes: string[] = [
+          `${intent} placed (${transactionType}) · order ${placeRes.data.orderId}`,
+        ]
+
+        const stopLoss = parsePositiveNumber(tradeStopLossPrice)
+        if (intent !== 'EXIT' && stopLoss != null) {
+          const protectiveSide = transactionType === 'BUY' ? 'SELL' : 'BUY'
+          const slRes = await api.post<KiteOrderActionResultResponse>('/broker/kite/orders/place', {
+            variety: 'regular',
+            exchange: selected.exchange,
+            tradingsymbol: selected.tradingsymbol,
+            transactionType: protectiveSide,
+            quantity,
+            product: tradeProduct,
+            orderType: 'SL-M',
+            validity: 'DAY',
+            triggerPrice: stopLoss,
+            tag: 'scalper-sl',
+          })
+          notes.push(`SL trigger set (${protectiveSide}) · order ${slRes.data.orderId}`)
+        }
+
+        if (intent === 'BUY' || intent === 'SELL') setLastEntrySide(intent)
+        if (intent === 'EXIT') setLastEntrySide(null)
+        setTradeInfo(notes.join(' | '))
+      } catch (err) {
+        setTradeError(problemDetail(err))
+      } finally {
+        setTradeBusy(false)
+      }
+    },
+    [
+      isZerodha,
+      lastEntrySide,
+      selected,
+      tradeOrderType,
+      tradePrice,
+      tradeProduct,
+      tradeQty,
+      tradeStopLossPrice,
+      tradeTriggerPrice,
+    ],
   )
 
   useEffect(() => {
@@ -970,6 +1113,104 @@ export function ScalperPage() {
                           PE chart
                         </Button>
                       </div>
+                    </div>
+                  ) : null}
+                  {selected && isZerodha ? (
+                    <div className="border rounded border-secondary-subtle p-2 bg-body text-body mb-2">
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                        <div className="small fw-semibold">Scalper ticket</div>
+                        <div className="small text-muted font-monospace">
+                          {selected.tradingsymbol} · {selected.exchange}
+                        </div>
+                      </div>
+                      {tradeError ? <Alert variant="warning" className="py-1 small mb-2">{tradeError}</Alert> : null}
+                      {tradeInfo ? <Alert variant="success" className="py-1 small mb-2">{tradeInfo}</Alert> : null}
+                      <Row className="g-2 mb-2">
+                        <Col xs={4}>
+                          <Form.Label className="small text-secondary mb-1">Qty</Form.Label>
+                          <Form.Control
+                            size="sm"
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={tradeQty}
+                            onChange={(e) => setTradeQty(e.target.value)}
+                          />
+                        </Col>
+                        <Col xs={4}>
+                          <Form.Label className="small text-secondary mb-1">Product</Form.Label>
+                          <Form.Select size="sm" value={tradeProduct} onChange={(e) => setTradeProduct(e.target.value as 'MIS' | 'NRML')}>
+                            <option value="MIS">MIS</option>
+                            <option value="NRML">NRML</option>
+                          </Form.Select>
+                        </Col>
+                        <Col xs={4}>
+                          <Form.Label className="small text-secondary mb-1">Type</Form.Label>
+                          <Form.Select
+                            size="sm"
+                            value={tradeOrderType}
+                            onChange={(e) => setTradeOrderType(e.target.value as ScalperTicketOrderType)}
+                          >
+                            {SCALPER_TICKET_ORDER_TYPES.map((ot) => (
+                              <option key={`sc-order-type-${ot}`} value={ot}>
+                                {ot}
+                              </option>
+                            ))}
+                          </Form.Select>
+                        </Col>
+                      </Row>
+                      <Row className="g-2 mb-2">
+                        <Col xs={4}>
+                          <Form.Label className="small text-secondary mb-1">Price</Form.Label>
+                          <Form.Control
+                            size="sm"
+                            type="number"
+                            min={0}
+                            step="0.05"
+                            value={tradePrice}
+                            onChange={(e) => setTradePrice(e.target.value)}
+                            placeholder="LIMIT/SL"
+                          />
+                        </Col>
+                        <Col xs={4}>
+                          <Form.Label className="small text-secondary mb-1">Sell trigger</Form.Label>
+                          <Form.Control
+                            size="sm"
+                            type="number"
+                            min={0}
+                            step="0.05"
+                            value={tradeTriggerPrice}
+                            onChange={(e) => setTradeTriggerPrice(e.target.value)}
+                            placeholder="SL/SL-M"
+                          />
+                        </Col>
+                        <Col xs={4}>
+                          <Form.Label className="small text-secondary mb-1">Stop loss</Form.Label>
+                          <Form.Control
+                            size="sm"
+                            type="number"
+                            min={0}
+                            step="0.05"
+                            value={tradeStopLossPrice}
+                            onChange={(e) => setTradeStopLossPrice(e.target.value)}
+                            placeholder="auto SL-M"
+                          />
+                        </Col>
+                      </Row>
+                      <InputGroup size="sm">
+                        <Button variant="success" disabled={tradeBusy} onClick={() => void placeScalperOrder('BUY')}>
+                          {tradeBusy ? 'Placing…' : 'Buy'}
+                        </Button>
+                        <Button variant="danger" disabled={tradeBusy} onClick={() => void placeScalperOrder('SELL')}>
+                          {tradeBusy ? 'Placing…' : 'Sell'}
+                        </Button>
+                        <Button variant="outline-secondary" disabled={tradeBusy} onClick={() => void placeScalperOrder('EXIT')}>
+                          {tradeBusy ? 'Placing…' : 'Exit'}
+                        </Button>
+                        <InputGroup.Text className="small text-muted">
+                          {lastEntrySide ? `Last entry: ${lastEntrySide}` : 'SL: set Stop loss for protective order'}
+                        </InputGroup.Text>
+                      </InputGroup>
                     </div>
                   ) : null}
                   {selected ? (

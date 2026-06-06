@@ -378,6 +378,31 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    [Authorize]
+    [HttpPost("kite/orders/place")]
+    public async Task<ActionResult<KiteOrderActionResultDto>> PlaceKiteOrder(
+        [FromBody] KiteOrderPlaceRequestDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with variety, symbol, side, quantity, product, orderType and optional price/trigger.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.PlaceKiteOrderAsync(User.GetUserId(), body, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     /// <summary>Saved favorite Kite instruments for the current user (persisted in the database).</summary>
     [Authorize]
     [HttpGet("kite/favorites")]

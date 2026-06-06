@@ -545,6 +545,7 @@ public sealed class BrokerService : IBrokerService
             NormalizeNullablePrice(body.TriggerPrice),
             body.DisclosedQuantity > 0 ? body.DisclosedQuantity : null,
             NormalizeOptional(body.Tag));
+        ValidateOrderTypePayload(request.OrderType, request.Price, request.TriggerPrice);
 
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
         var action = await _kiteInstruments.ModifyOrderAsync(variety, oid, request, apiKey, accessToken, ct).ConfigureAwait(false);
@@ -598,6 +599,39 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(action.ErrorMessage ?? "Could not repeat order on Kite.");
 
         return new KiteOrderActionResultDto(action.OrderId ?? sourceId, "repeat", "Order repeat request accepted.");
+    }
+
+    public async Task<KiteOrderActionResultDto> PlaceKiteOrderAsync(
+        Guid userId,
+        KiteOrderPlaceRequestDto body,
+        CancellationToken ct = default)
+    {
+        if (body is null)
+            throw new InvalidOperationException("Request body is required.");
+        if (body.Quantity < 1)
+            throw new InvalidOperationException("quantity must be greater than zero.");
+
+        var variety = NormalizeKiteOrderVariety(body.Variety);
+        var request = new KiteOrderUpsertRequest(
+            NormalizeRequired(body.Exchange, "exchange"),
+            NormalizeRequired(body.Tradingsymbol, "tradingsymbol"),
+            NormalizeRequired(body.TransactionType, "transactionType"),
+            body.Quantity,
+            NormalizeRequired(body.Product, "product"),
+            NormalizeRequired(body.OrderType, "orderType"),
+            NormalizeValidity(body.Validity),
+            NormalizeNullablePrice(body.Price),
+            NormalizeNullablePrice(body.TriggerPrice),
+            body.DisclosedQuantity > 0 ? body.DisclosedQuantity : null,
+            NormalizeOptional(body.Tag));
+        ValidateOrderTypePayload(request.OrderType, request.Price, request.TriggerPrice);
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var action = await _kiteInstruments.PlaceOrderAsync(variety, request, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!action.Success)
+            throw new InvalidOperationException(action.ErrorMessage ?? "Could not place order on Kite.");
+
+        return new KiteOrderActionResultDto(action.OrderId ?? "unknown", "place", "Order placement request accepted.");
     }
 
     /// <summary>Validated composite; cache hit skips Kite + session churn when parallel chart routes share the window.</summary>
@@ -1492,6 +1526,17 @@ public sealed class BrokerService : IBrokerService
     {
         var v = string.IsNullOrWhiteSpace(value) ? "regular" : value.Trim().ToLowerInvariant();
         return v is "regular" or "amo" or "co" or "bo" ? v : "regular";
+    }
+
+    private static void ValidateOrderTypePayload(string orderTypeRaw, decimal? price, decimal? triggerPrice)
+    {
+        var orderType = orderTypeRaw.Trim().ToUpperInvariant();
+        if (orderType == "LIMIT" && price is null)
+            throw new InvalidOperationException("LIMIT order requires price.");
+        if (orderType == "SL" && (price is null || triggerPrice is null))
+            throw new InvalidOperationException("SL order requires both price and triggerPrice.");
+        if (orderType == "SL-M" && triggerPrice is null)
+            throw new InvalidOperationException("SL-M order requires triggerPrice.");
     }
 
     private static string NormalizeUiChartInterval(string interval) => ChartUiIntervals.Normalize(interval);

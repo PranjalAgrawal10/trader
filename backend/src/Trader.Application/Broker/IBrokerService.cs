@@ -91,6 +91,11 @@ public interface IBrokerService
         KiteOrderRepeatRequestDto body,
         CancellationToken ct = default);
 
+    Task<KiteOrderActionResultDto> PlaceKiteOrderAsync(
+        Guid userId,
+        KiteOrderPlaceRequestDto body,
+        CancellationToken ct = default);
+
     Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(Guid userId, CancellationToken ct = default);
 
     Task AddKiteFavoriteInstrumentAsync(Guid userId, KiteInstrumentListItemDto item, CancellationToken ct = default);
