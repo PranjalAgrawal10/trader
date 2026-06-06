@@ -492,11 +492,11 @@ export function TradesPage() {
                 </td>
                 <td className="small">{o.statusMessage ?? o.statusMessageRaw ?? '—'}</td>
                 <td className="text-nowrap">
-                  <Dropdown align="end">
+                  <Dropdown align="end" drop="up">
                     <Dropdown.Toggle size="sm" variant="outline-secondary" id={`order-actions-${o.orderId}`}>
                       Actions
                     </Dropdown.Toggle>
-                    <Dropdown.Menu>
+                    <Dropdown.Menu popperConfig={{ strategy: 'fixed' }} style={{ zIndex: 3000 }}>
                       {orderActions.map((action) => (
                         <Dropdown.Item key={`${o.orderId}-${action}`} onClick={() => void onOrderAction(action, o)}>
                           {action}
