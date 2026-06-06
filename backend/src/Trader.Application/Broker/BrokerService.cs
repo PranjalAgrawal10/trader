@@ -495,6 +495,111 @@ public sealed class BrokerService : IBrokerService
         return new KiteOrderBookDto(items);
     }
 
+    public async Task<KiteOrderActionResultDto> CancelKiteOrderAsync(
+        Guid userId,
+        string orderId,
+        KiteOrderCancelRequestDto body,
+        CancellationToken ct = default)
+    {
+        if (body is null)
+            throw new InvalidOperationException("Request body is required.");
+        if (string.IsNullOrWhiteSpace(orderId))
+            throw new InvalidOperationException("orderId is required.");
+
+        var oid = orderId.Trim();
+        var variety = NormalizeKiteOrderVariety(body.Variety);
+        var parentOrderId = string.IsNullOrWhiteSpace(body.ParentOrderId) ? null : body.ParentOrderId.Trim();
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var action = await _kiteInstruments.CancelOrderAsync(variety, oid, parentOrderId, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!action.Success)
+            throw new InvalidOperationException(action.ErrorMessage ?? "Could not cancel order on Kite.");
+
+        return new KiteOrderActionResultDto(action.OrderId ?? oid, "cancel", "Order cancel request accepted.");
+    }
+
+    public async Task<KiteOrderActionResultDto> ModifyKiteOrderAsync(
+        Guid userId,
+        string orderId,
+        KiteOrderModifyRequestDto body,
+        CancellationToken ct = default)
+    {
+        if (body is null)
+            throw new InvalidOperationException("Request body is required.");
+        if (string.IsNullOrWhiteSpace(orderId))
+            throw new InvalidOperationException("orderId is required.");
+        if (body.Quantity < 1)
+            throw new InvalidOperationException("quantity must be greater than zero.");
+
+        var oid = orderId.Trim();
+        var variety = NormalizeKiteOrderVariety(body.Variety);
+        var request = new KiteOrderUpsertRequest(
+            NormalizeRequired(body.Exchange, "exchange"),
+            NormalizeRequired(body.Tradingsymbol, "tradingsymbol"),
+            NormalizeRequired(body.TransactionType, "transactionType"),
+            body.Quantity,
+            NormalizeRequired(body.Product, "product"),
+            NormalizeRequired(body.OrderType, "orderType"),
+            NormalizeValidity(body.Validity),
+            NormalizeNullablePrice(body.Price),
+            NormalizeNullablePrice(body.TriggerPrice),
+            body.DisclosedQuantity > 0 ? body.DisclosedQuantity : null,
+            NormalizeOptional(body.Tag));
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var action = await _kiteInstruments.ModifyOrderAsync(variety, oid, request, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!action.Success)
+            throw new InvalidOperationException(action.ErrorMessage ?? "Could not modify order on Kite.");
+
+        return new KiteOrderActionResultDto(action.OrderId ?? oid, "modify", "Order modify request accepted.");
+    }
+
+    public async Task<KiteOrderActionResultDto> RepeatKiteOrderAsync(
+        Guid userId,
+        string sourceOrderId,
+        KiteOrderRepeatRequestDto body,
+        CancellationToken ct = default)
+    {
+        if (body is null)
+            throw new InvalidOperationException("Request body is required.");
+        if (string.IsNullOrWhiteSpace(sourceOrderId))
+            throw new InvalidOperationException("sourceOrderId is required.");
+
+        var sourceId = sourceOrderId.Trim();
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var fetched = await _kiteInstruments.FetchOrdersAsync(apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!fetched.Success)
+            throw new InvalidOperationException(fetched.ErrorMessage ?? "Could not load orders from Kite.");
+
+        var source = fetched.Items.FirstOrDefault(x => string.Equals(x.OrderId, sourceId, StringComparison.Ordinal));
+        if (source is null)
+            throw new InvalidOperationException("Source order not found in today orderbook.");
+
+        var variety = NormalizeKiteOrderVariety(string.IsNullOrWhiteSpace(body.Variety) ? source.Variety : body.Variety);
+        var quantity = source.Quantity > 0 ? source.Quantity : source.PendingQuantity > 0 ? source.PendingQuantity : 0;
+        if (quantity < 1)
+            throw new InvalidOperationException("Source order does not have a valid quantity to repeat.");
+
+        var request = new KiteOrderUpsertRequest(
+            NormalizeRequired(source.Exchange, "exchange"),
+            NormalizeRequired(source.Tradingsymbol, "tradingsymbol"),
+            NormalizeRequired(source.TransactionType, "transactionType"),
+            quantity,
+            NormalizeRequired(source.Product, "product"),
+            NormalizeRequired(source.OrderType, "orderType"),
+            NormalizeValidity(source.Validity),
+            NormalizeNullablePrice(source.Price),
+            NormalizeNullablePrice(source.TriggerPrice),
+            null,
+            NormalizeOptional(source.Tag));
+
+        var action = await _kiteInstruments.PlaceOrderAsync(variety, request, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!action.Success)
+            throw new InvalidOperationException(action.ErrorMessage ?? "Could not repeat order on Kite.");
+
+        return new KiteOrderActionResultDto(action.OrderId ?? sourceId, "repeat", "Order repeat request accepted.");
+    }
+
     /// <summary>Validated composite; cache hit skips Kite + session churn when parallel chart routes share the window.</summary>
     private async Task<KiteHistoricalCandlesDto> GetOrComposeChartHistoricalCandlesCachedAsync(
         Guid userId,
@@ -1358,6 +1463,35 @@ public sealed class BrokerService : IBrokerService
             return null;
         var t = value.Trim();
         return t.Length == 0 ? null : t;
+    }
+
+    private static string NormalizeRequired(string? value, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new InvalidOperationException($"{fieldName} is required.");
+        return value.Trim();
+    }
+
+    private static string? NormalizeOptional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static decimal? NormalizeNullablePrice(decimal? value)
+    {
+        if (!value.HasValue || value.Value <= 0m)
+            return null;
+        return value.Value;
+    }
+
+    private static string NormalizeValidity(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "DAY";
+        return value.Trim().ToUpperInvariant();
+    }
+
+    private static string NormalizeKiteOrderVariety(string? value)
+    {
+        var v = string.IsNullOrWhiteSpace(value) ? "regular" : value.Trim().ToLowerInvariant();
+        return v is "regular" or "amo" or "co" or "bo" ? v : "regular";
     }
 
     private static string NormalizeUiChartInterval(string interval) => ChartUiIntervals.Normalize(interval);

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Card, Col, Form, Row, Table } from 'react-bootstrap'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Alert, Card, Col, Dropdown, Form, Row, Table } from 'react-bootstrap'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import type { LwSyntheticBarRow } from '../components/LwMiscCharts'
@@ -48,6 +49,12 @@ interface KiteOrderBookResponse {
   items: OrderRow[]
 }
 
+interface KiteOrderActionResult {
+  orderId: string
+  action: string
+  message: string
+}
+
 const KITE_ORDER_STATUSES: readonly string[] = [
   'OPEN',
   'COMPLETE',
@@ -73,10 +80,12 @@ function normalizeKiteTimestamp(value: string | null | undefined): string | null
 }
 
 export function TradesPage() {
+  const navigate = useNavigate()
   const [rows, setRows] = useState<TradeRow[]>([])
   const [orders, setOrders] = useState<OrderRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [ordersError, setOrdersError] = useState<string | null>(null)
+  const [ordersActionInfo, setOrdersActionInfo] = useState<string | null>(null)
   const [orderSearch, setOrderSearch] = useState('')
   const [orderStatus, setOrderStatus] = useState('all')
   const [orderBotId, setOrderBotId] = useState('all')
@@ -84,17 +93,23 @@ export function TradesPage() {
   const [orderFrom, setOrderFrom] = useState('')
   const [orderTo, setOrderTo] = useState('')
 
+  const loadOrders = useCallback(async () => {
+    try {
+      const r = await api.get<KiteOrderBookResponse>('/broker/kite/orders')
+      setOrders(r.data.items ?? [])
+      setOrdersError(null)
+    } catch {
+      setOrdersError('Failed to load orders.')
+    }
+  }, [])
+
   useEffect(() => {
     api
       .get<TradeRow[]>('/trades')
       .then((r) => setRows(r.data))
       .catch(() => setError('Failed to load trades.'))
-
-    api
-      .get<KiteOrderBookResponse>('/broker/kite/orders')
-      .then((r) => setOrders(r.data.items ?? []))
-      .catch(() => setOrdersError('Failed to load orders.'))
-  }, [])
+    void loadOrders()
+  }, [loadOrders])
 
   const lwTradeCharts = useMemo(() => {
     const sorted = [...rows].sort(
@@ -180,6 +195,126 @@ export function TradesPage() {
     })
   }, [orderBotId, orderFrom, orderSearch, orderStatus, orderTo, orderType, orders])
 
+  const orderActions = [
+    'Modify',
+    'Cancel',
+    'Repeat',
+    'Info',
+    'Chart',
+    'Option chain',
+    'Create GTT / GTC',
+    'Create alert / ATO',
+    'Market depth',
+    'Add to marketwatch',
+    'Add to basket',
+    'Technicals',
+  ] as const
+
+  const onOrderAction = async (action: (typeof orderActions)[number], order: OrderRow) => {
+    if (action === 'Cancel') {
+      try {
+        const res = await api.post<KiteOrderActionResult>(`/broker/kite/orders/${encodeURIComponent(order.orderId)}/cancel`, {
+          variety: order.variety,
+          parentOrderId: order.parentOrderId,
+        })
+        setOrdersActionInfo(res.data.message)
+        await loadOrders()
+      } catch {
+        setOrdersActionInfo(`Cancel failed for ${order.orderId}.`)
+      }
+      return
+    }
+    if (action === 'Modify') {
+      try {
+        const res = await api.post<KiteOrderActionResult>(`/broker/kite/orders/${encodeURIComponent(order.orderId)}/modify`, {
+          variety: order.variety,
+          exchange: order.exchange,
+          tradingsymbol: order.tradingsymbol,
+          transactionType: order.transactionType,
+          quantity: order.quantity,
+          product: order.product,
+          orderType: order.orderType,
+          validity: order.validity,
+          price: order.price,
+          triggerPrice: order.triggerPrice,
+          tag: order.tag,
+        })
+        setOrdersActionInfo(res.data.message)
+        await loadOrders()
+      } catch {
+        setOrdersActionInfo(`Modify failed for ${order.orderId}.`)
+      }
+      return
+    }
+    if (action === 'Repeat') {
+      try {
+        const res = await api.post<KiteOrderActionResult>(`/broker/kite/orders/${encodeURIComponent(order.orderId)}/repeat`, {
+          variety: order.variety,
+        })
+        setOrdersActionInfo(`${res.data.message} New order: ${res.data.orderId}`)
+        await loadOrders()
+      } catch {
+        setOrdersActionInfo(`Repeat failed for ${order.orderId}.`)
+      }
+      return
+    }
+    if (action === 'Chart') {
+      navigate('/instruments')
+      setOrdersActionInfo(`Opened Instruments for ${order.tradingsymbol}.`)
+      return
+    }
+    if (action === 'Option chain' || action === 'Technicals') {
+      navigate('/scalper')
+      setOrdersActionInfo(`Opened Scalper for ${order.tradingsymbol}.`)
+      return
+    }
+    if (action === 'Info') {
+      setOrderSearch(order.orderId)
+      setOrdersActionInfo(`Loaded order ${order.orderId} details in filters/table.`)
+      return
+    }
+    if (action === 'Add to marketwatch') {
+      try {
+        await navigator.clipboard.writeText(`${order.exchange}:${order.tradingsymbol}`)
+        setOrdersActionInfo(`Copied ${order.exchange}:${order.tradingsymbol} to clipboard (use in watch/search).`)
+      } catch {
+        setOrdersActionInfo(`Use ${order.exchange}:${order.tradingsymbol} in watch/search.`)
+      }
+      return
+    }
+    if (action === 'Add to basket') {
+      try {
+        await navigator.clipboard.writeText(
+          JSON.stringify(
+            {
+              tradingsymbol: order.tradingsymbol,
+              exchange: order.exchange,
+              transactionType: order.transactionType,
+              orderType: order.orderType,
+              product: order.product,
+              quantity: order.quantity,
+              price: order.price,
+              triggerPrice: order.triggerPrice,
+            },
+            null,
+            2,
+          ),
+        )
+        setOrdersActionInfo(`Copied order payload for ${order.tradingsymbol} to clipboard.`)
+      } catch {
+        setOrdersActionInfo(`Basket payload ready for ${order.tradingsymbol}.`)
+      }
+      return
+    }
+    if (action === 'Market depth') {
+      setOrdersActionInfo(
+        `${order.tradingsymbol}: qty ${order.quantity}, filled ${order.filledQuantity}, pending ${order.pendingQuantity}, status ${order.status}.`,
+      )
+      return
+    }
+    setOrdersActionInfo(`${action} is available in the action menu.`)
+  }
+
   return (
     <Layout>
       <h1 className="h3 mb-1">Trade history</h1>
@@ -254,6 +389,11 @@ export function TradesPage() {
       <h2 className="h4 mt-4 mb-2">Orders</h2>
       <p className="text-secondary small mb-3">Fetches from your order history; apply filters locally.</p>
       {ordersError ? <p className="text-danger small mb-3">{ordersError}</p> : null}
+      {ordersActionInfo ? (
+        <Alert variant="secondary" className="py-2 small mb-3">
+          {ordersActionInfo}
+        </Alert>
+      ) : null}
 
       <Card className="border-secondary mb-3">
         <Card.Body className="p-2">
@@ -324,6 +464,7 @@ export function TradesPage() {
               <th>Qty (F/P/C)</th>
               <th>Price / Avg / Trigger</th>
               <th>Message</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -350,11 +491,25 @@ export function TradesPage() {
                   {o.price ?? '—'} / {o.averagePrice ?? '—'} / {o.triggerPrice ?? '—'}
                 </td>
                 <td className="small">{o.statusMessage ?? o.statusMessageRaw ?? '—'}</td>
+                <td className="text-nowrap">
+                  <Dropdown align="end">
+                    <Dropdown.Toggle size="sm" variant="outline-secondary" id={`order-actions-${o.orderId}`}>
+                      Actions
+                    </Dropdown.Toggle>
+                    <Dropdown.Menu>
+                      {orderActions.map((action) => (
+                        <Dropdown.Item key={`${o.orderId}-${action}`} onClick={() => void onOrderAction(action, o)}>
+                          {action}
+                        </Dropdown.Item>
+                      ))}
+                    </Dropdown.Menu>
+                  </Dropdown>
+                </td>
               </tr>
             ))}
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-muted">
+                <td colSpan={9} className="text-muted">
                   No orders match current filters.
                 </td>
               </tr>

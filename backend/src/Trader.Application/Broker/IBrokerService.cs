@@ -73,6 +73,24 @@ public interface IBrokerService
     /// <summary>Kite orderbook for the day (<c>GET /orders</c>), including all interim/final statuses.</summary>
     Task<KiteOrderBookDto> GetKiteOrdersAsync(Guid userId, CancellationToken ct = default);
 
+    Task<KiteOrderActionResultDto> CancelKiteOrderAsync(
+        Guid userId,
+        string orderId,
+        KiteOrderCancelRequestDto body,
+        CancellationToken ct = default);
+
+    Task<KiteOrderActionResultDto> ModifyKiteOrderAsync(
+        Guid userId,
+        string orderId,
+        KiteOrderModifyRequestDto body,
+        CancellationToken ct = default);
+
+    Task<KiteOrderActionResultDto> RepeatKiteOrderAsync(
+        Guid userId,
+        string sourceOrderId,
+        KiteOrderRepeatRequestDto body,
+        CancellationToken ct = default);
+
     Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(Guid userId, CancellationToken ct = default);
 
     Task AddKiteFavoriteInstrumentAsync(Guid userId, KiteInstrumentListItemDto item, CancellationToken ct = default);

@@ -300,6 +300,84 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    [Authorize]
+    [HttpPost("kite/orders/{orderId}/cancel")]
+    public async Task<ActionResult<KiteOrderActionResultDto>> CancelKiteOrder(
+        [FromRoute] string orderId,
+        [FromBody] KiteOrderCancelRequestDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with optional variety and parentOrderId.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.CancelKiteOrderAsync(User.GetUserId(), orderId, body, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPost("kite/orders/{orderId}/modify")]
+    public async Task<ActionResult<KiteOrderActionResultDto>> ModifyKiteOrder(
+        [FromRoute] string orderId,
+        [FromBody] KiteOrderModifyRequestDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with variety, symbol, quantity, side, type and price fields.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.ModifyKiteOrderAsync(User.GetUserId(), orderId, body, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPost("kite/orders/{orderId}/repeat")]
+    public async Task<ActionResult<KiteOrderActionResultDto>> RepeatKiteOrder(
+        [FromRoute] string orderId,
+        [FromBody] KiteOrderRepeatRequestDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with optional variety.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.RepeatKiteOrderAsync(User.GetUserId(), orderId, body, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     /// <summary>Saved favorite Kite instruments for the current user (persisted in the database).</summary>
     [Authorize]
     [HttpGet("kite/favorites")]

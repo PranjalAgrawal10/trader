@@ -329,6 +329,50 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         }
     }
 
+    public Task<KiteOrderActionResult> CancelOrderAsync(
+        string variety,
+        string orderId,
+        string? parentOrderId,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        var v = variety.Trim();
+        var oid = orderId.Trim();
+        var path = $"orders/{Uri.EscapeDataString(v)}/{Uri.EscapeDataString(oid)}";
+        if (!string.IsNullOrWhiteSpace(parentOrderId))
+            path += $"?parent_order_id={Uri.EscapeDataString(parentOrderId.Trim())}";
+        return SendOrderActionAsync(HttpMethod.Delete, path, content: null, apiKey, accessToken, ct);
+    }
+
+    public Task<KiteOrderActionResult> ModifyOrderAsync(
+        string variety,
+        string orderId,
+        KiteOrderUpsertRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        var v = variety.Trim();
+        var oid = orderId.Trim();
+        var path = $"orders/{Uri.EscapeDataString(v)}/{Uri.EscapeDataString(oid)}";
+        var content = BuildOrderUpsertContent(request);
+        return SendOrderActionAsync(HttpMethod.Put, path, content, apiKey, accessToken, ct);
+    }
+
+    public Task<KiteOrderActionResult> PlaceOrderAsync(
+        string variety,
+        KiteOrderUpsertRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        var v = variety.Trim();
+        var path = $"orders/{Uri.EscapeDataString(v)}";
+        var content = BuildOrderUpsertContent(request);
+        return SendOrderActionAsync(HttpMethod.Post, path, content, apiKey, accessToken, ct);
+    }
+
     public async Task<KiteInstrumentsFetchResult> FetchExchangeInstrumentsAsync(
         string exchange,
         string apiKey,
@@ -677,6 +721,79 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         catch (JsonException)
         {
             return null;
+        }
+    }
+
+    private static FormUrlEncodedContent BuildOrderUpsertContent(KiteOrderUpsertRequest request)
+    {
+        var values = new List<KeyValuePair<string, string>>
+        {
+            new("exchange", request.Exchange.Trim()),
+            new("tradingsymbol", request.Tradingsymbol.Trim()),
+            new("transaction_type", request.TransactionType.Trim()),
+            new("quantity", request.Quantity.ToString(CultureInfo.InvariantCulture)),
+            new("product", request.Product.Trim()),
+            new("order_type", request.OrderType.Trim()),
+            new("validity", request.Validity.Trim()),
+        };
+
+        if (request.Price.HasValue)
+            values.Add(new("price", request.Price.Value.ToString(CultureInfo.InvariantCulture)));
+        if (request.TriggerPrice.HasValue)
+            values.Add(new("trigger_price", request.TriggerPrice.Value.ToString(CultureInfo.InvariantCulture)));
+        if (request.DisclosedQuantity.HasValue)
+            values.Add(new("disclosed_quantity", request.DisclosedQuantity.Value.ToString(CultureInfo.InvariantCulture)));
+        if (!string.IsNullOrWhiteSpace(request.Tag))
+            values.Add(new("tag", request.Tag.Trim()));
+
+        return new FormUrlEncodedContent(values);
+    }
+
+    private async Task<KiteOrderActionResult> SendOrderActionAsync(
+        HttpMethod method,
+        string path,
+        HttpContent? content,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, path);
+        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+        if (content is not null)
+            request.Content = content;
+
+        using var response = await _http.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for order action.";
+            return new KiteOrderActionResult(false, msg, null);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("status", out var st)
+                || !string.Equals(st.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+            {
+                var msg = TryParseKiteMessage(body) ?? "Unexpected order action response from Kite.";
+                return new KiteOrderActionResult(false, msg, null);
+            }
+
+            string? orderId = null;
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                if (data.TryGetProperty("order_id", out var idEl) && idEl.ValueKind != JsonValueKind.Null)
+                    orderId = idEl.ToString();
+            }
+
+            return new KiteOrderActionResult(true, null, orderId);
+        }
+        catch (JsonException)
+        {
+            return new KiteOrderActionResult(false, "Could not parse Kite order action response.", null);
         }
     }
 }

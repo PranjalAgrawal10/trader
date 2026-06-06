@@ -109,6 +109,35 @@ public sealed record KiteOrderBookItemDto(
 
 public sealed record KiteOrderBookDto(IReadOnlyList<KiteOrderBookItemDto> Items);
 
+public sealed record KiteOrderActionResultDto(string OrderId, string Action, string Message);
+
+public sealed class KiteOrderCancelRequestDto
+{
+    public string? Variety { get; set; }
+    public string? ParentOrderId { get; set; }
+}
+
+public sealed class KiteOrderModifyRequestDto
+{
+    public string? Variety { get; set; }
+    public string? Exchange { get; set; }
+    public string? Tradingsymbol { get; set; }
+    public string? TransactionType { get; set; }
+    public int Quantity { get; set; }
+    public string? Product { get; set; }
+    public string? OrderType { get; set; }
+    public string? Validity { get; set; }
+    public decimal? Price { get; set; }
+    public decimal? TriggerPrice { get; set; }
+    public int? DisclosedQuantity { get; set; }
+    public string? Tag { get; set; }
+}
+
+public sealed class KiteOrderRepeatRequestDto
+{
+    public string? Variety { get; set; }
+}
+
 /// <summary>OHLCV series from Kite historical API (possibly after server-side resampling for 2m / 4m).</summary>
 public sealed record KiteHistoricalCandlesDto(
     IReadOnlyList<KiteHistoricalCandlePointDto> Candles,
