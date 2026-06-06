@@ -458,6 +458,43 @@ public sealed class BrokerService : IBrokerService
         return dto;
     }
 
+    public async Task<KiteOrderBookDto> GetKiteOrdersAsync(Guid userId, CancellationToken ct = default)
+    {
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var fetched = await _kiteInstruments.FetchOrdersAsync(apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!fetched.Success)
+            throw new InvalidOperationException(fetched.ErrorMessage ?? "Could not load orders from Kite.");
+
+        var items = fetched.Items
+            .Select(o => new KiteOrderBookItemDto(
+                o.OrderId,
+                o.ExchangeOrderId,
+                o.ParentOrderId,
+                o.Status,
+                o.StatusMessage,
+                o.StatusMessageRaw,
+                o.Tradingsymbol,
+                o.Exchange,
+                o.TransactionType,
+                o.Variety,
+                o.OrderType,
+                o.Product,
+                o.Validity,
+                o.Quantity,
+                o.FilledQuantity,
+                o.PendingQuantity,
+                o.CancelledQuantity,
+                o.Price,
+                o.TriggerPrice,
+                o.AveragePrice,
+                o.Tag,
+                o.OrderTimestamp,
+                o.ExchangeUpdateTimestamp))
+            .OrderByDescending(x => x.ExchangeUpdateTimestamp ?? x.OrderTimestamp ?? "")
+            .ToList();
+        return new KiteOrderBookDto(items);
+    }
+
     /// <summary>Validated composite; cache hit skips Kite + session churn when parallel chart routes share the window.</summary>
     private async Task<KiteHistoricalCandlesDto> GetOrComposeChartHistoricalCandlesCachedAsync(
         Guid userId,

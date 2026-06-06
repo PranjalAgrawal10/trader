@@ -70,6 +70,9 @@ public interface IBrokerService
         string tradingsymbol,
         CancellationToken ct = default);
 
+    /// <summary>Kite orderbook for the day (<c>GET /orders</c>), including all interim/final statuses.</summary>
+    Task<KiteOrderBookDto> GetKiteOrdersAsync(Guid userId, CancellationToken ct = default);
+
     Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(Guid userId, CancellationToken ct = default);
 
     Task AddKiteFavoriteInstrumentAsync(Guid userId, KiteInstrumentListItemDto item, CancellationToken ct = default);

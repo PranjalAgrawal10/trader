@@ -19,11 +19,57 @@ interface TradeRow {
 }
 
 interface OrderRow {
-  id: string
-  botId: string
-  externalId: string
+  orderId: string
+  exchangeOrderId: string | null
+  parentOrderId: string | null
   status: string
-  createdAt: string
+  statusMessage: string | null
+  statusMessageRaw: string | null
+  tradingsymbol: string
+  exchange: string
+  transactionType: string
+  variety: string
+  orderType: string
+  product: string
+  validity: string
+  quantity: number
+  filledQuantity: number
+  pendingQuantity: number
+  cancelledQuantity: number | null
+  price: number | null
+  triggerPrice: number | null
+  averagePrice: number | null
+  tag: string | null
+  orderTimestamp: string | null
+  exchangeUpdateTimestamp: string | null
+}
+
+interface KiteOrderBookResponse {
+  items: OrderRow[]
+}
+
+const KITE_ORDER_STATUSES: readonly string[] = [
+  'OPEN',
+  'COMPLETE',
+  'CANCELLED',
+  'REJECTED',
+  'PUT ORDER REQ RECEIVED',
+  'VALIDATION PENDING',
+  'OPEN PENDING',
+  'MODIFY VALIDATION PENDING',
+  'MODIFY PENDING',
+  'TRIGGER PENDING',
+  'CANCEL PENDING',
+  'AMO REQ RECEIVED',
+]
+
+function normalizeKiteTimestamp(value: string | null | undefined): string | null {
+  if (!value) return null
+  const t = value.trim()
+  if (!t) return null
+  if (t.includes('T')) return t
+  // Kite orders API often returns "yyyy-MM-dd HH:mm:ss" without timezone; treat as IST.
+  return t.replace(' ', 'T') + '+05:30'
 }
 
 export function TradesPage() {
@@ -34,6 +80,7 @@ export function TradesPage() {
   const [orderSearch, setOrderSearch] = useState('')
   const [orderStatus, setOrderStatus] = useState('all')
   const [orderBotId, setOrderBotId] = useState('all')
+  const [orderType, setOrderType] = useState('all')
   const [orderFrom, setOrderFrom] = useState('')
   const [orderTo, setOrderTo] = useState('')
 
@@ -44,8 +91,8 @@ export function TradesPage() {
       .catch(() => setError('Failed to load trades.'))
 
     api
-      .get<OrderRow[]>('/trades/orders')
-      .then((r) => setOrders(r.data))
+      .get<KiteOrderBookResponse>('/broker/kite/orders')
+      .then((r) => setOrders(r.data.items ?? []))
       .catch(() => setOrdersError('Failed to load orders.'))
   }, [])
 
@@ -91,13 +138,25 @@ export function TradesPage() {
     return 'Buy'
   }
 
-  const orderStatusOptions = useMemo(
-    () => [...new Set(orders.map((o) => o.status.trim()).filter((s) => s.length > 0))].sort((a, b) => a.localeCompare(b)),
+  const orderStatusOptions = useMemo(() => {
+    const seen = new Set(KITE_ORDER_STATUSES)
+    for (const o of orders) {
+      const s = o.status.trim()
+      if (s.length > 0) seen.add(s)
+    }
+    return [...seen]
+  }, [orders])
+
+  const orderExchangeOptions = useMemo(
+    () => [...new Set(orders.map((o) => o.exchange.trim()).filter((s) => s.length > 0))].sort((a, b) => a.localeCompare(b)),
     [orders],
   )
 
-  const orderBotOptions = useMemo(
-    () => [...new Set(orders.map((o) => o.botId.trim()).filter((s) => s.length > 0))].sort((a, b) => a.localeCompare(b)),
+  const orderTypeOptions = useMemo(
+    () =>
+      [...new Set(orders.map((o) => `${o.transactionType} ${o.orderType}`.trim()).filter((s) => s.length > 0))].sort((a, b) =>
+        a.localeCompare(b),
+      ),
     [orders],
   )
 
@@ -107,17 +166,19 @@ export function TradesPage() {
     const toMs = orderTo ? new Date(orderTo).getTime() : null
     return orders.filter((o) => {
       if (orderStatus !== 'all' && o.status !== orderStatus) return false
-      if (orderBotId !== 'all' && o.botId !== orderBotId) return false
+      if (orderBotId !== 'all' && o.exchange !== orderBotId) return false
+      if (orderType !== 'all' && `${o.transactionType} ${o.orderType}`.trim() !== orderType) return false
       if (q.length > 0) {
-        const hay = `${o.externalId} ${o.status} ${o.botId}`.toLowerCase()
+        const hay =
+          `${o.orderId} ${o.exchangeOrderId ?? ''} ${o.tradingsymbol} ${o.exchange} ${o.status} ${o.transactionType} ${o.orderType} ${o.product} ${o.statusMessage ?? ''}`.toLowerCase()
         if (!hay.includes(q)) return false
       }
-      const createdMs = new Date(o.createdAt).getTime()
+      const createdMs = new Date(normalizeKiteTimestamp(o.exchangeUpdateTimestamp ?? o.orderTimestamp) ?? '').getTime()
       if (fromMs != null && Number.isFinite(fromMs) && createdMs < fromMs) return false
       if (toMs != null && Number.isFinite(toMs) && createdMs > toMs) return false
       return true
     })
-  }, [orderBotId, orderFrom, orderSearch, orderStatus, orderTo, orders])
+  }, [orderBotId, orderFrom, orderSearch, orderStatus, orderTo, orderType, orders])
 
   return (
     <Layout>
@@ -203,7 +264,7 @@ export function TradesPage() {
                 size="sm"
                 value={orderSearch}
                 onChange={(e) => setOrderSearch(e.target.value)}
-                placeholder="External ID / status / bot id"
+                placeholder="Order ID / symbol / status / type"
               />
             </Col>
             <Col xs={6} md={2}>
@@ -218,21 +279,32 @@ export function TradesPage() {
               </Form.Select>
             </Col>
             <Col xs={6} md={2}>
-              <Form.Label className="small text-secondary text-uppercase mb-1">Bot</Form.Label>
+              <Form.Label className="small text-secondary text-uppercase mb-1">Exchange</Form.Label>
               <Form.Select size="sm" value={orderBotId} onChange={(e) => setOrderBotId(e.target.value)}>
                 <option value="all">All</option>
-                {orderBotOptions.map((b) => (
-                  <option key={`order-bot-${b}`} value={b}>
-                    {b.slice(0, 8)}...
+                {orderExchangeOptions.map((b) => (
+                  <option key={`order-ex-${b}`} value={b}>
+                    {b}
                   </option>
                 ))}
               </Form.Select>
             </Col>
             <Col xs={6} md={2}>
+              <Form.Label className="small text-secondary text-uppercase mb-1">Type</Form.Label>
+              <Form.Select size="sm" value={orderType} onChange={(e) => setOrderType(e.target.value)}>
+                <option value="all">All</option>
+                {orderTypeOptions.map((t) => (
+                  <option key={`order-type-${t}`} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Form.Select>
+            </Col>
+            <Col xs={6} md={1}>
               <Form.Label className="small text-secondary text-uppercase mb-1">From</Form.Label>
               <Form.Control size="sm" type="datetime-local" value={orderFrom} onChange={(e) => setOrderFrom(e.target.value)} />
             </Col>
-            <Col xs={6} md={2}>
+            <Col xs={6} md={1}>
               <Form.Label className="small text-secondary text-uppercase mb-1">To</Form.Label>
               <Form.Control size="sm" type="datetime-local" value={orderTo} onChange={(e) => setOrderTo(e.target.value)} />
             </Col>
@@ -244,24 +316,45 @@ export function TradesPage() {
         <Table responsive hover className="mb-0 small">
           <thead className="table-dark">
             <tr>
-              <th>Created</th>
-              <th>External ID</th>
+              <th>Updated</th>
+              <th>Order ID</th>
+              <th>Symbol</th>
+              <th>Type</th>
               <th>Status</th>
-              <th>Bot ID</th>
+              <th>Qty (F/P/C)</th>
+              <th>Price / Avg / Trigger</th>
+              <th>Message</th>
             </tr>
           </thead>
           <tbody>
             {filteredOrders.map((o) => (
-              <tr key={o.id}>
-                <td className="text-secondary text-nowrap">{formatLocalDateTime(o.createdAt)}</td>
-                <td className="font-monospace">{o.externalId}</td>
-                <td>{o.status}</td>
-                <td className="font-monospace">{o.botId}</td>
+              <tr key={o.orderId}>
+                <td className="text-secondary text-nowrap">
+                  {formatLocalDateTime(normalizeKiteTimestamp(o.exchangeUpdateTimestamp ?? o.orderTimestamp))}
+                </td>
+                <td className="font-monospace">
+                  {o.orderId}
+                  {o.exchangeOrderId ? <div className="text-muted">{o.exchangeOrderId}</div> : null}
+                </td>
+                <td>
+                  <div className="fw-medium">{o.tradingsymbol}</div>
+                  <div className="text-muted small">{o.exchange}</div>
+                </td>
+                <td className="text-nowrap">
+                  {o.transactionType} {o.orderType}
+                  <div className="text-muted small">{o.product}</div>
+                </td>
+                <td className="text-nowrap">{o.status}</td>
+                <td className="text-nowrap">{o.quantity} ({o.filledQuantity}/{o.pendingQuantity}/{o.cancelledQuantity ?? 0})</td>
+                <td className="text-nowrap">
+                  {o.price ?? '—'} / {o.averagePrice ?? '—'} / {o.triggerPrice ?? '—'}
+                </td>
+                <td className="small">{o.statusMessage ?? o.statusMessageRaw ?? '—'}</td>
               </tr>
             ))}
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={4} className="text-muted">
+                <td colSpan={8} className="text-muted">
                   No orders match current filters.
                 </td>
               </tr>

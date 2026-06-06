@@ -284,6 +284,22 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    /// <summary>Kite orderbook for the day (open/pending/executed/rejected/cancelled).</summary>
+    [Authorize]
+    [HttpGet("kite/orders")]
+    public async Task<ActionResult<KiteOrderBookDto>> KiteOrders(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetKiteOrdersAsync(User.GetUserId(), ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     /// <summary>Saved favorite Kite instruments for the current user (persisted in the database).</summary>
     [Authorize]
     [HttpGet("kite/favorites")]

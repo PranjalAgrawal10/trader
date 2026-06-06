@@ -52,6 +52,12 @@ public interface IKiteInstrumentsClient
         string apiKey,
         string accessToken,
         CancellationToken ct = default);
+
+    /// <summary>Kite <c>GET /orders</c> — full orderbook for the trading day (includes pending/open/executed/rejected/cancelled).</summary>
+    Task<KiteOrdersFetchResult> FetchOrdersAsync(
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
 }
 
 public sealed record KiteQuoteOhlcFetchResult(
@@ -72,3 +78,33 @@ public sealed record KiteHistoricalFetchResult(
     bool Success,
     string? ErrorMessage,
     IReadOnlyList<KiteHistoricalCandlePointDto> Candles);
+
+public sealed record KiteOrdersFetchResult(
+    bool Success,
+    string? ErrorMessage,
+    IReadOnlyList<KiteOrderListItemDto> Items);
+
+public sealed record KiteOrderListItemDto(
+    string OrderId,
+    string? ExchangeOrderId,
+    string? ParentOrderId,
+    string Status,
+    string? StatusMessage,
+    string? StatusMessageRaw,
+    string Tradingsymbol,
+    string Exchange,
+    string TransactionType,
+    string Variety,
+    string OrderType,
+    string Product,
+    string Validity,
+    int Quantity,
+    int FilledQuantity,
+    int PendingQuantity,
+    int? CancelledQuantity,
+    decimal? Price,
+    decimal? TriggerPrice,
+    decimal? AveragePrice,
+    string? Tag,
+    string? OrderTimestamp,
+    string? ExchangeUpdateTimestamp);

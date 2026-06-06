@@ -81,6 +81,34 @@ public sealed record KiteInstrumentLiveQuoteDto(
     decimal LastPrice,
     decimal PreviousClose);
 
+/// <summary>Kite orderbook row from <c>GET /orders</c> (trading-day scope; includes open/pending/executed/rejected/cancelled).</summary>
+public sealed record KiteOrderBookItemDto(
+    string OrderId,
+    string? ExchangeOrderId,
+    string? ParentOrderId,
+    string Status,
+    string? StatusMessage,
+    string? StatusMessageRaw,
+    string Tradingsymbol,
+    string Exchange,
+    string TransactionType,
+    string Variety,
+    string OrderType,
+    string Product,
+    string Validity,
+    int Quantity,
+    int FilledQuantity,
+    int PendingQuantity,
+    int? CancelledQuantity,
+    decimal? Price,
+    decimal? TriggerPrice,
+    decimal? AveragePrice,
+    string? Tag,
+    string? OrderTimestamp,
+    string? ExchangeUpdateTimestamp);
+
+public sealed record KiteOrderBookDto(IReadOnlyList<KiteOrderBookItemDto> Items);
+
 /// <summary>OHLCV series from Kite historical API (possibly after server-side resampling for 2m / 4m).</summary>
 public sealed record KiteHistoricalCandlesDto(
     IReadOnlyList<KiteHistoricalCandlePointDto> Candles,
