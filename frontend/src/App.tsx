@@ -4,15 +4,12 @@ import { BROKER_PROFILE_SECTION_ID } from './constants/profileSections'
 import { RequiresBroker } from './components/RequiresBroker'
 import { RequiresTwoFactor } from './components/RequiresTwoFactor'
 import { useAuthStore } from './store/useAuthStore'
-import { BotsPage } from './pages/BotsPage'
-import { DashboardPage } from './pages/DashboardPage'
 import { KiteInstrumentsPage } from './pages/KiteInstrumentsPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { VerifyEmailPage } from './pages/VerifyEmailPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
-import { StrategiesPage } from './pages/StrategiesPage'
 import { TradesPage } from './pages/TradesPage'
 import { ScalperPage } from './pages/ScalperPage'
 import { WalletPage } from './pages/WalletPage'
@@ -123,7 +120,7 @@ export default function App() {
           <Protected>
             <RequiresTwoFactor>
               <RequiresBroker>
-                <DashboardPage />
+                <Navigate to="/instruments" replace />
               </RequiresBroker>
             </RequiresTwoFactor>
           </Protected>
@@ -135,7 +132,7 @@ export default function App() {
           <Protected>
             <RequiresTwoFactor>
               <RequiresBroker>
-                <StrategiesPage />
+                <Navigate to="/instruments" replace />
               </RequiresBroker>
             </RequiresTwoFactor>
           </Protected>
@@ -147,7 +144,7 @@ export default function App() {
           <Protected>
             <RequiresTwoFactor>
               <RequiresBroker>
-                <BotsPage />
+                <Navigate to="/instruments" replace />
               </RequiresBroker>
             </RequiresTwoFactor>
           </Protected>
@@ -177,7 +174,7 @@ export default function App() {
           </Protected>
         }
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/instruments" replace />} />
     </Routes>
   )
 }

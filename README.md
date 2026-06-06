@@ -2,7 +2,7 @@
 
 This repository contains **two deployable projects**: **`backend/`** (.NET 8 API) and **`frontend/`** (Vite + React). They can stay in one Git repo or be pushed to **separate remotes** (copy each folder into its own repository root if you split).
 
-Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React (TypeScript)** UI for strategies, bots, trades, broker onboarding, **email verification**, **password reset links**, and **second-factor sign-in** (authenticator **TOTP** or **email OTP** after password).
+Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React (TypeScript)** UI for instruments, scalper, trades, broker onboarding, **email verification**, **password reset links**, and **second-factor sign-in** (authenticator **TOTP** or **email OTP** after password).
 
 ## Prerequisites
 

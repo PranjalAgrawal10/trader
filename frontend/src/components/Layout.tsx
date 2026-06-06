@@ -29,20 +29,11 @@ export function Layout({ children }: { children: ReactNode }) {
           <Navbar.Toggle aria-controls="main-nav" />
           <Navbar.Collapse id="main-nav">
             <Nav className="me-auto mb-3 mb-lg-0">
-              <Nav.Link as={NavLink} to="/" end>
-                Dashboard
-              </Nav.Link>
               <Nav.Link as={NavLink} to="/instruments">
                 F&amp;O / Spot / MCX
               </Nav.Link>
               <Nav.Link as={NavLink} to="/scalper">
                 Scalper
-              </Nav.Link>
-              <Nav.Link as={NavLink} to="/strategies">
-                Strategies
-              </Nav.Link>
-              <Nav.Link as={NavLink} to="/bots">
-                Bots
               </Nav.Link>
               <Nav.Link as={NavLink} to="/trades">
                 Trades

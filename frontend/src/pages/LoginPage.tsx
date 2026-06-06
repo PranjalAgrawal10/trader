@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { type FormEvent, useState } from 'react'
-import { Button, ButtonGroup, Card, Col, Container, Form, Row, Alert } from 'react-bootstrap'
+import { Button, ButtonGroup, Card, Col, Container, Form, Row, Alert, InputGroup } from 'react-bootstrap'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { navigateToAppAfterTwoFactor } from '../navigation/afterTwoFactor'
@@ -64,8 +64,32 @@ export function LoginPage() {
   const [twoFactor, setTwoFactor] = useState<TwoFactorChallenge | null>(null)
   const [registerSent, setRegisterSent] = useState(false)
   const [totpCode, setTotpCode] = useState('')
+  const [otpPasteState, setOtpPasteState] = useState<'idle' | 'ok' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const extractOtpDigits = (raw: string): string => {
+    const digits = raw.replace(/\D/g, '')
+    if (digits.length >= 6) return digits.slice(0, 6)
+    return digits
+  }
+
+  const pasteEmailOtp = async () => {
+    if (!twoFactor || twoFactor.second_factor !== 'email_otp') return
+    try {
+      if (!navigator.clipboard?.readText) throw new Error('Clipboard read is unavailable.')
+      const text = await navigator.clipboard.readText()
+      const otp = extractOtpDigits(text)
+      if (otp.length === 0) throw new Error('No OTP digits found in clipboard.')
+      setTotpCode(otp)
+      setOtpPasteState('ok')
+      setError(null)
+    } catch {
+      setOtpPasteState('error')
+    } finally {
+      window.setTimeout(() => setOtpPasteState('idle'), 1400)
+    }
+  }
 
   const continueAfterAuth = async (token: string, accountEmail: string) => {
     setAuth(token, accountEmail)
@@ -175,6 +199,7 @@ export function LoginPage() {
   const backToPassword = () => {
     setTwoFactor(null)
     setTotpCode('')
+    setOtpPasteState('idle')
     setError(null)
   }
 
@@ -203,15 +228,32 @@ export function LoginPage() {
                     <Form.Label className="small text-secondary text-uppercase">
                       {twoFactor.second_factor === 'email_otp' ? 'Code from email' : 'Authenticator or recovery code'}
                     </Form.Label>
-                    <Form.Control
-                      inputMode="text"
-                      autoComplete="one-time-code"
-                      value={totpCode}
-                      onChange={(ev) => setTotpCode(ev.target.value)}
-                      placeholder="123456"
-                      required
-                      autoFocus
-                    />
+                    {twoFactor.second_factor === 'email_otp' ? (
+                      <InputGroup>
+                        <Form.Control
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          value={totpCode}
+                          onChange={(ev) => setTotpCode(ev.target.value)}
+                          placeholder="123456"
+                          required
+                          autoFocus
+                        />
+                        <Button variant="outline-secondary" type="button" onClick={() => void pasteEmailOtp()} disabled={busy}>
+                          {otpPasteState === 'ok' ? 'Pasted' : otpPasteState === 'error' ? 'Paste failed' : 'Paste OTP'}
+                        </Button>
+                      </InputGroup>
+                    ) : (
+                      <Form.Control
+                        inputMode="text"
+                        autoComplete="one-time-code"
+                        value={totpCode}
+                        onChange={(ev) => setTotpCode(ev.target.value)}
+                        placeholder="123456"
+                        required
+                        autoFocus
+                      />
+                    )}
                   </Form.Group>
                   {error ? (
                     <Form.Text className="text-danger d-block mb-3">{error}</Form.Text>

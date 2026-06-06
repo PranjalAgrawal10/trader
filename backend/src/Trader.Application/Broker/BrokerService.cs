@@ -515,15 +515,34 @@ public sealed class BrokerService : IBrokerService
             return FinalizeChartHistoricalCandles(merged, code, requestStart, requestEnd);
         }
 
-        if (code == "4h")
+        if (code is "2h" or "4h" or "8h")
         {
+            var bucketHours = code switch
+            {
+                "2h" => 2L,
+                "4h" => 4L,
+                "8h" => 8L,
+                _ => 4L,
+            };
             var fetch = await _kiteInstruments
                 .FetchHistoricalCandlesAsync(token, "60minute", apiKey, accessToken, fetchStart, requestEnd, continuous: false, ct)
                 .ConfigureAwait(false);
             if (!fetch.Success)
                 throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load candles from Kite.");
 
-            var merged = MergeOhlcByBucketSeconds(fetch.Candles, 4L * 3600);
+            var merged = MergeOhlcByBucketSeconds(fetch.Candles, bucketHours * 3600);
+            return FinalizeChartHistoricalCandles(merged, code, requestStart, requestEnd);
+        }
+
+        if (code == "90m")
+        {
+            var fetch = await _kiteInstruments
+                .FetchHistoricalCandlesAsync(token, "minute", apiKey, accessToken, fetchStart, requestEnd, continuous: false, ct)
+                .ConfigureAwait(false);
+            if (!fetch.Success)
+                throw new InvalidOperationException(fetch.ErrorMessage ?? "Could not load candles from Kite.");
+
+            var merged = MergeOhlcByBucketSeconds(fetch.Candles, 90L * 60);
             return FinalizeChartHistoricalCandles(merged, code, requestStart, requestEnd);
         }
 
@@ -1360,7 +1379,10 @@ public sealed class BrokerService : IBrokerService
             "15m" => TimeSpan.FromDays(120),
             "30m" => TimeSpan.FromDays(180),
             "1h" => TimeSpan.FromDays(365),
+            "90m" => TimeSpan.FromDays(365),
+            "2h" => TimeSpan.FromDays(540),
             "4h" => TimeSpan.FromDays(730),
+            "8h" => TimeSpan.FromDays(1095),
             "1d" => TimeSpan.FromDays(730),
             "1w" => TimeSpan.FromDays(365 * 12),
             _ => TimeSpan.FromDays(5),
