@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Spinner, Table } from 'react-bootstrap'
+import { Alert, Button, ButtonGroup, Spinner, Table } from 'react-bootstrap'
 import { fetchHistoricalChartOhlcMulti } from '../api/kiteChartHistorical'
 import { summarizeCloseLinearTrend, type CloseLinearTrendSummary } from '../utils/closeLinearTrend'
 import { formatLocalDateTime } from '../utils/formatLocalDateTime'
@@ -40,6 +40,7 @@ function classifyTrend(s: CloseLinearTrendSummary): 'up' | 'down' | 'neutral' {
 }
 
 export type TrendAnalysisMultiPanelVariant = 'browseAlways' | 'favoriteLazy'
+type TrendIntervalOption = { id: string; label: string }
 
 /** Multi-interval OHLC fetched with the parent’s Range (past window); least-squares on close matches chart “Trend LR” over the downloaded series (not zoom). */
 export function TrendAnalysisMultiPanel({
@@ -48,18 +49,35 @@ export function TrendAnalysisMultiPanel({
   historicalQueryExtra,
   selectedIntervalsOrdered,
   variant,
+  embeddedIntervalSelector,
 }: {
   instrumentToken: string | null | undefined
   symbolLabel: string
   historicalQueryExtra: Record<string, string | undefined>
-  selectedIntervalsOrdered: readonly string[]
+  selectedIntervalsOrdered?: readonly string[]
   variant: TrendAnalysisMultiPanelVariant
+  embeddedIntervalSelector?: {
+    heading: string
+    options: readonly TrendIntervalOption[]
+    defaultSelectedIds?: readonly string[]
+  }
 }) {
   const shouldAutoRun = variant === 'browseAlways'
+  const hasEmbeddedSelector = embeddedIntervalSelector != null
+  const [internalSelectedIntervals, setInternalSelectedIntervals] = useState<string[]>(() => {
+    if (!embeddedIntervalSelector) return []
+    const optionIds = embeddedIntervalSelector.options.map((o) => o.id)
+    if (embeddedIntervalSelector.defaultSelectedIds && embeddedIntervalSelector.defaultSelectedIds.length > 0) {
+      const selected = embeddedIntervalSelector.defaultSelectedIds.filter((x) => optionIds.includes(x))
+      if (selected.length > 0) return [...selected]
+    }
+    return optionIds
+  })
+  const effectiveSelectedIntervals = hasEmbeddedSelector ? internalSelectedIntervals : [...(selectedIntervalsOrdered ?? [])]
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   /** Stable for effect deps — parent often passes a new array instance each render with the same intervals. */
-  const intervalsKey = selectedIntervalsOrdered.join('|')
+  const intervalsKey = effectiveSelectedIntervals.join('|')
   const extrasKey = JSON.stringify(historicalQueryExtra)
   const [rowsByInterval, setRowsByInterval] = useState<
     Record<
@@ -143,7 +161,7 @@ export function TrendAnalysisMultiPanel({
     let neutral = 0
     let errs = 0
     let done = 0
-    for (const iv of selectedIntervalsOrdered) {
+    for (const iv of effectiveSelectedIntervals) {
       const row = rowsByInterval[iv]
       if (row === 'error') {
         errs++
@@ -162,12 +180,12 @@ export function TrendAnalysisMultiPanel({
       else if (down >= neutral) label = totalVotes === down ? `${down}/${totalVotes} down` : `Down leads (${down}/${totalVotes})`
       else label = `Sideways-heavy (${neutral}/${totalVotes})`
     }
-    return { up, down, neutral, errs, totalVotes: selectedIntervalsOrdered.length, done, label }
-  }, [rowsByInterval, selectedIntervalsOrdered])
+    return { up, down, neutral, errs, totalVotes: effectiveSelectedIntervals.length, done, label }
+  }, [rowsByInterval, effectiveSelectedIntervals])
 
   if (!instrumentToken) return null
 
-  const body = selectedIntervalsOrdered.length === 0 ? (
+  const body = effectiveSelectedIntervals.length === 0 ? (
     <p className="text-secondary small mb-0 py-2">Select at least one interval under Trend analysis.</p>
   ) : (
     <>
@@ -218,7 +236,7 @@ export function TrendAnalysisMultiPanel({
             </tr>
           </thead>
           <tbody>
-            {selectedIntervalsOrdered.map((iv) => {
+            {effectiveSelectedIntervals.map((iv) => {
               const r = rowsByInterval[iv]
               const dirClass =
                 r != null && r !== 'error'
@@ -289,6 +307,36 @@ export function TrendAnalysisMultiPanel({
     </>
   )
 
+  const intervalSelector = embeddedIntervalSelector ? (
+    <div className="border rounded border-secondary-subtle p-1 mb-2">
+      <div className="small fw-semibold mb-1" style={{ fontSize: '0.72rem', letterSpacing: '0.02em' }}>
+        {embeddedIntervalSelector.heading}
+      </div>
+      <div className="d-flex align-items-center flex-nowrap overflow-auto scalper-compact-scrollbar">
+        <ButtonGroup size="sm" className="flex-nowrap">
+          {embeddedIntervalSelector.options.map((opt) => {
+            const active = internalSelectedIntervals.includes(opt.id)
+            return (
+              <Button
+                key={`trend-analysis-interval-${opt.id}`}
+                size="sm"
+                variant={active ? 'secondary' : 'outline-secondary'}
+                style={{ padding: '0.12rem 0.38rem', fontSize: '0.68rem', lineHeight: 1.1, whiteSpace: 'nowrap' }}
+                onClick={() =>
+                  setInternalSelectedIntervals((prev) =>
+                    prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id],
+                  )
+                }
+              >
+                {opt.label}
+              </Button>
+            )
+          })}
+        </ButtonGroup>
+      </div>
+    </div>
+  ) : null
+
   if (shouldAutoRun) {
     return (
       <section className="mt-3" aria-labelledby="trend-multi-heading-browse">
@@ -306,6 +354,7 @@ export function TrendAnalysisMultiPanel({
             ⓘ
           </span>
         </div>
+        {intervalSelector}
         {body}
       </section>
     )
@@ -327,6 +376,7 @@ export function TrendAnalysisMultiPanel({
           ⓘ
         </span>
       </div>
+      {intervalSelector}
       {body}
     </section>
   )

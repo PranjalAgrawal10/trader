@@ -291,7 +291,6 @@ export function ScalperPage() {
   const [showVolume, setShowVolume] = useState(true)
   const [graphType, setGraphType] = useState<ChartGraphType>('candlestick')
   const [maLineVisibility, setMaLineVisibility] = useState<MaLineVisibility>(SCALPER_MA)
-  const [trendIntervals, setTrendIntervals] = useState<string[]>(['1m', '2m', '3m', '5m', '10m', '15m', '30m', '1h', '4h'])
 
   const [rawSeries, setRawSeries] = useState<ChartPointWithMa[]>([])
   const rawSeriesRef = useRef<ChartPointWithMa[] | null>(null)
@@ -555,9 +554,9 @@ export function ScalperPage() {
   )
 
   const trendHistoricalExtra = useMemo(() => scalperRangeQueryParams(rangePreset), [rangePreset])
-  const trendIntervalsOrdered = useMemo(
-    () => SCALPER_TREND_INTERVAL_OPTIONS.map((opt) => opt.id).filter((id) => trendIntervals.includes(id)),
-    [trendIntervals],
+  const defaultTrendIntervals = useMemo(
+    () => ['1m', '2m', '3m', '5m', '10m', '15m', '30m', '1h', '4h'],
+    [],
   )
 
   const liveVsBar = useMemo(() => {
@@ -973,43 +972,6 @@ export function ScalperPage() {
                     </div>
                   ) : null}
                   {selected ? (
-                    <div className="border rounded border-secondary-subtle p-1 mb-2">
-                      <div
-                        className="small fw-semibold mb-1"
-                        style={{ fontSize: '0.72rem', letterSpacing: '0.02em' }}
-                      >
-                        Trend analysis intervals
-                      </div>
-                      <div className="d-flex align-items-center flex-nowrap overflow-auto scalper-compact-scrollbar">
-                        <ButtonGroup size="sm" className="flex-nowrap">
-                          {SCALPER_TREND_INTERVAL_OPTIONS.map((opt) => {
-                            const active = trendIntervals.includes(opt.id)
-                            return (
-                              <Button
-                                key={`scalper-trend-${opt.id}`}
-                                size="sm"
-                                variant={active ? 'secondary' : 'outline-secondary'}
-                                style={{
-                                  padding: '0.12rem 0.38rem',
-                                  fontSize: '0.68rem',
-                                  lineHeight: 1.1,
-                                  whiteSpace: 'nowrap',
-                                }}
-                                onClick={() =>
-                                  setTrendIntervals((prev) =>
-                                    prev.includes(opt.id) ? prev.filter((x) => x !== opt.id) : [...prev, opt.id],
-                                  )
-                                }
-                              >
-                                {opt.label}
-                              </Button>
-                            )
-                          })}
-                        </ButtonGroup>
-                      </div>
-                    </div>
-                  ) : null}
-                  {selected && trendIntervalsOrdered.length > 0 ? (
                     <div
                       style={{
                         fontFamily: '"Trebuchet MS", "Segoe UI", Arial, sans-serif',
@@ -1021,8 +983,12 @@ export function ScalperPage() {
                         instrumentToken={selected.instrumentToken}
                         symbolLabel={`${selected.tradingsymbol} · ${selected.exchange}`}
                         historicalQueryExtra={trendHistoricalExtra}
-                        selectedIntervalsOrdered={trendIntervalsOrdered}
                         variant="browseAlways"
+                        embeddedIntervalSelector={{
+                          heading: 'Trend analysis intervals',
+                          options: SCALPER_TREND_INTERVAL_OPTIONS,
+                          defaultSelectedIds: defaultTrendIntervals,
+                        }}
                       />
                     </div>
                   ) : null}
