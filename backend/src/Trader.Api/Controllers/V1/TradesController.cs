@@ -28,4 +28,12 @@ public sealed class TradesController : ControllerBase
         var items = await _trades.ListAsync(userId, botId, ct);
         return Ok(items);
     }
+
+    [HttpGet("orders")]
+    public async Task<ActionResult<IReadOnlyList<TradingOrderResponse>>> ListOrders([FromQuery] Guid? botId, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        var items = await _trades.ListOrdersAsync(userId, botId, ct);
+        return Ok(items);
+    }
 }

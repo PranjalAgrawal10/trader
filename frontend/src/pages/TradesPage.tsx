@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Card, Col, Row, Table } from 'react-bootstrap'
+import { Card, Col, Form, Row, Table } from 'react-bootstrap'
 import { api } from '../api/client'
 import { ChartWithRightGutter } from '../components/ChartWithRightGutter'
 import type { LwSyntheticBarRow } from '../components/LwMiscCharts'
@@ -18,15 +18,35 @@ interface TradeRow {
   executedAt: string
 }
 
+interface OrderRow {
+  id: string
+  botId: string
+  externalId: string
+  status: string
+  createdAt: string
+}
+
 export function TradesPage() {
   const [rows, setRows] = useState<TradeRow[]>([])
+  const [orders, setOrders] = useState<OrderRow[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [ordersError, setOrdersError] = useState<string | null>(null)
+  const [orderSearch, setOrderSearch] = useState('')
+  const [orderStatus, setOrderStatus] = useState('all')
+  const [orderBotId, setOrderBotId] = useState('all')
+  const [orderFrom, setOrderFrom] = useState('')
+  const [orderTo, setOrderTo] = useState('')
 
   useEffect(() => {
     api
       .get<TradeRow[]>('/trades')
       .then((r) => setRows(r.data))
       .catch(() => setError('Failed to load trades.'))
+
+    api
+      .get<OrderRow[]>('/trades/orders')
+      .then((r) => setOrders(r.data))
+      .catch(() => setOrdersError('Failed to load orders.'))
   }, [])
 
   const lwTradeCharts = useMemo(() => {
@@ -70,6 +90,34 @@ export function TradesPage() {
     if (v === 'sell' || v === 1) return 'Sell'
     return 'Buy'
   }
+
+  const orderStatusOptions = useMemo(
+    () => [...new Set(orders.map((o) => o.status.trim()).filter((s) => s.length > 0))].sort((a, b) => a.localeCompare(b)),
+    [orders],
+  )
+
+  const orderBotOptions = useMemo(
+    () => [...new Set(orders.map((o) => o.botId.trim()).filter((s) => s.length > 0))].sort((a, b) => a.localeCompare(b)),
+    [orders],
+  )
+
+  const filteredOrders = useMemo(() => {
+    const q = orderSearch.trim().toLowerCase()
+    const fromMs = orderFrom ? new Date(orderFrom).getTime() : null
+    const toMs = orderTo ? new Date(orderTo).getTime() : null
+    return orders.filter((o) => {
+      if (orderStatus !== 'all' && o.status !== orderStatus) return false
+      if (orderBotId !== 'all' && o.botId !== orderBotId) return false
+      if (q.length > 0) {
+        const hay = `${o.externalId} ${o.status} ${o.botId}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      const createdMs = new Date(o.createdAt).getTime()
+      if (fromMs != null && Number.isFinite(fromMs) && createdMs < fromMs) return false
+      if (toMs != null && Number.isFinite(toMs) && createdMs > toMs) return false
+      return true
+    })
+  }, [orderBotId, orderFrom, orderSearch, orderStatus, orderTo, orders])
 
   return (
     <Layout>
@@ -138,6 +186,86 @@ export function TradesPage() {
                 <td>{t.realizedPnl ?? '—'}</td>
               </tr>
             ))}
+          </tbody>
+        </Table>
+      </div>
+
+      <h2 className="h4 mt-4 mb-2">Orders</h2>
+      <p className="text-secondary small mb-3">Fetches from your order history; apply filters locally.</p>
+      {ordersError ? <p className="text-danger small mb-3">{ordersError}</p> : null}
+
+      <Card className="border-secondary mb-3">
+        <Card.Body className="p-2">
+          <Row className="g-2">
+            <Col xs={12} md={4}>
+              <Form.Label className="small text-secondary text-uppercase mb-1">Search</Form.Label>
+              <Form.Control
+                size="sm"
+                value={orderSearch}
+                onChange={(e) => setOrderSearch(e.target.value)}
+                placeholder="External ID / status / bot id"
+              />
+            </Col>
+            <Col xs={6} md={2}>
+              <Form.Label className="small text-secondary text-uppercase mb-1">Status</Form.Label>
+              <Form.Select size="sm" value={orderStatus} onChange={(e) => setOrderStatus(e.target.value)}>
+                <option value="all">All</option>
+                {orderStatusOptions.map((s) => (
+                  <option key={`order-status-${s}`} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </Form.Select>
+            </Col>
+            <Col xs={6} md={2}>
+              <Form.Label className="small text-secondary text-uppercase mb-1">Bot</Form.Label>
+              <Form.Select size="sm" value={orderBotId} onChange={(e) => setOrderBotId(e.target.value)}>
+                <option value="all">All</option>
+                {orderBotOptions.map((b) => (
+                  <option key={`order-bot-${b}`} value={b}>
+                    {b.slice(0, 8)}...
+                  </option>
+                ))}
+              </Form.Select>
+            </Col>
+            <Col xs={6} md={2}>
+              <Form.Label className="small text-secondary text-uppercase mb-1">From</Form.Label>
+              <Form.Control size="sm" type="datetime-local" value={orderFrom} onChange={(e) => setOrderFrom(e.target.value)} />
+            </Col>
+            <Col xs={6} md={2}>
+              <Form.Label className="small text-secondary text-uppercase mb-1">To</Form.Label>
+              <Form.Control size="sm" type="datetime-local" value={orderTo} onChange={(e) => setOrderTo(e.target.value)} />
+            </Col>
+          </Row>
+        </Card.Body>
+      </Card>
+
+      <div className="rounded border border-secondary overflow-x-auto">
+        <Table responsive hover className="mb-0 small">
+          <thead className="table-dark">
+            <tr>
+              <th>Created</th>
+              <th>External ID</th>
+              <th>Status</th>
+              <th>Bot ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredOrders.map((o) => (
+              <tr key={o.id}>
+                <td className="text-secondary text-nowrap">{formatLocalDateTime(o.createdAt)}</td>
+                <td className="font-monospace">{o.externalId}</td>
+                <td>{o.status}</td>
+                <td className="font-monospace">{o.botId}</td>
+              </tr>
+            ))}
+            {filteredOrders.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="text-muted">
+                  No orders match current filters.
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </Table>
       </div>
