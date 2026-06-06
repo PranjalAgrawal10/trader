@@ -58,6 +58,7 @@ import {
 
 export type InstrumentPriceChartGraphType = 'line' | 'bar' | 'candlestick'
 export type InstrumentChartDensity = 'compact' | 'comfortable'
+export type InstrumentCrosshairMode = 'magnet' | 'normal'
 
 export type InstrumentPriceChartProps = {
   graphType: InstrumentPriceChartGraphType
@@ -81,6 +82,8 @@ export type InstrumentPriceChartProps = {
   enableInitialViewportClip?: boolean
   /** Show price + time axes (readable scale). Default true for OHLC. */
   showScales?: boolean
+  /** Crosshair behavior: magnet snaps to OHLC; normal follows cursor point. */
+  crosshairMode?: InstrumentCrosshairMode
   /** Panned near the oldest bar — fetch and prepend older OHLC upstream. */
   onNeedOlderBars?: () => void
   /** Gate for {@link onNeedOlderBars}; false disables further prefetch. */
@@ -180,7 +183,7 @@ function mlDirectionGlyph(direction: MlPredictionLogEntry['direction']): string 
   return '◇'
 }
 
-function lwChartOptions(bg: string, showScales: boolean) {
+function lwChartOptions(bg: string, showScales: boolean, crosshairMode: InstrumentCrosshairMode) {
   return {
     attributionLogo: false,
     autoSize: true,
@@ -209,7 +212,7 @@ function lwChartOptions(bg: string, showScales: boolean) {
       secondsVisible: false,
     },
     crosshair: {
-      mode: CrosshairMode.MagnetOHLC,
+      mode: crosshairMode === 'normal' ? CrosshairMode.Normal : CrosshairMode.MagnetOHLC,
       vertLine: { labelVisible: showScales },
       horzLine: { labelVisible: showScales },
     },
@@ -480,6 +483,7 @@ export function InstrumentPriceChart({
   defaultVisibleBars = CHART_DEFAULT_VISIBLE_BARS,
   enableInitialViewportClip = true,
   showScales = true,
+  crosshairMode = 'magnet',
   onNeedOlderBars,
   canLoadOlderBars = true,
   loadingOlderBars = false,
@@ -585,7 +589,7 @@ export function InstrumentPriceChart({
     let st = stRef.current
     if (!st?.chart) {
       disposeInternals(st)
-      const chart = createChart(el, lwChartOptions(bgMemo, showScales))
+      const chart = createChart(el, lwChartOptions(bgMemo, showScales, crosshairMode))
       const histogram = showVolume
         ? chart.addSeries(HistogramSeries, {
             priceFormat: { type: 'volume' },
@@ -769,8 +773,8 @@ export function InstrumentPriceChart({
   useLayoutEffect(() => {
     const st = stRef.current
     if (!st?.chart) return
-    st.chart.applyOptions(lwChartOptions(bgMemo, showScales))
-  }, [bgMemo, showScales])
+    st.chart.applyOptions(lwChartOptions(bgMemo, showScales, crosshairMode))
+  }, [bgMemo, showScales, crosshairMode])
 
   return (
     <div className="position-relative w-100 h-100 d-flex flex-column">

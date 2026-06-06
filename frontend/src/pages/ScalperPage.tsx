@@ -836,6 +836,7 @@ export function ScalperPage() {
                         data={displaySeriesWithCustom}
                         maLineVisibility={maLineVisibility}
                         customEmaPeriod={customEmaApplied}
+                        crosshairMode="normal"
                         livePrice={live.lastPrice}
                         showVolume={showVolume}
                         newerGhostBars={0}
