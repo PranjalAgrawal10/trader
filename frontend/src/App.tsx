@@ -174,18 +174,6 @@ export default function App() {
           </Protected>
         }
       />
-      <Route
-        path="/safe-scalper"
-        element={
-          <Protected>
-            <RequiresTwoFactor>
-              <RequiresBroker>
-                <ScalperPage mode="safe" />
-              </RequiresBroker>
-            </RequiresTwoFactor>
-          </Protected>
-        }
-      />
       <Route path="*" element={<Navigate to="/instruments" replace />} />
     </Routes>
   )

@@ -114,7 +114,6 @@ interface KiteOrderActionResultResponse {
 }
 
 type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
-type ScalperPageMode = 'standard' | 'safe'
 
 const SCALPER_TICKET_ORDER_TYPES: ReadonlyArray<ScalperTicketOrderType> = ['MARKET', 'LIMIT', 'SL', 'SL-M']
 const SAFE_SCALPER_POINT_PRESETS: ReadonlyArray<{ stop: string; trigger: string; label: string }> = [
@@ -301,8 +300,8 @@ function buildAtmChainRows(
   })
 }
 
-export function ScalperPage({ mode = 'standard' }: { mode?: ScalperPageMode } = {}) {
-  const isSafeMode = mode === 'safe'
+export function ScalperPage() {
+  const [isSafeMode, setIsSafeMode] = useState(false)
   const [broker, setBroker] = useState<BrokerStatusResponse | null>(null)
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
@@ -900,7 +899,7 @@ export function ScalperPage({ mode = 'standard' }: { mode?: ScalperPageMode } = 
     <Layout>
       <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-2">
         <div className="d-flex align-items-center gap-2">
-          <h1 className="h3 mb-0">{isSafeMode ? 'Safe Scalper' : 'Scalper'}</h1>
+          <h1 className="h3 mb-0">Scalper</h1>
           <span
             role="img"
             aria-label="Scalper help"
@@ -916,11 +915,16 @@ export function ScalperPage({ mode = 'standard' }: { mode?: ScalperPageMode } = 
           </span>
         </div>
         <div className="d-flex flex-wrap align-items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={isSafeMode ? 'success' : 'outline-secondary'}
+            onClick={() => setIsSafeMode((v) => !v)}
+          >
+            {isSafeMode ? 'Safe Scalper: ON' : 'Safe Scalper: OFF'}
+          </Button>
           <Link to="/instruments" className="btn btn-sm btn-outline-secondary">
             Kite instruments
-          </Link>
-          <Link to={isSafeMode ? '/scalper' : '/safe-scalper'} className="btn btn-sm btn-outline-secondary">
-            {isSafeMode ? 'Open Scalper' : 'Open Safe Scalper'}
           </Link>
         </div>
       </div>

@@ -35,9 +35,6 @@ export function Layout({ children }: { children: ReactNode }) {
               <Nav.Link as={NavLink} to="/scalper">
                 Scalper
               </Nav.Link>
-              <Nav.Link as={NavLink} to="/safe-scalper">
-                Safe Scalper
-              </Nav.Link>
               <Nav.Link as={NavLink} to="/trades">
                 Trades
               </Nav.Link>
