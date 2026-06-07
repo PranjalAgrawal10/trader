@@ -114,8 +114,15 @@ interface KiteOrderActionResultResponse {
 }
 
 type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
+type ScalperPageMode = 'standard' | 'safe'
 
 const SCALPER_TICKET_ORDER_TYPES: ReadonlyArray<ScalperTicketOrderType> = ['MARKET', 'LIMIT', 'SL', 'SL-M']
+const SAFE_SCALPER_POINT_PRESETS: ReadonlyArray<{ stop: string; trigger: string; label: string }> = [
+  { stop: '10', trigger: '20', label: 'N10 / M20' },
+  { stop: '15', trigger: '30', label: 'N15 / M30' },
+  { stop: '20', trigger: '40', label: 'N20 / M40' },
+  { stop: '25', trigger: '50', label: 'N25 / M50' },
+]
 
 type ChartContextPriceMenuState = { x: number; y: number; price: number } | null
 
@@ -294,7 +301,8 @@ function buildAtmChainRows(
   })
 }
 
-export function ScalperPage() {
+export function ScalperPage({ mode = 'standard' }: { mode?: ScalperPageMode } = {}) {
+  const isSafeMode = mode === 'safe'
   const [broker, setBroker] = useState<BrokerStatusResponse | null>(null)
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
@@ -334,6 +342,8 @@ export function ScalperPage() {
   const [tradeInfo, setTradeInfo] = useState<string | null>(null)
   const [tradeError, setTradeError] = useState<string | null>(null)
   const [lastEntrySide, setLastEntrySide] = useState<'BUY' | 'SELL' | null>(null)
+  const [safeStopLossPoints, setSafeStopLossPoints] = useState('10')
+  const [safeSellTriggerPoints, setSafeSellTriggerPoints] = useState('20')
   const [activeTradeSide, setActiveTradeSide] = useState<'BUY' | 'SELL' | null>(null)
   const [entryLinePrice, setEntryLinePrice] = useState<number | null>(null)
   const [triggerLinePrice, setTriggerLinePrice] = useState<number | null>(null)
@@ -458,7 +468,38 @@ export function ScalperPage() {
           `${intent} placed (${transactionType}) · order ${placeRes.data.orderId}`,
         ]
 
-        const stopLoss = parsePositiveNumber(tradeStopLossPrice)
+        const executionLikePrice = normalizedPrice ?? (live.lastPrice != null ? Number(live.lastPrice.toFixed(2)) : null)
+        if (isSafeMode && intent !== 'EXIT' && (executionLikePrice == null || !Number.isFinite(executionLikePrice))) {
+          throw new Error('Safe Scalper needs a valid execution price (LTP/limit) to compute auto trigger and stop-loss.')
+        }
+
+        const safeStopPts = parsePositiveNumber(safeStopLossPoints)
+        const safeTriggerPts = parsePositiveNumber(safeSellTriggerPoints)
+        if (isSafeMode && intent !== 'EXIT' && (safeStopPts == null || safeTriggerPts == null)) {
+          throw new Error('Safe Scalper requires valid N/M point values for auto stop-loss and trigger.')
+        }
+        const autoFromSafe =
+          isSafeMode &&
+          intent !== 'EXIT' &&
+          executionLikePrice != null &&
+          Number.isFinite(executionLikePrice) &&
+          safeStopPts != null &&
+          safeTriggerPts != null
+
+        const computedStopLoss =
+          autoFromSafe
+            ? transactionType === 'BUY'
+              ? Number((executionLikePrice - safeStopPts).toFixed(2))
+              : Number((executionLikePrice + safeStopPts).toFixed(2))
+            : null
+        const computedTrigger =
+          autoFromSafe
+            ? transactionType === 'BUY'
+              ? Number((executionLikePrice + safeTriggerPts).toFixed(2))
+              : Number((executionLikePrice - safeTriggerPts).toFixed(2))
+            : null
+
+        const stopLoss = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
         if (intent !== 'EXIT' && stopLoss != null) {
           const protectiveSide = transactionType === 'BUY' ? 'SELL' : 'BUY'
           const slRes = await api.post<KiteOrderActionResultResponse>('/broker/kite/orders/place', {
@@ -476,12 +517,15 @@ export function ScalperPage() {
           notes.push(`SL trigger set (${protectiveSide}) · order ${slRes.data.orderId}`)
         }
 
+        if (computedTrigger != null) {
+          notes.push(`Auto trigger ${computedTrigger.toFixed(2)} (${transactionType === 'BUY' ? 'target up' : 'target down'})`)
+        }
+
         if (intent === 'BUY' || intent === 'SELL') setLastEntrySide(intent)
-        const executionLikePrice = normalizedPrice ?? (live.lastPrice != null ? Number(live.lastPrice.toFixed(2)) : null)
         if ((intent === 'BUY' || intent === 'SELL') && executionLikePrice != null && Number.isFinite(executionLikePrice)) {
           const side = intent
-          const manualTrigger = parsePositiveNumber(tradeTriggerPrice)
-          const manualStop = parsePositiveNumber(tradeStopLossPrice)
+          const manualTrigger = computedTrigger ?? parsePositiveNumber(tradeTriggerPrice)
+          const manualStop = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
           setActiveTradeSide(side)
           setEntryLinePrice(executionLikePrice)
           if (side === 'BUY') {
@@ -518,7 +562,10 @@ export function ScalperPage() {
     },
     [
       isZerodha,
+      isSafeMode,
       lastEntrySide,
+      safeSellTriggerPoints,
+      safeStopLossPoints,
       selected,
       tradeOrderType,
       tradePrice,
@@ -853,11 +900,15 @@ export function ScalperPage() {
     <Layout>
       <div className="d-flex flex-wrap align-items-baseline justify-content-between gap-2 mb-2">
         <div className="d-flex align-items-center gap-2">
-          <h1 className="h3 mb-0">Scalper</h1>
+          <h1 className="h3 mb-0">{isSafeMode ? 'Safe Scalper' : 'Scalper'}</h1>
           <span
             role="img"
             aria-label="Scalper help"
-            title="Scalper shows 3-day candles with live LTP/ticks, ATM chain shortcuts, and multi-interval trend panels."
+            title={
+              isSafeMode
+                ? 'Safe Scalper auto-computes trigger/stop-loss points after entry while keeping all standard scalper tools.'
+                : 'Scalper shows 3-day candles with live LTP/ticks, ATM chain shortcuts, and multi-interval trend panels.'
+            }
             className="text-secondary"
             style={{ cursor: 'help', fontSize: '0.95rem', userSelect: 'none' }}
           >
@@ -867,6 +918,9 @@ export function ScalperPage() {
         <div className="d-flex flex-wrap align-items-center gap-2">
           <Link to="/instruments" className="btn btn-sm btn-outline-secondary">
             Kite instruments
+          </Link>
+          <Link to={isSafeMode ? '/scalper' : '/safe-scalper'} className="btn btn-sm btn-outline-secondary">
+            {isSafeMode ? 'Open Scalper' : 'Open Safe Scalper'}
           </Link>
         </div>
       </div>
@@ -1250,13 +1304,62 @@ export function ScalperPage() {
                   {selected && isZerodha ? (
                     <div className="border rounded border-secondary-subtle p-2 bg-body text-body mb-2">
                       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-                        <div className="small fw-semibold">Scalper ticket</div>
+                        <div className="small fw-semibold">{isSafeMode ? 'Safe scalper ticket' : 'Scalper ticket'}</div>
                         <div className="small text-muted font-monospace">
                           {selected.tradingsymbol} · {selected.exchange}
                         </div>
                       </div>
                       {tradeError ? <Alert variant="warning" className="py-1 small mb-2">{tradeError}</Alert> : null}
                       {tradeInfo ? <Alert variant="success" className="py-1 small mb-2">{tradeInfo}</Alert> : null}
+                      {isSafeMode ? (
+                        <Row className="g-2 mb-2">
+                          <Col xs={12} md={6}>
+                            <Form.Label className="small text-secondary mb-1">N points stop loss</Form.Label>
+                            <Form.Control
+                              size="sm"
+                              type="number"
+                              min={0.05}
+                              step="0.05"
+                              value={safeStopLossPoints}
+                              onChange={(e) => setSafeStopLossPoints(e.target.value)}
+                            />
+                          </Col>
+                          <Col xs={12} md={6}>
+                            <Form.Label className="small text-secondary mb-1">M points sell trigger</Form.Label>
+                            <Form.Control
+                              size="sm"
+                              type="number"
+                              min={0.05}
+                              step="0.05"
+                              value={safeSellTriggerPoints}
+                              onChange={(e) => setSafeSellTriggerPoints(e.target.value)}
+                            />
+                          </Col>
+                          <Col xs={12}>
+                            <div className="small text-secondary mb-1">Safe presets</div>
+                            <div className="d-flex flex-wrap gap-1">
+                              {SAFE_SCALPER_POINT_PRESETS.map((p) => (
+                                <Button
+                                  key={`safe-preset-${p.stop}-${p.trigger}`}
+                                  size="sm"
+                                  variant={
+                                    safeStopLossPoints === p.stop && safeSellTriggerPoints === p.trigger
+                                      ? 'secondary'
+                                      : 'outline-secondary'
+                                  }
+                                  style={{ padding: '0.12rem 0.36rem', fontSize: '0.68rem', lineHeight: 1.1, borderRadius: '0.32rem' }}
+                                  onClick={() => {
+                                    setSafeStopLossPoints(p.stop)
+                                    setSafeSellTriggerPoints(p.trigger)
+                                  }}
+                                >
+                                  {p.label}
+                                </Button>
+                              ))}
+                            </div>
+                          </Col>
+                        </Row>
+                      ) : null}
                       <Row className="g-2 mb-2">
                         <Col xs={4}>
                           <Form.Label className="small text-secondary mb-1">Qty</Form.Label>
@@ -1340,9 +1443,11 @@ export function ScalperPage() {
                           {tradeBusy ? 'Placing…' : 'Exit'}
                         </Button>
                         <InputGroup.Text className="small text-muted">
-                          {lastEntrySide
-                            ? `Last entry: ${lastEntrySide} · drag green/red lines on chart to adjust trigger/SL`
-                            : 'SL: set Stop loss for protective order'}
+                          {isSafeMode
+                            ? `Safe mode: auto SL ${safeStopLossPoints || 'N'} pts, auto trigger ${safeSellTriggerPoints || 'M'} pts`
+                            : lastEntrySide
+                              ? `Last entry: ${lastEntrySide} · drag green/red lines on chart to adjust trigger/SL`
+                              : 'SL: set Stop loss for protective order'}
                         </InputGroup.Text>
                       </InputGroup>
                     </div>
