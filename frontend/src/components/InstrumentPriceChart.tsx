@@ -2,8 +2,8 @@
  * Zerodha-style OHLC chart using TradingView Lightweight Charts™ v5+
  * @see https://tradingview.github.io/lightweight-charts/
  */
-import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { MutableRefObject } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent, MutableRefObject } from 'react'
 import type {
   IChartApi,
   IPriceLine,
@@ -59,6 +59,17 @@ import {
 export type InstrumentPriceChartGraphType = 'line' | 'bar' | 'candlestick'
 export type InstrumentChartDensity = 'compact' | 'comfortable'
 export type InstrumentCrosshairMode = 'magnet' | 'normal'
+export type InstrumentTradeGuideSide = 'BUY' | 'SELL'
+
+export type InstrumentTradeGuideLines = {
+  entryPrice?: number | null
+  triggerPrice?: number | null
+  stopLossPrice?: number | null
+  side?: InstrumentTradeGuideSide | null
+  dragEnabled?: boolean
+  onTriggerPriceChange?: (price: number) => void
+  onStopLossPriceChange?: (price: number) => void
+}
 
 export type InstrumentPriceChartProps = {
   graphType: InstrumentPriceChartGraphType
@@ -84,6 +95,10 @@ export type InstrumentPriceChartProps = {
   showScales?: boolean
   /** Crosshair behavior: magnet snaps to OHLC; normal follows cursor point. */
   crosshairMode?: InstrumentCrosshairMode
+  /** Right-click chart callback with price at cursor Y coordinate. */
+  onPriceContextMenu?: (payload: { price: number; x: number; y: number }) => void
+  /** Optional entry/trigger/stop-loss guide lines for manual trading. */
+  tradeGuideLines?: InstrumentTradeGuideLines
   /** Panned near the oldest bar — fetch and prepend older OHLC upstream. */
   onNeedOlderBars?: () => void
   /** Gate for {@link onNeedOlderBars}; false disables further prefetch. */
@@ -109,6 +124,9 @@ type Internals = {
 
 const LIVE_LTP = '#38bdf8'
 const PAPER_BUY_LINE = '#f59e0b'
+const TRADE_ENTRY_LINE = '#a855f7'
+const TRADE_TRIGGER_LINE = '#22c55e'
+const TRADE_STOP_LINE = '#ef4444'
 
 function coerceFixedLwRange(dom: [unknown, unknown] | undefined): { from: number; to: number } | null {
   if (!dom || dom.length !== 2) return null
@@ -484,6 +502,8 @@ export function InstrumentPriceChart({
   enableInitialViewportClip = true,
   showScales = true,
   crosshairMode = 'magnet',
+  onPriceContextMenu,
+  tradeGuideLines,
   onNeedOlderBars,
   canLoadOlderBars = true,
   loadingOlderBars = false,
@@ -652,6 +672,7 @@ export function InstrumentPriceChart({
       fixedY,
       livePrice,
       paperLastBuyPrice,
+      tradeGuideLines,
       mlPredictionEntries,
       paperBuyDataIndices,
     })
@@ -756,6 +777,7 @@ export function InstrumentPriceChart({
     onNeedOlderBars,
     paperBuyDataIndices,
     paperLastBuyPrice,
+    tradeGuideLines,
     showVolume,
     showScales,
     times,
@@ -776,10 +798,98 @@ export function InstrumentPriceChart({
     st.chart.applyOptions(lwChartOptions(bgMemo, showScales, crosshairMode))
   }, [bgMemo, showScales, crosshairMode])
 
+  const tradeGuideLinesRef = useRef<InstrumentTradeGuideLines | undefined>(undefined)
+  tradeGuideLinesRef.current = tradeGuideLines
+  const draggingTradeLineRef = useRef<'trigger' | 'stop' | null>(null)
+
+  const onChartMouseDown = useCallback(
+    (ev: ReactMouseEvent<HTMLDivElement>) => {
+      if (ev.button !== 0) return
+      const st = stRef.current
+      const guide = tradeGuideLinesRef.current
+      if (!st?.main || !guide?.dragEnabled || !guide.entryPrice || !Number.isFinite(guide.entryPrice)) return
+      const rect = ev.currentTarget.getBoundingClientRect()
+      const y = ev.clientY - rect.top
+      if (!Number.isFinite(y)) return
+      const hitPx = 8
+      const triggerY =
+        typeof guide.triggerPrice === 'number' && Number.isFinite(guide.triggerPrice)
+          ? st.main.priceToCoordinate(guide.triggerPrice)
+          : null
+      const stopY =
+        typeof guide.stopLossPrice === 'number' && Number.isFinite(guide.stopLossPrice)
+          ? st.main.priceToCoordinate(guide.stopLossPrice)
+          : null
+
+      const triggerDist = triggerY == null ? Number.POSITIVE_INFINITY : Math.abs(y - triggerY)
+      const stopDist = stopY == null ? Number.POSITIVE_INFINITY : Math.abs(y - stopY)
+      if (triggerDist > hitPx && stopDist > hitPx) return
+      draggingTradeLineRef.current = triggerDist <= stopDist ? 'trigger' : 'stop'
+      ev.preventDefault()
+    },
+    [],
+  )
+
+  useEffect(() => {
+    const onMove = (ev: MouseEvent) => {
+      const kind = draggingTradeLineRef.current
+      if (!kind) return
+      const st = stRef.current
+      const guide = tradeGuideLinesRef.current
+      const mount = chartMountRef.current
+      if (!st?.main || !guide || !mount) return
+      const rect = mount.getBoundingClientRect()
+      const y = ev.clientY - rect.top
+      const clampedY = Math.max(0, Math.min(rect.height, y))
+      const rawPrice = st.main.coordinateToPrice(clampedY)
+      if (rawPrice == null || !Number.isFinite(rawPrice)) return
+      let next = Number(rawPrice.toFixed(2))
+      const entry = guide.entryPrice
+      if (entry != null && Number.isFinite(entry)) {
+        if (guide.side === 'BUY') {
+          if (kind === 'trigger') next = Math.max(next, entry)
+          else next = Math.min(next, entry)
+        } else if (guide.side === 'SELL') {
+          if (kind === 'trigger') next = Math.min(next, entry)
+          else next = Math.max(next, entry)
+        }
+      }
+      if (kind === 'trigger') guide.onTriggerPriceChange?.(next)
+      else guide.onStopLossPriceChange?.(next)
+    }
+    const onUp = () => {
+      draggingTradeLineRef.current = null
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  const onChartContextMenu = useCallback(
+    (ev: ReactMouseEvent<HTMLDivElement>) => {
+      if (!onPriceContextMenu) return
+      const st = stRef.current
+      if (!st?.main) return
+      const rect = ev.currentTarget.getBoundingClientRect()
+      const x = ev.clientX - rect.left
+      const y = ev.clientY - rect.top
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return
+      if (x < 0 || y < 0 || x > rect.width || y > rect.height) return
+      const price = st.main.coordinateToPrice(y)
+      if (price == null || !Number.isFinite(price)) return
+      ev.preventDefault()
+      onPriceContextMenu({ price, x, y })
+    },
+    [onPriceContextMenu],
+  )
+
   return (
     <div className="position-relative w-100 h-100 d-flex flex-column">
       <div className="flex-grow-1 position-relative" style={{ minHeight: 0 }}>
-        <div ref={chartMountRef} className="w-100 h-100">
+        <div ref={chartMountRef} className="w-100 h-100" onContextMenu={onChartContextMenu} onMouseDown={onChartMouseDown}>
           {data.length === 0 ? (
             <div className="d-flex align-items-center justify-content-center text-secondary small h-100">No candles.</div>
           ) : null}
@@ -924,6 +1034,7 @@ type SyncPack = {
   fixedY: { from: number; to: number } | null
   livePrice?: number | null
   paperLastBuyPrice?: number | null
+  tradeGuideLines?: InstrumentTradeGuideLines
   mlPredictionEntries: readonly MlPredictionLogEntry[]
   paperBuyDataIndices: readonly number[]
 }
@@ -1038,6 +1149,39 @@ function syncSeriesData(st: Internals, p: SyncPack) {
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: false,
         title: 'Last buy',
+      }),
+    )
+  if (typeof p.tradeGuideLines?.entryPrice === 'number' && Number.isFinite(p.tradeGuideLines.entryPrice))
+    st.priceLines.push(
+      st.main.createPriceLine({
+        price: p.tradeGuideLines.entryPrice,
+        color: TRADE_ENTRY_LINE,
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: 'Entry',
+      }),
+    )
+  if (typeof p.tradeGuideLines?.triggerPrice === 'number' && Number.isFinite(p.tradeGuideLines.triggerPrice))
+    st.priceLines.push(
+      st.main.createPriceLine({
+        price: p.tradeGuideLines.triggerPrice,
+        color: TRADE_TRIGGER_LINE,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: 'Trigger',
+      }),
+    )
+  if (typeof p.tradeGuideLines?.stopLossPrice === 'number' && Number.isFinite(p.tradeGuideLines.stopLossPrice))
+    st.priceLines.push(
+      st.main.createPriceLine({
+        price: p.tradeGuideLines.stopLossPrice,
+        color: TRADE_STOP_LINE,
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        axisLabelVisible: true,
+        title: 'Stop',
       }),
     )
 }

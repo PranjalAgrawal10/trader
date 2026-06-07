@@ -117,6 +117,8 @@ type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
 
 const SCALPER_TICKET_ORDER_TYPES: ReadonlyArray<ScalperTicketOrderType> = ['MARKET', 'LIMIT', 'SL', 'SL-M']
 
+type ChartContextPriceMenuState = { x: number; y: number; price: number } | null
+
 type ScalperAtmChainRow = {
   strike: number
   isAtm: boolean
@@ -332,6 +334,11 @@ export function ScalperPage() {
   const [tradeInfo, setTradeInfo] = useState<string | null>(null)
   const [tradeError, setTradeError] = useState<string | null>(null)
   const [lastEntrySide, setLastEntrySide] = useState<'BUY' | 'SELL' | null>(null)
+  const [activeTradeSide, setActiveTradeSide] = useState<'BUY' | 'SELL' | null>(null)
+  const [entryLinePrice, setEntryLinePrice] = useState<number | null>(null)
+  const [triggerLinePrice, setTriggerLinePrice] = useState<number | null>(null)
+  const [stopLinePrice, setStopLinePrice] = useState<number | null>(null)
+  const [chartContextPriceMenu, setChartContextPriceMenu] = useState<ChartContextPriceMenuState>(null)
 
   const isZerodha = broker?.connected === true && (broker?.provider ?? '').toLowerCase() === 'zerodha'
   const atmTarget = useMemo(
@@ -360,10 +367,33 @@ export function ScalperPage() {
     setTradeInfo(null)
     setTradeError(null)
     setLastEntrySide(null)
+    setActiveTradeSide(null)
+    setEntryLinePrice(null)
+    setTriggerLinePrice(null)
+    setStopLinePrice(null)
   }, [selected?.instrumentToken, selected?.lotSize])
 
+  const onTradeTriggerInputChange = useCallback((raw: string) => {
+    setTradeTriggerPrice(raw)
+    const n = Number(raw)
+    setTriggerLinePrice(Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : null)
+  }, [])
+
+  const onTradeStopInputChange = useCallback((raw: string) => {
+    setTradeStopLossPrice(raw)
+    const n = Number(raw)
+    setStopLinePrice(Number.isFinite(n) && n > 0 ? Number(n.toFixed(2)) : null)
+  }, [])
+
   const placeScalperOrder = useCallback(
-    async (intent: 'BUY' | 'SELL' | 'EXIT') => {
+    async (
+      intent: 'BUY' | 'SELL' | 'EXIT',
+      overrides?: {
+        orderType?: ScalperTicketOrderType
+        price?: number | null
+        triggerPrice?: number | null
+      },
+    ) => {
       if (!selected || !isZerodha) return
       const qtyN = Number(tradeQty)
       const quantity = Number.isFinite(qtyN) ? Math.max(1, Math.floor(qtyN)) : 0
@@ -381,27 +411,28 @@ export function ScalperPage() {
               : 'SELL'
           : intent
 
-      const price = parsePositiveNumber(tradePrice)
-      const trigger = parsePositiveNumber(tradeTriggerPrice)
-      if (tradeOrderType === 'LIMIT' && price == null) {
+      const effectiveOrderType = overrides?.orderType ?? tradeOrderType
+      const price = overrides?.price ?? parsePositiveNumber(tradePrice)
+      const trigger = overrides?.triggerPrice ?? parsePositiveNumber(tradeTriggerPrice)
+      if (effectiveOrderType === 'LIMIT' && price == null) {
         setTradeError('LIMIT order requires a valid price.')
         return
       }
-      if (tradeOrderType === 'SL' && (price == null || trigger == null)) {
+      if (effectiveOrderType === 'SL' && (price == null || trigger == null)) {
         setTradeError('SL order requires both price and trigger.')
         return
       }
-      if (tradeOrderType === 'SL-M' && trigger == null) {
+      if (effectiveOrderType === 'SL-M' && trigger == null) {
         setTradeError('SL-M order requires trigger price.')
         return
       }
 
       const normalizedPrice =
-        tradeOrderType === 'LIMIT' || tradeOrderType === 'SL'
+        effectiveOrderType === 'LIMIT' || effectiveOrderType === 'SL'
           ? price
           : null
       const normalizedTrigger =
-        tradeOrderType === 'SL' || tradeOrderType === 'SL-M'
+        effectiveOrderType === 'SL' || effectiveOrderType === 'SL-M'
           ? trigger
           : null
 
@@ -416,7 +447,7 @@ export function ScalperPage() {
           transactionType,
           quantity,
           product: tradeProduct,
-          orderType: tradeOrderType,
+          orderType: effectiveOrderType,
           validity: 'DAY',
           price: normalizedPrice,
           triggerPrice: normalizedTrigger,
@@ -446,7 +477,38 @@ export function ScalperPage() {
         }
 
         if (intent === 'BUY' || intent === 'SELL') setLastEntrySide(intent)
-        if (intent === 'EXIT') setLastEntrySide(null)
+        const executionLikePrice = normalizedPrice ?? (live.lastPrice != null ? Number(live.lastPrice.toFixed(2)) : null)
+        if ((intent === 'BUY' || intent === 'SELL') && executionLikePrice != null && Number.isFinite(executionLikePrice)) {
+          const side = intent
+          const manualTrigger = parsePositiveNumber(tradeTriggerPrice)
+          const manualStop = parsePositiveNumber(tradeStopLossPrice)
+          setActiveTradeSide(side)
+          setEntryLinePrice(executionLikePrice)
+          if (side === 'BUY') {
+            const nextTrigger = Number((manualTrigger ?? executionLikePrice * 1.003).toFixed(2))
+            const nextStop = Number((manualStop ?? executionLikePrice * 0.997).toFixed(2))
+            setTriggerLinePrice(nextTrigger)
+            setStopLinePrice(nextStop)
+            setTradeTriggerPrice(nextTrigger.toFixed(2))
+            setTradeStopLossPrice(nextStop.toFixed(2))
+          } else {
+            const nextTrigger = Number((manualTrigger ?? executionLikePrice * 0.997).toFixed(2))
+            const nextStop = Number((manualStop ?? executionLikePrice * 1.003).toFixed(2))
+            setTriggerLinePrice(nextTrigger)
+            setStopLinePrice(nextStop)
+            setTradeTriggerPrice(nextTrigger.toFixed(2))
+            setTradeStopLossPrice(nextStop.toFixed(2))
+          }
+        }
+        if (intent === 'EXIT') {
+          setLastEntrySide(null)
+          setActiveTradeSide(null)
+          setEntryLinePrice(null)
+          setTriggerLinePrice(null)
+          setStopLinePrice(null)
+          setTradeTriggerPrice('')
+          setTradeStopLossPrice('')
+        }
         setTradeInfo(notes.join(' | '))
       } catch (err) {
         setTradeError(problemDetail(err))
@@ -464,8 +526,43 @@ export function ScalperPage() {
       tradeQty,
       tradeStopLossPrice,
       tradeTriggerPrice,
+      live.lastPrice,
     ],
   )
+
+  useEffect(() => {
+    if (!chartContextPriceMenu) return
+    const closeMenu = () => setChartContextPriceMenu(null)
+    window.addEventListener('click', closeMenu)
+    window.addEventListener('scroll', closeMenu, true)
+    return () => {
+      window.removeEventListener('click', closeMenu)
+      window.removeEventListener('scroll', closeMenu, true)
+    }
+  }, [chartContextPriceMenu])
+
+  const onChartBuyAtPrice = useCallback(
+    (price: number) => {
+      if (!Number.isFinite(price) || price <= 0) return
+      const p = Number(price.toFixed(2))
+      setTradeOrderType('LIMIT')
+      setTradePrice(p.toFixed(2))
+      setTradeTriggerPrice('')
+      setChartContextPriceMenu(null)
+      void placeScalperOrder('BUY', { orderType: 'LIMIT', price: p, triggerPrice: null })
+    },
+    [placeScalperOrder],
+  )
+
+  const onChartTriggerLineChange = useCallback((price: number) => {
+    setTriggerLinePrice(price)
+    setTradeTriggerPrice(price.toFixed(2))
+  }, [])
+
+  const onChartStopLineChange = useCallback((price: number) => {
+    setStopLinePrice(price)
+    setTradeStopLossPrice(price.toFixed(2))
+  }, [])
 
   useEffect(() => {
     const refresh = () => setIsLivePullWindow(isIstMarketLiveWindow())
@@ -973,13 +1070,25 @@ export function ScalperPage() {
                       Loading candles…
                     </div>
                   ) : selected && displaySeriesWithCustom.length > 0 ? (
-                    <div style={{ height: 'min(58vh, 520px)', minHeight: '320px' }}>
+                    <div style={{ height: 'min(58vh, 520px)', minHeight: '320px', position: 'relative' }}>
                       <InstrumentPriceChart
                         graphType={graphType}
                         data={displaySeriesWithCustom}
                         maLineVisibility={maLineVisibility}
                         customEmaPeriod={customEmaApplied}
                         crosshairMode="normal"
+                        tradeGuideLines={{
+                          entryPrice: entryLinePrice,
+                          triggerPrice: triggerLinePrice,
+                          stopLossPrice: stopLinePrice,
+                          side: activeTradeSide,
+                          dragEnabled: !!entryLinePrice && !tradeBusy,
+                          onTriggerPriceChange: onChartTriggerLineChange,
+                          onStopLossPriceChange: onChartStopLineChange,
+                        }}
+                        onPriceContextMenu={({ price, x, y }) => {
+                          setChartContextPriceMenu({ price, x, y })
+                        }}
                         livePrice={live.lastPrice}
                         showVolume={showVolume}
                         newerGhostBars={0}
@@ -987,6 +1096,29 @@ export function ScalperPage() {
                         canLoadOlderBars={canLoadOlderBars}
                         loadingOlderBars={loadingOlderBars}
                       />
+                      {chartContextPriceMenu ? (
+                        <div
+                          className="border border-secondary rounded bg-body shadow-sm p-1"
+                          style={{
+                            position: 'absolute',
+                            left: `${Math.max(8, chartContextPriceMenu.x - 8)}px`,
+                            top: `${Math.max(8, chartContextPriceMenu.y - 8)}px`,
+                            zIndex: 40,
+                            minWidth: '11.5rem',
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Button
+                            size="sm"
+                            variant="outline-success"
+                            className="w-100 text-start"
+                            disabled={tradeBusy}
+                            onClick={() => onChartBuyAtPrice(chartContextPriceMenu.price)}
+                          >
+                            {tradeBusy ? 'Placing…' : `Buy @ ${chartContextPriceMenu.price.toFixed(2)}`}
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   ) : selected && !chartLoading ? (
                     <p className="text-muted small mb-0">No candle data returned for this range.</p>
@@ -1180,7 +1312,7 @@ export function ScalperPage() {
                             min={0}
                             step="0.05"
                             value={tradeTriggerPrice}
-                            onChange={(e) => setTradeTriggerPrice(e.target.value)}
+                            onChange={(e) => onTradeTriggerInputChange(e.target.value)}
                             placeholder="SL/SL-M"
                           />
                         </Col>
@@ -1192,7 +1324,7 @@ export function ScalperPage() {
                             min={0}
                             step="0.05"
                             value={tradeStopLossPrice}
-                            onChange={(e) => setTradeStopLossPrice(e.target.value)}
+                            onChange={(e) => onTradeStopInputChange(e.target.value)}
                             placeholder="auto SL-M"
                           />
                         </Col>
@@ -1208,7 +1340,9 @@ export function ScalperPage() {
                           {tradeBusy ? 'Placing…' : 'Exit'}
                         </Button>
                         <InputGroup.Text className="small text-muted">
-                          {lastEntrySide ? `Last entry: ${lastEntrySide}` : 'SL: set Stop loss for protective order'}
+                          {lastEntrySide
+                            ? `Last entry: ${lastEntrySide} · drag green/red lines on chart to adjust trigger/SL`
+                            : 'SL: set Stop loss for protective order'}
                         </InputGroup.Text>
                       </InputGroup>
                     </div>
