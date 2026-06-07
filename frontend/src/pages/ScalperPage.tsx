@@ -931,6 +931,30 @@ export function ScalperPage() {
     return pctChange(ref, last)
   }, [live.lastPrice, rawSeries])
 
+  const atmChainRowsDisplay = useMemo(() => {
+    const expiry = atmSnapshot.optionExpiry
+    const atmStrike = atmSnapshot.atmStrike
+    if (!expiry || atmStrike == null) return atmSnapshot.chainRows
+
+    const seededRows = buildAtmChainRows(atmOptionRows, expiry, atmStrike, atmChainStrikesEachSide)
+    if (seededRows.length === 0) return atmSnapshot.chainRows
+
+    const quoteByToken = new Map<string, KiteInstrumentLiveQuoteResponse | null>()
+    for (const row of atmSnapshot.chainRows) {
+      if (row.ceRow) quoteByToken.set(row.ceRow.instrumentToken, row.ceQuote)
+      if (row.peRow) quoteByToken.set(row.peRow.instrumentToken, row.peQuote)
+    }
+
+    return seededRows.map((row) => ({
+      strike: row.strike,
+      isAtm: row.isAtm,
+      ceRow: row.ceRow,
+      peRow: row.peRow,
+      ceQuote: row.ceRow ? (quoteByToken.get(row.ceRow.instrumentToken) ?? null) : null,
+      peQuote: row.peRow ? (quoteByToken.get(row.peRow.instrumentToken) ?? null) : null,
+    }))
+  }, [atmChainStrikesEachSide, atmOptionRows, atmSnapshot])
+
   const { loadOlderBars, loadingOlderBars, canLoadOlderBars } = useChartOlderBars({
     instrumentToken: selected?.instrumentToken ?? '',
     interval,
@@ -1319,7 +1343,7 @@ export function ScalperPage() {
                         </span>{' '}
                         {atmLastUpdatedAt ? `· updated ${formatLocalDateTime(atmLastUpdatedAt)}` : ''}
                       </div>
-                      {atmSnapshot.chainRows.length > 0 ? (
+                      {atmChainRowsDisplay.length > 0 ? (
                         <>
                           <div className="d-flex justify-content-center mb-1">
                             <Button
@@ -1332,7 +1356,7 @@ export function ScalperPage() {
                             </Button>
                           </div>
                           <div className="d-flex flex-column gap-1 small font-monospace">
-                            {atmSnapshot.chainRows.map((row) => (
+                            {atmChainRowsDisplay.map((row) => (
                               <div
                                 key={`scalper-atm-${atmTarget.key}-${row.strike}`}
                                 className={`d-flex align-items-center justify-content-between gap-1 border rounded px-1 py-1 ${

@@ -58,8 +58,8 @@ public sealed partial class EmailOtpService : IEmailOtpService
     }
 
     /// <remarks>
-    /// HTML clients cannot reliably run JavaScript Clipboard APIs; we avoid fake copy buttons and render clearly
-    /// selectable OTP blocks with touch-friendly selection hints.
+    /// HTML email clients cannot reliably run JavaScript Clipboard APIs, so this renders a "Copy OTP" CTA as
+    /// a touch-friendly selectable block that contains the code itself.
     /// </remarks>
     private static string BuildLoginSecondFactorHtmlBody(string plainCode, int expiryMinutes)
     {
@@ -90,6 +90,18 @@ public sealed partial class EmailOtpService : IEmailOtpService
             + "letter-spacing:0.18em;text-transform:uppercase;\">OTP code&nbsp;&nbsp;</span>"
             + "<span style=\"color:#f8fafc;font-size:22px;font-weight:800;"
             + "letter-spacing:0.32em;font-family:Consolas,Menlo,'Courier New',monospace;\">" + codeEsc + "</span>"
+            + "</td></tr></table>"
+            + "<table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" style=\"margin:0 0 18px;"
+            + "border-collapse:separate;border-spacing:0;\">"
+            + "<tr><td aria-label=\"Copy OTP button\""
+            + " style=\"-webkit-touch-callout:default;-webkit-user-select:text;user-select:text;cursor:text;"
+            + "padding:12px 18px;border-radius:10px;background:#0f766e;"
+            + "border:1px solid #115e59;\">"
+            + "<span style=\"color:#ccfbf1;font-size:12px;font-weight:700;"
+            + "letter-spacing:0.12em;text-transform:uppercase;\">Copy OTP</span>"
+            + "<span style=\"display:block;color:#ffffff;font-size:20px;font-weight:800;margin-top:4px;"
+            + "letter-spacing:0.3em;font-family:Consolas,Menlo,'Courier New',monospace;\">"
+            + codeEsc + "</span>"
             + "</td></tr></table>"
             + "<p style=\"margin:-4px 0 16px;color:#64748b;font-size:13px;\">"
             + "To copy quickly: tap and hold either code block, then use <strong>Select All</strong> and "
