@@ -16,6 +16,15 @@ public sealed record KiteInstrumentsChartSettingsState(
     bool? DemoAutoTradeEnabled = null,
     string? DemoAutoTradeStrategy = null);
 
+public sealed record ScalperSettingsState(
+    string? Interval,
+    string? RangePreset,
+    string? GraphType,
+    bool ShowVolume,
+    bool SafeModeEnabled,
+    decimal? SafeStopLossPoints,
+    decimal? SafeTriggerPoints);
+
 public interface IKiteInstrumentsChartSettingsGateway
 {
     Task<KiteInstrumentsChartSettingsState?> GetAsync(Guid userId, CancellationToken ct = default);
@@ -44,4 +53,8 @@ public interface IKiteInstrumentsChartSettingsGateway
 
     /// <summary>Persists instruments-page demo auto-trade toggle and optional strategy (canonical id when non-null).</summary>
     Task SetDemoAutoTradePreferencesAsync(Guid userId, bool enabled, string? normalizedStrategyOrNull, CancellationToken ct = default);
+
+    Task<ScalperSettingsState?> GetScalperSettingsAsync(Guid userId, CancellationToken ct = default);
+
+    Task SaveScalperSettingsAsync(Guid userId, ScalperSettingsState settings, CancellationToken ct = default);
 }

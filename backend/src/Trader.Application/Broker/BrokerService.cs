@@ -935,6 +935,49 @@ public sealed class BrokerService : IBrokerService
             DemoAutoTradeStrategyIds.NormalizeOrDefault(row.DemoAutoTradeStrategy));
     }
 
+    public async Task<ScalperSettingsDto> GetScalperSettingsAsync(Guid userId, CancellationToken ct = default)
+    {
+        var row = await _kiteChartSettings.GetScalperSettingsAsync(userId, ct).ConfigureAwait(false);
+        if (row is null)
+            throw new InvalidOperationException("User not found.");
+
+        var interval = NormalizeScalperIntervalOrDefault(row.Interval);
+        var rangePreset = NormalizeScalperRangePresetOrDefault(row.RangePreset);
+        var graphType = NormalizeScalperGraphTypeOrDefault(row.GraphType);
+        var stopPts = NormalizeScalperPointsOrDefault(row.SafeStopLossPoints, 10m);
+        var triggerPts = NormalizeScalperPointsOrDefault(row.SafeTriggerPoints, 20m);
+        return new ScalperSettingsDto(
+            interval,
+            rangePreset,
+            graphType,
+            row.ShowVolume,
+            row.SafeModeEnabled,
+            stopPts,
+            triggerPts);
+    }
+
+    public async Task SaveScalperSettingsAsync(Guid userId, ScalperSettingsPutDto body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        var interval = NormalizeScalperIntervalOrDefault(body.Interval);
+        var rangePreset = NormalizeScalperRangePresetOrDefault(body.RangePreset);
+        var graphType = NormalizeScalperGraphTypeOrDefault(body.GraphType);
+        var stopPts = NormalizeScalperPointsOrDefault(body.SafeStopLossPoints, 10m);
+        var triggerPts = NormalizeScalperPointsOrDefault(body.SafeTriggerPoints, 20m);
+
+        await _kiteChartSettings.SaveScalperSettingsAsync(
+            userId,
+            new ScalperSettingsState(
+                interval,
+                rangePreset,
+                graphType,
+                body.ShowVolume,
+                body.SafeModeEnabled,
+                stopPts,
+                triggerPts),
+            ct).ConfigureAwait(false);
+    }
+
     public async Task SetDemoAutoTradePreferencesAsync(
         Guid userId,
         bool enabled,
@@ -1537,6 +1580,46 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException("SL order requires both price and triggerPrice.");
         if (orderType == "SL-M" && triggerPrice is null)
             throw new InvalidOperationException("SL-M order requires triggerPrice.");
+    }
+
+    private static string NormalizeScalperIntervalOrDefault(string? intervalRaw)
+    {
+        var x = string.IsNullOrWhiteSpace(intervalRaw) ? "" : intervalRaw.Trim().ToLowerInvariant();
+        return x switch
+        {
+            "1m" or "3m" or "5m" => x,
+            _ => "1m",
+        };
+    }
+
+    private static string NormalizeScalperRangePresetOrDefault(string? presetRaw)
+    {
+        var x = string.IsNullOrWhiteSpace(presetRaw) ? "" : presetRaw.Trim().ToLowerInvariant();
+        return x switch
+        {
+            "last15m" or "last30m" or "last1h" or "last5h" or "last1d" or "last3d" => x,
+            _ => "last3d",
+        };
+    }
+
+    private static string NormalizeScalperGraphTypeOrDefault(string? graphTypeRaw)
+    {
+        var x = string.IsNullOrWhiteSpace(graphTypeRaw) ? "" : graphTypeRaw.Trim().ToLowerInvariant();
+        return x switch
+        {
+            "candlestick" or "line" or "bar" => x,
+            _ => "candlestick",
+        };
+    }
+
+    private static decimal NormalizeScalperPointsOrDefault(decimal? raw, decimal fallback)
+    {
+        var v = raw ?? fallback;
+        if (v <= 0m)
+            return fallback;
+        if (v > 1_000_000m)
+            return 1_000_000m;
+        return decimal.Round(v, 2, MidpointRounding.AwayFromZero);
     }
 
     private static string NormalizeUiChartInterval(string interval) => ChartUiIntervals.Normalize(interval);

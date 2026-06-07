@@ -49,6 +49,13 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.KiteInstrumentsChartZoomJson);
             e.Property(x => x.KiteInstrumentsChartIntervalByInstrumentTokenJson);
             e.Property(x => x.KiteInstrumentsTrendAnalysisIntervalsJson);
+            e.Property(x => x.ScalperInterval).HasMaxLength(16);
+            e.Property(x => x.ScalperRangePreset).HasMaxLength(32);
+            e.Property(x => x.ScalperGraphType).HasMaxLength(16);
+            e.Property(x => x.ScalperShowVolume).HasDefaultValue(true);
+            e.Property(x => x.ScalperSafeModeEnabled).HasDefaultValue(false);
+            e.Property(x => x.ScalperSafeStopLossPoints).HasPrecision(18, 4);
+            e.Property(x => x.ScalperSafeTriggerPoints).HasPrecision(18, 4);
             e.Property(x => x.WalletBalance).HasPrecision(18, 2).HasDefaultValue(0);
             e.Property(x => x.DemoAutoTradeEnabled).HasDefaultValue(false);
             e.Property(x => x.DemoAutoTradeStrategy).HasMaxLength(32).HasDefaultValue("equal_split");

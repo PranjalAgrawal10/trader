@@ -96,6 +96,10 @@ public interface IBrokerService
         KiteOrderPlaceRequestDto body,
         CancellationToken ct = default);
 
+    Task<ScalperSettingsDto> GetScalperSettingsAsync(Guid userId, CancellationToken ct = default);
+
+    Task SaveScalperSettingsAsync(Guid userId, ScalperSettingsPutDto body, CancellationToken ct = default);
+
     Task<KiteFavoriteInstrumentsListDto> GetKiteFavoriteInstrumentsAsync(Guid userId, CancellationToken ct = default);
 
     Task AddKiteFavoriteInstrumentAsync(Guid userId, KiteInstrumentListItemDto item, CancellationToken ct = default);

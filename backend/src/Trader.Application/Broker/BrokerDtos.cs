@@ -154,6 +154,26 @@ public sealed class KiteOrderPlaceRequestDto
     public string? Tag { get; set; }
 }
 
+public sealed record ScalperSettingsDto(
+    string Interval,
+    string RangePreset,
+    string GraphType,
+    bool ShowVolume,
+    bool SafeModeEnabled,
+    decimal SafeStopLossPoints,
+    decimal SafeTriggerPoints);
+
+public sealed class ScalperSettingsPutDto
+{
+    public string? Interval { get; set; }
+    public string? RangePreset { get; set; }
+    public string? GraphType { get; set; }
+    public bool ShowVolume { get; set; }
+    public bool SafeModeEnabled { get; set; }
+    public decimal SafeStopLossPoints { get; set; }
+    public decimal SafeTriggerPoints { get; set; }
+}
+
 /// <summary>OHLCV series from Kite historical API (possibly after server-side resampling for 2m / 4m).</summary>
 public sealed record KiteHistoricalCandlesDto(
     IReadOnlyList<KiteHistoricalCandlePointDto> Candles,

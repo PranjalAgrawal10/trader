@@ -113,6 +113,16 @@ interface KiteOrderActionResultResponse {
   message: string
 }
 
+interface ScalperSettingsResponse {
+  interval: ScalperInterval
+  rangePreset: ScalperRange
+  graphType: ChartGraphType
+  showVolume: boolean
+  safeModeEnabled: boolean
+  safeStopLossPoints: number
+  safeTriggerPoints: number
+}
+
 type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
 
 const SCALPER_TICKET_ORDER_TYPES: ReadonlyArray<ScalperTicketOrderType> = ['MARKET', 'LIMIT', 'SL', 'SL-M']
@@ -343,6 +353,7 @@ export function ScalperPage() {
   const [lastEntrySide, setLastEntrySide] = useState<'BUY' | 'SELL' | null>(null)
   const [safeStopLossPoints, setSafeStopLossPoints] = useState('10')
   const [safeSellTriggerPoints, setSafeSellTriggerPoints] = useState('20')
+  const [scalperPrefsHydrated, setScalperPrefsHydrated] = useState(false)
   const [activeTradeSide, setActiveTradeSide] = useState<'BUY' | 'SELL' | null>(null)
   const [entryLinePrice, setEntryLinePrice] = useState<number | null>(null)
   const [triggerLinePrice, setTriggerLinePrice] = useState<number | null>(null)
@@ -381,6 +392,70 @@ export function ScalperPage() {
     setTriggerLinePrice(null)
     setStopLinePrice(null)
   }, [selected?.instrumentToken, selected?.lotSize])
+
+  useEffect(() => {
+    let dead = false
+    ;(async () => {
+      try {
+        const { data } = await api.get<ScalperSettingsResponse>('/broker/kite/scalper-settings')
+        if (dead) return
+        if (SCALPER_INTERVALS.includes(data.interval)) setInterval(data.interval)
+        if (SCALPER_RANGES.some((x) => x.id === data.rangePreset)) setRangePreset(data.rangePreset)
+        if (data.graphType === 'line' || data.graphType === 'bar' || data.graphType === 'candlestick')
+          setGraphType(data.graphType)
+        setShowVolume(Boolean(data.showVolume))
+        setIsSafeMode(Boolean(data.safeModeEnabled))
+        setSafeStopLossPoints(
+          typeof data.safeStopLossPoints === 'number' && Number.isFinite(data.safeStopLossPoints) && data.safeStopLossPoints > 0
+            ? String(data.safeStopLossPoints)
+            : '10',
+        )
+        setSafeSellTriggerPoints(
+          typeof data.safeTriggerPoints === 'number' && Number.isFinite(data.safeTriggerPoints) && data.safeTriggerPoints > 0
+            ? String(data.safeTriggerPoints)
+            : '20',
+        )
+      } catch {
+        /* keep defaults */
+      } finally {
+        if (!dead) setScalperPrefsHydrated(true)
+      }
+    })()
+    return () => {
+      dead = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!scalperPrefsHydrated) return
+    const stopPts = Number(safeStopLossPoints)
+    const triggerPts = Number(safeSellTriggerPoints)
+    const tid = window.setTimeout(() => {
+      void api.put('/broker/kite/scalper-settings', {
+        interval,
+        rangePreset,
+        graphType,
+        showVolume,
+        safeModeEnabled: isSafeMode,
+        safeStopLossPoints:
+          Number.isFinite(stopPts) && stopPts > 0 ? stopPts : 10,
+        safeTriggerPoints:
+          Number.isFinite(triggerPts) && triggerPts > 0 ? triggerPts : 20,
+      }).catch(() => {
+        /* non-fatal */
+      })
+    }, 450)
+    return () => window.clearTimeout(tid)
+  }, [
+    graphType,
+    interval,
+    isSafeMode,
+    rangePreset,
+    safeSellTriggerPoints,
+    safeStopLossPoints,
+    scalperPrefsHydrated,
+    showVolume,
+  ])
 
   const onTradeTriggerInputChange = useCallback((raw: string) => {
     setTradeTriggerPrice(raw)

@@ -112,4 +112,31 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
             user.DemoAutoTradeStrategy = normalizedStrategyOrNull.Trim();
         await _db.SaveChangesAsync(ct);
     }
+
+    public Task<ScalperSettingsState?> GetScalperSettingsAsync(Guid userId, CancellationToken ct = default) =>
+        _db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => new ScalperSettingsState(
+                u.ScalperInterval,
+                u.ScalperRangePreset,
+                u.ScalperGraphType,
+                u.ScalperShowVolume,
+                u.ScalperSafeModeEnabled,
+                u.ScalperSafeStopLossPoints,
+                u.ScalperSafeTriggerPoints))
+            .FirstOrDefaultAsync(ct);
+
+    public async Task SaveScalperSettingsAsync(Guid userId, ScalperSettingsState settings, CancellationToken ct = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+                   ?? throw new InvalidOperationException("User not found.");
+        user.ScalperInterval = settings.Interval;
+        user.ScalperRangePreset = settings.RangePreset;
+        user.ScalperGraphType = settings.GraphType;
+        user.ScalperShowVolume = settings.ShowVolume;
+        user.ScalperSafeModeEnabled = settings.SafeModeEnabled;
+        user.ScalperSafeStopLossPoints = settings.SafeStopLossPoints;
+        user.ScalperSafeTriggerPoints = settings.SafeTriggerPoints;
+        await _db.SaveChangesAsync(ct);
+    }
 }

@@ -41,6 +41,27 @@ public class User
     /// <summary>JSON array of chart interval codes (<c>1m</c>…<c>1w</c>) selected for multi-interval trend analysis on favorites / locked grids.</summary>
     public string? KiteInstrumentsTrendAnalysisIntervalsJson { get; set; }
 
+    /// <summary>Scalper page interval (e.g. <c>1m</c>, <c>3m</c>, <c>5m</c>).</summary>
+    public string? ScalperInterval { get; set; }
+
+    /// <summary>Scalper page range preset (e.g. <c>last3d</c>).</summary>
+    public string? ScalperRangePreset { get; set; }
+
+    /// <summary>Scalper chart style (<c>candlestick</c>, <c>line</c>, <c>bar</c>).</summary>
+    public string? ScalperGraphType { get; set; }
+
+    /// <summary>Scalper chart volume visibility toggle.</summary>
+    public bool ScalperShowVolume { get; set; }
+
+    /// <summary>Safe scalper mode toggle on the main scalper page.</summary>
+    public bool ScalperSafeModeEnabled { get; set; }
+
+    /// <summary>N points for auto stop-loss in safe scalper mode.</summary>
+    public decimal? ScalperSafeStopLossPoints { get; set; }
+
+    /// <summary>M points for auto trigger in safe scalper mode.</summary>
+    public decimal? ScalperSafeTriggerPoints { get; set; }
+
     /// <summary>Stored balance for the in-app wallet (simulated top-ups; no payment integration yet).</summary>
     public decimal WalletBalance { get; set; }
 

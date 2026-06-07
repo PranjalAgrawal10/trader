@@ -301,6 +301,46 @@ public sealed class BrokerController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("kite/scalper-settings")]
+    public async Task<ActionResult<ScalperSettingsDto>> GetScalperSettings(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetScalperSettingsAsync(User.GetUserId(), ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPut("kite/scalper-settings")]
+    public async Task<IActionResult> PutScalperSettings(
+        [FromBody] ScalperSettingsPutDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with interval, rangePreset, graphType, showVolume, safeModeEnabled, safeStopLossPoints, and safeTriggerPoints.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _broker.SaveScalperSettingsAsync(User.GetUserId(), body, ct);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
     [HttpPost("kite/orders/{orderId}/cancel")]
     public async Task<ActionResult<KiteOrderActionResultDto>> CancelKiteOrder(
         [FromRoute] string orderId,
