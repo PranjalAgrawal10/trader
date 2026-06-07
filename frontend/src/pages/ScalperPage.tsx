@@ -11,7 +11,6 @@ import {
   InputGroup,
   Row,
   Spinner,
-  Table,
 } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
@@ -58,7 +57,7 @@ const SCALPER_TREND_INTERVAL_OPTIONS: ReadonlyArray<{ id: string; label: string 
   { id: '4h', label: '4h' },
   { id: '8h', label: '8h' },
 ]
-const SCALPER_ATM_POLL_MS = 5_000
+const SCALPER_ATM_POLL_MS = 2_000
 
 interface KiteInstrumentLiveQuoteResponse {
   exchange: string
@@ -340,6 +339,7 @@ export function ScalperPage() {
   const [atmSpotRow, setAtmSpotRow] = useState<KiteInstrumentRow | null>(null)
   const [atmOptionRows, setAtmOptionRows] = useState<KiteInstrumentRow[]>([])
   const [atmSnapshot, setAtmSnapshot] = useState<ScalperAtmSnapshot>(EMPTY_ATM_SNAPSHOT)
+  const [atmChainStrikesEachSide, setAtmChainStrikesEachSide] = useState(3)
   const [isLivePullWindow, setIsLivePullWindow] = useState<boolean>(() => isIstMarketLiveWindow())
   const [tradeQty, setTradeQty] = useState('1')
   const [tradeProduct, setTradeProduct] = useState<'MIS' | 'NRML'>('MIS')
@@ -739,7 +739,7 @@ export function ScalperPage() {
       const previous = atmSnapshot
       const spotQuote = await fetchQuote(atmSpotRow)
       const atm = pickAtmLegs(atmOptionRows, spotQuote?.lastPrice ?? previous.spotQuote?.lastPrice ?? Number.NaN)
-      const chainRowsSeed = buildAtmChainRows(atmOptionRows, atm.expiry, atm.strike, 3)
+      const chainRowsSeed = buildAtmChainRows(atmOptionRows, atm.expiry, atm.strike, atmChainStrikesEachSide)
 
       const uniqueRows = new Map<string, KiteInstrumentRow>()
       for (const row of chainRowsSeed) {
@@ -799,7 +799,7 @@ export function ScalperPage() {
     } finally {
       setAtmLiveLoading(false)
     }
-  }, [atmOptionRows, atmSnapshot, atmSpotRow, atmTarget.key, isLivePullWindow, isZerodha])
+  }, [atmChainStrikesEachSide, atmOptionRows, atmSnapshot, atmSpotRow, atmTarget.key, isLivePullWindow, isZerodha])
 
   useEffect(() => {
     let cancelled = false
@@ -820,6 +820,10 @@ export function ScalperPage() {
     if (!isZerodha) return
     void loadAtmReferences()
   }, [isZerodha, loadAtmReferences])
+
+  useEffect(() => {
+    setAtmChainStrikesEachSide(3)
+  }, [atmTarget.key])
 
   useEffect(() => {
     const cached = loadScalperAtmFromCache(atmTarget.key)
@@ -1316,38 +1320,61 @@ export function ScalperPage() {
                         {atmLastUpdatedAt ? `· updated ${formatLocalDateTime(atmLastUpdatedAt)}` : ''}
                       </div>
                       {atmSnapshot.chainRows.length > 0 ? (
-                        <div className="table-responsive">
-                          <Table size="sm" bordered hover className="mb-0 small align-middle">
-                            <thead>
-                              <tr>
-                                <th className="text-end">Call LTP</th>
-                                <th className="text-center">Strike</th>
-                                <th className="text-start">Put LTP</th>
-                              </tr>
-                            </thead>
-                            <tbody className="font-monospace">
-                              {atmSnapshot.chainRows.map((row) => (
-                                <tr key={`scalper-atm-${atmTarget.key}-${row.strike}`} className={row.isAtm ? 'table-warning' : undefined}>
-                                  <td
-                                    role={row.ceRow ? 'button' : undefined}
-                                    className={`text-end ${row.ceRow ? 'cursor-pointer' : ''}`}
-                                    onClick={() => row.ceRow && setSelected(row.ceRow)}
-                                  >
-                                    {row.ceQuote ? row.ceQuote.lastPrice.toFixed(2) : '—'}
-                                  </td>
-                                  <td className="text-center fw-semibold">{row.strike.toFixed(2)}{row.isAtm ? ' ★' : ''}</td>
-                                  <td
-                                    role={row.peRow ? 'button' : undefined}
-                                    className={`text-start ${row.peRow ? 'cursor-pointer' : ''}`}
-                                    onClick={() => row.peRow && setSelected(row.peRow)}
-                                  >
-                                    {row.peQuote ? row.peQuote.lastPrice.toFixed(2) : '—'}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </Table>
-                        </div>
+                        <>
+                          <div className="d-flex justify-content-center mb-1">
+                            <Button
+                              size="sm"
+                              variant="outline-secondary"
+                              style={{ padding: '0.1rem 0.4rem', fontSize: '0.66rem', lineHeight: 1.1 }}
+                              onClick={() => setAtmChainStrikesEachSide((v) => Math.min(v + 2, 24))}
+                            >
+                              Load more ▲
+                            </Button>
+                          </div>
+                          <div className="d-flex flex-column gap-1 small font-monospace">
+                            {atmSnapshot.chainRows.map((row) => (
+                              <div
+                                key={`scalper-atm-${atmTarget.key}-${row.strike}`}
+                                className={`d-flex align-items-center justify-content-between gap-1 border rounded px-1 py-1 ${
+                                  row.isAtm ? 'border-warning-subtle bg-warning-subtle' : 'border-secondary-subtle'
+                                }`}
+                                style={{ fontSize: '0.71rem', lineHeight: 1.05 }}
+                              >
+                                <button
+                                  type="button"
+                                  className="btn btn-link text-decoration-none p-0 text-end"
+                                  style={{ minWidth: '5.1rem', fontSize: '0.71rem' }}
+                                  disabled={!row.ceRow}
+                                  onClick={() => row.ceRow && setSelected(row.ceRow)}
+                                >
+                                  {row.ceQuote ? row.ceQuote.lastPrice.toFixed(2) : '—'}
+                                </button>
+                                <div className="fw-semibold text-center" style={{ minWidth: '5.9rem' }}>
+                                  {row.strike.toFixed(2)}{row.isAtm ? ' ★' : ''}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-link text-decoration-none p-0 text-start"
+                                  style={{ minWidth: '5.1rem', fontSize: '0.71rem' }}
+                                  disabled={!row.peRow}
+                                  onClick={() => row.peRow && setSelected(row.peRow)}
+                                >
+                                  {row.peQuote ? row.peQuote.lastPrice.toFixed(2) : '—'}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="d-flex justify-content-center mt-1">
+                            <Button
+                              size="sm"
+                              variant="outline-secondary"
+                              style={{ padding: '0.1rem 0.4rem', fontSize: '0.66rem', lineHeight: 1.1 }}
+                              onClick={() => setAtmChainStrikesEachSide((v) => Math.min(v + 2, 24))}
+                            >
+                              Load more ▼
+                            </Button>
+                          </div>
+                        </>
                       ) : null}
                       <div className="mt-2 d-flex flex-wrap gap-2">
                         <Button
