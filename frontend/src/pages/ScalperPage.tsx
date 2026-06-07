@@ -283,7 +283,8 @@ function buildAtmChainRows(
   options: KiteInstrumentRow[],
   expiryIso: string | null,
   atmStrike: number | null,
-  strikesEachSide: number,
+  strikesAboveAtm: number,
+  strikesBelowAtm: number,
 ): Array<{ strike: number; isAtm: boolean; ceRow: KiteInstrumentRow | null; peRow: KiteInstrumentRow | null }> {
   if (!expiryIso || atmStrike == null) return []
   const expiryMs = Date.parse(expiryIso)
@@ -295,8 +296,8 @@ function buildAtmChainRows(
     (bestIdx, s, i) => (Math.abs(s - atmStrike) < Math.abs(strikes[bestIdx]! - atmStrike) ? i : bestIdx),
     0,
   )
-  const from = Math.max(0, atmIdx - strikesEachSide)
-  const to = Math.min(strikes.length - 1, atmIdx + strikesEachSide)
+  const from = Math.max(0, atmIdx - strikesAboveAtm)
+  const to = Math.min(strikes.length - 1, atmIdx + strikesBelowAtm)
   return strikes.slice(from, to + 1).map((strike) => {
     const strikeRows = bucket.filter((r) => Number(r.strike) === strike)
     const ceRow =
@@ -339,7 +340,8 @@ export function ScalperPage() {
   const [atmSpotRow, setAtmSpotRow] = useState<KiteInstrumentRow | null>(null)
   const [atmOptionRows, setAtmOptionRows] = useState<KiteInstrumentRow[]>([])
   const [atmSnapshot, setAtmSnapshot] = useState<ScalperAtmSnapshot>(EMPTY_ATM_SNAPSHOT)
-  const [atmChainStrikesEachSide, setAtmChainStrikesEachSide] = useState(3)
+  const [atmChainStrikesAboveAtm, setAtmChainStrikesAboveAtm] = useState(3)
+  const [atmChainStrikesBelowAtm, setAtmChainStrikesBelowAtm] = useState(3)
   const [isLivePullWindow, setIsLivePullWindow] = useState<boolean>(() => isIstMarketLiveWindow())
   const [tradeQty, setTradeQty] = useState('1')
   const [tradeProduct, setTradeProduct] = useState<'MIS' | 'NRML'>('MIS')
@@ -739,7 +741,13 @@ export function ScalperPage() {
       const previous = atmSnapshot
       const spotQuote = await fetchQuote(atmSpotRow)
       const atm = pickAtmLegs(atmOptionRows, spotQuote?.lastPrice ?? previous.spotQuote?.lastPrice ?? Number.NaN)
-      const chainRowsSeed = buildAtmChainRows(atmOptionRows, atm.expiry, atm.strike, atmChainStrikesEachSide)
+      const chainRowsSeed = buildAtmChainRows(
+        atmOptionRows,
+        atm.expiry,
+        atm.strike,
+        atmChainStrikesAboveAtm,
+        atmChainStrikesBelowAtm,
+      )
 
       const uniqueRows = new Map<string, KiteInstrumentRow>()
       for (const row of chainRowsSeed) {
@@ -799,7 +807,16 @@ export function ScalperPage() {
     } finally {
       setAtmLiveLoading(false)
     }
-  }, [atmChainStrikesEachSide, atmOptionRows, atmSnapshot, atmSpotRow, atmTarget.key, isLivePullWindow, isZerodha])
+  }, [
+    atmChainStrikesAboveAtm,
+    atmChainStrikesBelowAtm,
+    atmOptionRows,
+    atmSnapshot,
+    atmSpotRow,
+    atmTarget.key,
+    isLivePullWindow,
+    isZerodha,
+  ])
 
   useEffect(() => {
     let cancelled = false
@@ -822,7 +839,8 @@ export function ScalperPage() {
   }, [isZerodha, loadAtmReferences])
 
   useEffect(() => {
-    setAtmChainStrikesEachSide(3)
+    setAtmChainStrikesAboveAtm(3)
+    setAtmChainStrikesBelowAtm(3)
   }, [atmTarget.key])
 
   useEffect(() => {
@@ -936,7 +954,13 @@ export function ScalperPage() {
     const atmStrike = atmSnapshot.atmStrike
     if (!expiry || atmStrike == null) return atmSnapshot.chainRows
 
-    const seededRows = buildAtmChainRows(atmOptionRows, expiry, atmStrike, atmChainStrikesEachSide)
+    const seededRows = buildAtmChainRows(
+      atmOptionRows,
+      expiry,
+      atmStrike,
+      atmChainStrikesAboveAtm,
+      atmChainStrikesBelowAtm,
+    )
     if (seededRows.length === 0) return atmSnapshot.chainRows
 
     const quoteByToken = new Map<string, KiteInstrumentLiveQuoteResponse | null>()
@@ -953,7 +977,12 @@ export function ScalperPage() {
       ceQuote: row.ceRow ? (quoteByToken.get(row.ceRow.instrumentToken) ?? null) : null,
       peQuote: row.peRow ? (quoteByToken.get(row.peRow.instrumentToken) ?? null) : null,
     }))
-  }, [atmChainStrikesEachSide, atmOptionRows, atmSnapshot])
+  }, [atmChainStrikesAboveAtm, atmChainStrikesBelowAtm, atmOptionRows, atmSnapshot])
+
+  useEffect(() => {
+    if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
+    void refreshAtmLive()
+  }, [atmChainStrikesAboveAtm, atmChainStrikesBelowAtm, atmSpotRow, isLivePullWindow, isZerodha, refreshAtmLive])
 
   const { loadOlderBars, loadingOlderBars, canLoadOlderBars } = useChartOlderBars({
     instrumentToken: selected?.instrumentToken ?? '',
@@ -1350,12 +1379,15 @@ export function ScalperPage() {
                               size="sm"
                               variant="outline-secondary"
                               style={{ padding: '0.1rem 0.4rem', fontSize: '0.66rem', lineHeight: 1.1 }}
-                              onClick={() => setAtmChainStrikesEachSide((v) => Math.min(v + 2, 24))}
+                              onClick={() => setAtmChainStrikesAboveAtm((v) => Math.min(v + 2, 24))}
                             >
                               Load more ▲
                             </Button>
                           </div>
-                          <div className="d-flex flex-column gap-1 small font-monospace">
+                          <div
+                            className="d-flex flex-column gap-1 small font-monospace scalper-compact-scrollbar"
+                            style={{ maxHeight: '24rem', overflowY: 'auto', paddingRight: '0.1rem' }}
+                          >
                             {atmChainRowsDisplay.map((row) => (
                               <div
                                 key={`scalper-atm-${atmTarget.key}-${row.strike}`}
@@ -1393,7 +1425,7 @@ export function ScalperPage() {
                               size="sm"
                               variant="outline-secondary"
                               style={{ padding: '0.1rem 0.4rem', fontSize: '0.66rem', lineHeight: 1.1 }}
-                              onClick={() => setAtmChainStrikesEachSide((v) => Math.min(v + 2, 24))}
+                              onClick={() => setAtmChainStrikesBelowAtm((v) => Math.min(v + 2, 24))}
                             >
                               Load more ▼
                             </Button>
