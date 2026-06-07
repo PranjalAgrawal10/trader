@@ -94,6 +94,7 @@ public static class DependencyInjection
         }
 
         services.AddScoped<IUserRepository, UserRepository>();
+        services.AddScoped<IUserLoginAuditRepository, UserLoginAuditRepository>();
         services.AddScoped<IDemoPaperPositionRepository, DemoPaperPositionRepository>();
         services.AddScoped<IDemoPaperBuyLegRepository, DemoPaperBuyLegRepository>();
         services.AddScoped<IDemoPaperTradeLogRepository, DemoPaperTradeLogRepository>();

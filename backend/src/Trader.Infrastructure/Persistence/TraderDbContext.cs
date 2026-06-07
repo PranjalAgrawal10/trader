@@ -27,6 +27,7 @@ public sealed class TraderDbContext : DbContext
     public DbSet<DemoPaperPosition> DemoPaperPositions => Set<DemoPaperPosition>();
     public DbSet<DemoPaperBuyLeg> DemoPaperBuyLegs => Set<DemoPaperBuyLeg>();
     public DbSet<DemoPaperTradeLog> DemoPaperTradeLogs => Set<DemoPaperTradeLog>();
+    public DbSet<UserLoginAudit> UserLoginAudits => Set<UserLoginAudit>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -160,6 +161,18 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.ExecutedAtUtc).HasColumnType("datetime(6)");
             e.HasIndex(x => new { x.UserId, x.ExecutedAtUtc });
             e.HasOne(x => x.User).WithMany(u => u.DemoPaperTradeLogs).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserLoginAudit>(e =>
+        {
+            e.Property(x => x.IpAddress).HasMaxLength(64);
+            e.Property(x => x.ForwardedFor).HasMaxLength(1024);
+            e.Property(x => x.UserAgent).HasMaxLength(512);
+            e.Property(x => x.IpInfoJson).HasColumnType("longtext");
+            e.Property(x => x.LoggedInAtUtc).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.LoggedInAtUtc });
+            e.HasOne(x => x.User).WithMany(u => u.LoginAudits).HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

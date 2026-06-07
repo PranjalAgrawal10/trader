@@ -21,6 +21,7 @@ public sealed class AuthService : IAuthService
     private readonly ITwoFactorRecoveryCodesHelper _recoveryCodes;
     private readonly IPlainTextEmailSender _emailSender;
     private readonly IEmailOtpService _emailOtp;
+    private readonly IUserLoginAuditRepository _loginAudits;
     private readonly JwtOptions _jwtOptions;
     private readonly AuthOptions _authOptions;
     private readonly PublicWebOptions _publicWeb;
@@ -35,6 +36,7 @@ public sealed class AuthService : IAuthService
         ITwoFactorRecoveryCodesHelper recoveryCodes,
         IPlainTextEmailSender emailSender,
         IEmailOtpService emailOtp,
+        IUserLoginAuditRepository loginAudits,
         IOptions<JwtOptions> jwtOptions,
         IOptions<AuthOptions> authOptions,
         IOptions<PublicWebOptions> publicWeb)
@@ -48,6 +50,7 @@ public sealed class AuthService : IAuthService
         _recoveryCodes = recoveryCodes;
         _emailSender = emailSender;
         _emailOtp = emailOtp;
+        _loginAudits = loginAudits;
         _jwtOptions = jwtOptions.Value;
         _authOptions = authOptions.Value;
         _publicWeb = publicWeb.Value;
@@ -245,7 +248,10 @@ public sealed class AuthService : IAuthService
             user.EmailVerifiedAtUtc.HasValue);
     }
 
-    public async Task<LoginResult> LoginAsync(LoginRequest request, CancellationToken ct = default)
+    public async Task<LoginResult> LoginAsync(
+        LoginRequest request,
+        AuthRequestContext? requestContext = null,
+        CancellationToken ct = default)
     {
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
         var user = await _users.GetByEmailAsync(normalizedEmail, ct);
@@ -271,11 +277,14 @@ public sealed class AuthService : IAuthService
             return new LoginRequiresTwoFactor(totpTicket, "authenticator");
         }
 
-        var token = _jwtTokenService.CreateToken(user.Id, user.Email, user.Role);
-        return new LoginSucceeded(new AuthResponse(token, user.Id, user.Email, user.Role));
+        var auth = await IssueTokenWithLoginAuditAsync(user, requestContext, ct).ConfigureAwait(false);
+        return new LoginSucceeded(auth);
     }
 
-    public async Task<AuthResponse> CompleteTwoFactorLoginAsync(TwoFactorVerifyLoginRequest request, CancellationToken ct = default)
+    public async Task<AuthResponse> CompleteTwoFactorLoginAsync(
+        TwoFactorVerifyLoginRequest request,
+        AuthRequestContext? requestContext = null,
+        CancellationToken ct = default)
     {
         var ticket = request.ResolveTicket();
         var code = request.ResolveCode();
@@ -318,7 +327,7 @@ public sealed class AuthService : IAuthService
             }
 
             _attemptLimiter.Reset(scope);
-            return IssueToken(user);
+            return await IssueTokenWithLoginAuditAsync(user, requestContext, ct).ConfigureAwait(false);
         }
 
         if (string.IsNullOrEmpty(user.TotpSecretProtected))
@@ -349,7 +358,7 @@ public sealed class AuthService : IAuthService
             user.TotpRecoveryCodesProtected = updatedPayload;
             await _users.SaveChangesAsync(ct);
             _attemptLimiter.Reset(scope);
-            return IssueToken(user);
+            return await IssueTokenWithLoginAuditAsync(user, requestContext, ct).ConfigureAwait(false);
         }
 
         _attemptLimiter.RegisterFailure(scope);
@@ -557,6 +566,48 @@ public sealed class AuthService : IAuthService
     {
         var token = _jwtTokenService.CreateToken(user.Id, user.Email, user.Role);
         return new AuthResponse(token, user.Id, user.Email, user.Role);
+    }
+
+    private async Task<AuthResponse> IssueTokenWithLoginAuditAsync(
+        User user,
+        AuthRequestContext? requestContext,
+        CancellationToken ct)
+    {
+        var auth = IssueToken(user);
+        var ip = NormalizeIpAddress(requestContext?.IpAddress);
+        var forwardedFor = TrimToMaxOrNull(requestContext?.ForwardedFor, 1024);
+        var userAgent = TrimToMaxOrNull(requestContext?.UserAgent, 512);
+        var ipInfoJson = TrimToMaxOrNull(requestContext?.IpInfoJson, 4000);
+        var fallbackIp = "unknown";
+
+        await _loginAudits.AddAsync(
+                new UserLoginAudit
+                {
+                    UserId = user.Id,
+                    LoggedInAtUtc = DateTimeOffset.UtcNow,
+                    IpAddress = ip ?? fallbackIp,
+                    ForwardedFor = forwardedFor,
+                    UserAgent = userAgent,
+                    IpInfoJson = ipInfoJson,
+                },
+                ct)
+            .ConfigureAwait(false);
+        await _loginAudits.SaveChangesAsync(ct).ConfigureAwait(false);
+        return auth;
+    }
+
+    private static string? NormalizeIpAddress(string? raw)
+    {
+        return TrimToMaxOrNull(raw, 64);
+    }
+
+    private static string? TrimToMaxOrNull(string? raw, int maxLen)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var value = raw.Trim();
+        return value.Length <= maxLen ? value : value[..maxLen];
     }
 
     private static string LoginScope(Guid userId) => $"2fa-login:{userId:N}";

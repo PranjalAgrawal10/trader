@@ -65,6 +65,7 @@ export function LoginPage() {
   const [registerSent, setRegisterSent] = useState(false)
   const [totpCode, setTotpCode] = useState('')
   const [otpPasteState, setOtpPasteState] = useState<'idle' | 'ok' | 'error'>('idle')
+  const [otpCopyState, setOtpCopyState] = useState<'idle' | 'ok' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -88,6 +89,22 @@ export function LoginPage() {
       setOtpPasteState('error')
     } finally {
       window.setTimeout(() => setOtpPasteState('idle'), 1400)
+    }
+  }
+
+  const copyEmailOtp = async () => {
+    if (!twoFactor || twoFactor.second_factor !== 'email_otp') return
+    try {
+      const otp = extractOtpDigits(totpCode)
+      if (otp.length === 0) throw new Error('No OTP to copy.')
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard write is unavailable.')
+      await navigator.clipboard.writeText(otp)
+      setOtpCopyState('ok')
+      setError(null)
+    } catch {
+      setOtpCopyState('error')
+    } finally {
+      window.setTimeout(() => setOtpCopyState('idle'), 1400)
     }
   }
 
@@ -200,6 +217,7 @@ export function LoginPage() {
     setTwoFactor(null)
     setTotpCode('')
     setOtpPasteState('idle')
+    setOtpCopyState('idle')
     setError(null)
   }
 
@@ -241,6 +259,9 @@ export function LoginPage() {
                         />
                         <Button variant="outline-secondary" type="button" onClick={() => void pasteEmailOtp()} disabled={busy}>
                           {otpPasteState === 'ok' ? 'Pasted' : otpPasteState === 'error' ? 'Paste failed' : 'Paste OTP'}
+                        </Button>
+                        <Button variant="outline-secondary" type="button" onClick={() => void copyEmailOtp()} disabled={busy}>
+                          {otpCopyState === 'ok' ? 'Copied' : otpCopyState === 'error' ? 'Copy failed' : 'Copy OTP'}
                         </Button>
                       </InputGroup>
                     ) : (

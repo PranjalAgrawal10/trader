@@ -59,7 +59,7 @@ public sealed class TwoFactorController : ControllerBase
     public async Task<ActionResult<AuthResponse>> VerifyLogin(
         [FromBody] TwoFactorVerifyLoginRequest request,
         CancellationToken ct) =>
-        Ok(await _auth.CompleteTwoFactorLoginAsync(request, ct));
+        Ok(await _auth.CompleteTwoFactorLoginAsync(request, Request.BuildAuthRequestContext(), ct));
 
     [Authorize]
     [HttpPost("disable")]

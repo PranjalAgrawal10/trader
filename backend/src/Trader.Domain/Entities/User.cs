@@ -131,4 +131,6 @@ public class User
     public ICollection<DemoPaperBuyLeg> DemoPaperBuyLegs { get; set; } = new List<DemoPaperBuyLeg>();
 
     public ICollection<DemoPaperTradeLog> DemoPaperTradeLogs { get; set; } = new List<DemoPaperTradeLog>();
+
+    public ICollection<UserLoginAudit> LoginAudits { get; set; } = new List<UserLoginAudit>();
 }

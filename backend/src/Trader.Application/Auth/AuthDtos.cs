@@ -6,6 +6,12 @@ public sealed record RegisterRequest(string Email, string Password);
 
 public sealed record LoginRequest(string Email, string Password);
 
+public sealed record AuthRequestContext(
+    string? IpAddress,
+    string? ForwardedFor,
+    string? UserAgent,
+    string? IpInfoJson);
+
 public sealed record AuthResponse(string Token, Guid UserId, string Email, string Role);
 
 public sealed record ProfileResponse(

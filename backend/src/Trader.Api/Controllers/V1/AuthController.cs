@@ -1,6 +1,7 @@
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Trader.Api.Extensions;
 using Trader.Api.Models;
 using Trader.Application.Auth;
@@ -97,10 +98,12 @@ public sealed class AuthController : ControllerBase
     }
 
     [AllowAnonymous]
+    [EnableRateLimiting("auth-login")]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken ct)
     {
-        var result = await _auth.LoginAsync(request, ct);
+        var requestContext = Request.BuildAuthRequestContext();
+        var result = await _auth.LoginAsync(request, requestContext, ct);
         return result switch
         {
             LoginSucceeded s => Ok(s.Auth),
