@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Trader.Application.Broker;
 
@@ -14,6 +16,39 @@ public sealed class GrowwTradingClient : IGrowwTradingClient
     public GrowwTradingClient(HttpClient http)
     {
         _http = http;
+    }
+
+    public async Task<GrowwTokenAccessResult> CreateAccessTokenByApprovalAsync(
+        string apiKey,
+        string apiSecret,
+        CancellationToken ct = default)
+    {
+        var ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+        var checksum = GenerateChecksum(apiSecret, ts);
+        return await CreateAccessTokenAsync(
+            apiKey,
+            new
+            {
+                key_type = "approval",
+                checksum,
+                timestamp = ts,
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    public async Task<GrowwTokenAccessResult> CreateAccessTokenByTotpAsync(
+        string apiKey,
+        string totp,
+        CancellationToken ct = default)
+    {
+        return await CreateAccessTokenAsync(
+            apiKey,
+            new
+            {
+                key_type = "totp",
+                totp,
+            },
+            ct).ConfigureAwait(false);
     }
 
     public async Task<GrowwOrderActionResult> PlaceOrderAsync(
@@ -142,6 +177,11 @@ public sealed class GrowwTradingClient : IGrowwTradingClient
         try
         {
             using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var errObj) && errObj.ValueKind == JsonValueKind.Object)
+            {
+                if (errObj.TryGetProperty("message", out var msg2))
+                    return msg2.ToString();
+            }
             if (doc.RootElement.TryGetProperty("message", out var msg))
                 return msg.ToString();
             if (doc.RootElement.TryGetProperty("error", out var err))
@@ -154,5 +194,64 @@ public sealed class GrowwTradingClient : IGrowwTradingClient
         {
             return null;
         }
+    }
+
+    private async Task<GrowwTokenAccessResult> CreateAccessTokenAsync(
+        string apiKey,
+        object body,
+        CancellationToken ct)
+    {
+        using var http = new HttpRequestMessage(HttpMethod.Post, "token/api/access");
+        http.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
+        http.Content = JsonContent.Create(body);
+
+        using var res = await _http.SendAsync(http, ct).ConfigureAwait(false);
+        var payload = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!res.IsSuccessStatusCode)
+        {
+            return new GrowwTokenAccessResult(
+                false,
+                ParseGrowwError(payload) ?? $"Groww returned {(int)res.StatusCode}.",
+                null,
+                null,
+                null);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            var token = doc.RootElement.TryGetProperty("token", out var tok) ? tok.ToString() : null;
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return new GrowwTokenAccessResult(
+                    false,
+                    ParseGrowwError(payload) ?? "Groww token response did not include token.",
+                    null,
+                    null,
+                    null);
+            }
+
+            DateTimeOffset? expiresAt = null;
+            if (doc.RootElement.TryGetProperty("expiry", out var expiryEl)
+                && DateTimeOffset.TryParse(expiryEl.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsedExpiry))
+            {
+                expiresAt = parsedExpiry;
+            }
+
+            var tokenRef = doc.RootElement.TryGetProperty("tokenRefId", out var refEl) ? refEl.ToString() : null;
+            return new GrowwTokenAccessResult(true, null, token.Trim(), expiresAt, tokenRef);
+        }
+        catch (JsonException)
+        {
+            return new GrowwTokenAccessResult(false, "Could not parse Groww token response.", null, null, null);
+        }
+    }
+
+    private static string GenerateChecksum(string secret, string timestamp)
+    {
+        var input = $"{secret}{timestamp}";
+        var bytes = Encoding.UTF8.GetBytes(input);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }

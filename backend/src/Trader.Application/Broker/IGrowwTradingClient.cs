@@ -2,6 +2,16 @@ namespace Trader.Application.Broker;
 
 public interface IGrowwTradingClient
 {
+    Task<GrowwTokenAccessResult> CreateAccessTokenByApprovalAsync(
+        string apiKey,
+        string apiSecret,
+        CancellationToken ct = default);
+
+    Task<GrowwTokenAccessResult> CreateAccessTokenByTotpAsync(
+        string apiKey,
+        string totp,
+        CancellationToken ct = default);
+
     Task<GrowwOrderActionResult> PlaceOrderAsync(
         GrowwOrderCreateRequest request,
         string accessToken,
@@ -43,3 +53,10 @@ public sealed record GrowwPositionItem(
     string TradingSymbol,
     string Product,
     int Quantity);
+
+public sealed record GrowwTokenAccessResult(
+    bool Success,
+    string? ErrorMessage,
+    string? AccessToken,
+    DateTimeOffset? ExpiresAt,
+    string? TokenReferenceId);

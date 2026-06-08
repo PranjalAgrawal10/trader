@@ -178,9 +178,59 @@ public sealed class BrokerService : IBrokerService
         return await GetStatusAsync(userId, ct);
     }
 
-    public async Task<BrokerStatusDto> DisconnectAsync(Guid userId, CancellationToken ct = default)
+    public async Task<BrokerStatusDto> ConnectGrowwAsync(Guid userId, GrowwConnectRequestDto body, CancellationToken ct = default)
     {
-        await _brokerSetup.DisconnectBrokerAsync(userId, ct);
+        ArgumentNullException.ThrowIfNull(body);
+
+        var accessToken = NormalizeOptional(body.AccessToken);
+        var apiKey = NormalizeOptional(body.ApiKey);
+        var apiSecret = NormalizeOptional(body.ApiSecret);
+        var totp = NormalizeOptional(body.Totp);
+
+        GrowwTokenAccessResult? generated = null;
+        if (accessToken is null)
+        {
+            if (apiKey is null)
+                throw new InvalidOperationException("Provide accessToken, or provide apiKey with apiSecret/totp.");
+
+            if (apiSecret is not null)
+            {
+                generated = await _growwTrading.CreateAccessTokenByApprovalAsync(apiKey, apiSecret, ct).ConfigureAwait(false);
+            }
+            else if (totp is not null)
+            {
+                generated = await _growwTrading.CreateAccessTokenByTotpAsync(apiKey, totp, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                throw new InvalidOperationException("apiSecret or totp is required when accessToken is not provided.");
+            }
+
+            if (!generated.Success || string.IsNullOrWhiteSpace(generated.AccessToken))
+                throw new InvalidOperationException(generated.ErrorMessage ?? "Could not create Groww access token.");
+
+            accessToken = generated.AccessToken.Trim();
+        }
+
+        var probe = await _growwTrading.FetchPositionsAsync(accessToken, segment: null, ct).ConfigureAwait(false);
+        if (!probe.Success)
+            throw new InvalidOperationException(probe.ErrorMessage ?? "Groww token is invalid or expired.");
+
+        await _brokerSetup.PersistGrowwSessionAsync(
+            userId,
+            new BrokerGrowwPersistRequest(
+                accessToken,
+                generated?.ExpiresAt,
+                apiKey),
+            ct).ConfigureAwait(false);
+
+        return await GetStatusAsync(userId, ct).ConfigureAwait(false);
+    }
+
+    public async Task<BrokerStatusDto> DisconnectAsync(Guid userId, string? broker = null, CancellationToken ct = default)
+    {
+        var normalized = string.IsNullOrWhiteSpace(broker) ? null : broker.Trim();
+        await _brokerSetup.DisconnectBrokerAsync(userId, normalized, ct);
         return await GetStatusAsync(userId, ct);
     }
 
@@ -2001,12 +2051,9 @@ public sealed class BrokerService : IBrokerService
         Guid userId,
         CancellationToken ct)
     {
-        var snapshot = await _brokerSetup.GetSnapshotAsync(userId, ct).ConfigureAwait(false);
-        if (snapshot is null)
+        var userExists = await _brokerSetup.GetSnapshotAsync(userId, ct).ConfigureAwait(false);
+        if (userExists is null)
             throw new InvalidOperationException("User not found.");
-
-        if (!string.Equals(snapshot.BrokerProvider, "Zerodha", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Zerodha (Kite) is not connected.");
 
         var accessToken = await _brokerSetup.GetKiteAccessTokenAsync(userId, ct).ConfigureAwait(false);
         if (string.IsNullOrEmpty(accessToken))

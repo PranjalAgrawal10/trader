@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Card, Spinner, Stack } from 'react-bootstrap'
+import { Alert, Badge, Button, ButtonGroup, Card, Form, InputGroup, Spinner, Stack } from 'react-bootstrap'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
@@ -14,6 +14,14 @@ interface BrokerStatusResponse {
 type TwoFactorGate = {
   two_factor_enabled: boolean
 }
+
+type BrokerProviderAvailability = {
+  key: string
+  label: string
+  connected: boolean
+}
+
+const BROKER_PREF_STORAGE_KEY = 'trader-preferred-broker'
 
 function problemDetail(err: unknown): string {
   if (axios.isAxiosError(err)) {
@@ -40,9 +48,18 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
   const [provider, setProvider] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [providers, setProviders] = useState<BrokerProviderAvailability[]>([])
+  const [selectedProvider, setSelectedProvider] = useState<string>(() => {
+    const saved = window.localStorage.getItem(BROKER_PREF_STORAGE_KEY)?.trim().toLowerCase()
+    return saved || 'zerodha'
+  })
   const [kiteBanner, setKiteBanner] = useState<{ kind: 'success' | 'error'; text: string } | null>(
     null,
   )
+  const [growwAccessToken, setGrowwAccessToken] = useState('')
+  const [growwApiKey, setGrowwApiKey] = useState('')
+  const [growwApiSecret, setGrowwApiSecret] = useState('')
+  const [growwTotp, setGrowwTotp] = useState('')
 
   const loadBroker = useCallback(async () => {
     try {
@@ -54,6 +71,15 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
       setError('Could not load broker status.')
       setConnected(null)
       setProvider(null)
+    }
+  }, [])
+
+  const loadProviders = useCallback(async () => {
+    try {
+      const { data } = await api.get<BrokerProviderAvailability[]>('/broker/providers')
+      setProviders(Array.isArray(data) ? data : [])
+    } catch {
+      setProviders([])
     }
   }, [])
 
@@ -91,14 +117,30 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
     }
 
     void loadBroker()
-  }, [navigate, searchParams, loadBroker])
+    void loadProviders()
+  }, [navigate, searchParams, loadBroker, loadProviders])
 
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void loadBroker()
+      if (document.visibilityState === 'visible') {
+        void loadBroker()
+        void loadProviders()
+      }
     }, 90_000)
     return () => window.clearInterval(id)
-  }, [loadBroker])
+  }, [loadBroker, loadProviders])
+
+  useEffect(() => {
+    if (providers.length === 0) return
+    if (providers.some((p) => p.key.toLowerCase() === selectedProvider)) return
+    const fallback = providers[0]?.key?.toLowerCase()
+    if (fallback) setSelectedProvider(fallback)
+  }, [providers, selectedProvider])
+
+  useEffect(() => {
+    if (!selectedProvider) return
+    window.localStorage.setItem(BROKER_PREF_STORAGE_KEY, selectedProvider)
+  }, [selectedProvider])
 
   useEffect(() => {
     void loadTwoFa()
@@ -130,14 +172,51 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
     }
   }
 
+  const connectGroww = async () => {
+    if (!growwAccessToken.trim() && !growwApiKey.trim()) {
+      setError('Provide Groww access token, or API key with secret/TOTP.')
+      return
+    }
+    if (!growwAccessToken.trim() && growwApiKey.trim() && !growwApiSecret.trim() && !growwTotp.trim()) {
+      setError('When using Groww API key flow, provide API secret or TOTP.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await api.post('/broker/groww/connect', {
+        accessToken: growwAccessToken.trim() || undefined,
+        apiKey: growwApiKey.trim() || undefined,
+        apiSecret: growwApiSecret.trim() || undefined,
+        totp: growwTotp.trim() || undefined,
+      })
+      setKiteBanner({ kind: 'success', text: 'Groww connected successfully.' })
+      await loadBroker()
+      await loadProviders()
+      setGrowwAccessToken('')
+      setGrowwApiSecret('')
+      setGrowwTotp('')
+    } catch (err) {
+      setError(problemDetail(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const isZerodha = provider?.toLowerCase() === 'zerodha'
+  const selectedProviderMeta = providers.find((p) => p.key.toLowerCase() === selectedProvider) ?? null
+  const selectedIsConnected = selectedProviderMeta?.connected ?? false
+  const selectedIsGroww = selectedProvider === 'groww'
 
   const disconnectBroker = async () => {
     setBusy(true)
     setError(null)
     try {
-      await api.post('/broker/disconnect')
+      await api.post('/broker/disconnect', null, {
+        params: selectedProvider ? { broker: selectedProvider } : undefined,
+      })
       await loadBroker()
+      await loadProviders()
     } catch (err) {
       setError(problemDetail(err))
     } finally {
@@ -183,7 +262,7 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
         <Card.Body>
           <Card.Title className="h6">Link your broker</Card.Title>
           <Card.Text className="text-secondary small">
-            Connect Zerodha via Kite Connect (OAuth). Your API keys and tokens stay on the server; the app only stores
+            Choose your broker here and connect. Your API keys and tokens stay on the server; the app only stores
             encrypted session tokens after login.
           </Card.Text>
 
@@ -207,6 +286,68 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
                   <span className="text-warning">Not connected</span>
                 )}
               </Card.Text>
+              {providers.length > 0 ? (
+                <div className="mt-3">
+                  <div className="small text-secondary mb-2">Broker options</div>
+                  <ButtonGroup size="sm" className="flex-wrap">
+                    {providers.map((p) => {
+                      const key = p.key.toLowerCase()
+                      const isActive = selectedProvider === key
+                      return (
+                        <Button
+                          key={`broker-opt-${p.key}`}
+                          type="button"
+                          variant={isActive ? 'primary' : 'outline-secondary'}
+                          onClick={() => setSelectedProvider(key)}
+                        >
+                          {p.label}{' '}
+                          {p.connected ? <Badge bg="success" pill>connected</Badge> : null}
+                        </Button>
+                      )
+                    })}
+                  </ButtonGroup>
+                </div>
+              ) : null}
+              {selectedIsGroww ? (
+                <div className="mt-3">
+                  <Alert variant="info" className="py-2 small mb-3">
+                    Groww tokens expire daily. Use direct access token, or give API key with secret/TOTP for token generation.
+                  </Alert>
+                  <InputGroup className="mb-2">
+                    <InputGroup.Text className="small">Access token</InputGroup.Text>
+                    <Form.Control
+                      value={growwAccessToken}
+                      onChange={(e) => setGrowwAccessToken(e.target.value)}
+                      placeholder="Paste Groww access token (optional if using key flow)"
+                    />
+                  </InputGroup>
+                  <InputGroup className="mb-2">
+                    <InputGroup.Text className="small">API key</InputGroup.Text>
+                    <Form.Control
+                      value={growwApiKey}
+                      onChange={(e) => setGrowwApiKey(e.target.value)}
+                      placeholder="Groww API key"
+                    />
+                  </InputGroup>
+                  <InputGroup className="mb-2">
+                    <InputGroup.Text className="small">API secret</InputGroup.Text>
+                    <Form.Control
+                      type="password"
+                      value={growwApiSecret}
+                      onChange={(e) => setGrowwApiSecret(e.target.value)}
+                      placeholder="For approval flow"
+                    />
+                  </InputGroup>
+                  <InputGroup>
+                    <InputGroup.Text className="small">TOTP</InputGroup.Text>
+                    <Form.Control
+                      value={growwTotp}
+                      onChange={(e) => setGrowwTotp(e.target.value)}
+                      placeholder="Or 6-digit TOTP"
+                    />
+                  </InputGroup>
+                </div>
+              ) : null}
 
               {!connected ? (
                 <>
@@ -214,9 +355,15 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
                     variant="success"
                     className="mt-4"
                     disabled={busy || connected === null || gated}
-                    onClick={() => void startKiteOAuth()}
+                    onClick={() => {
+                      if (selectedIsGroww) {
+                        void connectGroww()
+                        return
+                      }
+                      void startKiteOAuth()
+                    }}
                   >
-                    {busy ? 'Opening Zerodha…' : 'Connect Zerodha (Kite)'}
+                    {selectedIsGroww ? (busy ? 'Connecting Groww…' : 'Connect Groww') : busy ? 'Opening Zerodha…' : 'Connect Zerodha (Kite)'}
                   </Button>
 
                   <hr className="border-secondary mt-4" />
@@ -238,17 +385,23 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
                   <Button variant="secondary" onClick={() => navigate('/', { replace: true })}>
                     Go to dashboard
                   </Button>
-                  {isZerodha ? (
+                  {isZerodha || selectedIsConnected ? (
                     <>
                       <Button
                         variant="outline-secondary"
                         disabled={busy || gated}
-                        onClick={() => void startKiteOAuth()}
+                        onClick={() => {
+                          if (selectedIsGroww) {
+                            void connectGroww()
+                            return
+                          }
+                          void startKiteOAuth()
+                        }}
                       >
-                        {busy ? 'Opening Zerodha…' : 'Reconnect Zerodha (Kite)'}
+                        {selectedIsGroww ? (busy ? 'Connecting Groww…' : 'Reconnect Groww') : busy ? 'Opening Zerodha…' : 'Reconnect Zerodha (Kite)'}
                       </Button>
                       <Button variant="outline-danger" disabled={busy || gated} onClick={() => void disconnectBroker()}>
-                        {busy ? 'Removing…' : 'Remove Zerodha connection'}
+                        {busy ? 'Removing…' : selectedIsGroww ? 'Remove Groww connection' : 'Remove Zerodha connection'}
                       </Button>
                     </>
                   ) : (

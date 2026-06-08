@@ -8,7 +8,8 @@ public interface IBrokerSetupGateway
     Task<BrokerSetupSnapshot?> GetSnapshotAsync(Guid userId, CancellationToken ct);
     Task CompleteBrokerSetupAsync(Guid userId, CancellationToken ct);
     Task PersistKiteSessionAsync(Guid userId, BrokerKitePersistRequest session, CancellationToken ct);
-    Task DisconnectBrokerAsync(Guid userId, CancellationToken ct);
+    Task PersistGrowwSessionAsync(Guid userId, BrokerGrowwPersistRequest session, CancellationToken ct);
+    Task DisconnectBrokerAsync(Guid userId, string? brokerName, CancellationToken ct);
 
     /// <summary>Decrypts the stored Kite access token, or null if missing.</summary>
     Task<string?> GetKiteAccessTokenAsync(Guid userId, CancellationToken ct);

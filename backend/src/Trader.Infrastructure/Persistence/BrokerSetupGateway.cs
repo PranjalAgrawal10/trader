@@ -10,6 +10,7 @@ namespace Trader.Infrastructure.Persistence;
 public sealed class BrokerSetupGateway : IBrokerSetupGateway
 {
     private const string ZerodhaBrokerName = "Zerodha";
+    private const string GrowwBrokerName = "Groww";
 
     private readonly TraderDbContext _db;
     private readonly IDataProtector _tokens;
@@ -31,44 +32,52 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
         if (!exists)
             return null;
 
-        var account = await _db.BrokerAccounts.AsNoTracking()
-            .Where(a => a.UserId == userId && a.BrokerName == ZerodhaBrokerName)
-            .FirstOrDefaultAsync(ct);
-
-        if (account is null || string.IsNullOrEmpty(account.AccessTokenProtected))
+        var accounts = await _db.BrokerAccounts.AsNoTracking()
+            .Where(a => a.UserId == userId && !string.IsNullOrEmpty(a.AccessTokenProtected))
+            .OrderByDescending(a => a.ConnectedAt)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (accounts.Count == 0)
             return new BrokerSetupSnapshot(userId, null, null);
 
-        try
+        var staleIds = new List<Guid>();
+        foreach (var account in accounts)
         {
-            var access = _tokens.Unprotect(account.AccessTokenProtected);
-            if (string.IsNullOrEmpty(access))
+            if (string.IsNullOrWhiteSpace(account.AccessTokenProtected) || string.IsNullOrWhiteSpace(account.BrokerName))
             {
-                await RemoveStaleZerodhaAccountsAsync(userId, ct).ConfigureAwait(false);
-                _logger.LogWarning(
-                    "Removed Zerodha broker row for user {UserId}: access token decrypted to empty.",
-                    userId);
-                return new BrokerSetupSnapshot(userId, null, null);
+                staleIds.Add(account.Id);
+                continue;
             }
-        }
-        catch (CryptographicException ex)
-        {
-            await RemoveStaleZerodhaAccountsAsync(userId, ct).ConfigureAwait(false);
-            _logger.LogWarning(
-                ex,
-                "Removed Zerodha broker credentials for user {UserId}: cannot decrypt tokens. " +
-                "Typical causes: redeploy without a persisted DataProtection__KeyRingPath, or rotated key ring.",
-                userId);
-            return new BrokerSetupSnapshot(userId, null, null);
+
+            try
+            {
+                var access = _tokens.Unprotect(account.AccessTokenProtected);
+                if (!string.IsNullOrWhiteSpace(access))
+                    return new BrokerSetupSnapshot(userId, account.ConnectedAt, account.BrokerName.Trim());
+            }
+            catch (CryptographicException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Broker token decrypt failed for user {UserId} provider {Provider}; removing stale row.",
+                    userId,
+                    account.BrokerName);
+            }
+
+            staleIds.Add(account.Id);
         }
 
-        return new BrokerSetupSnapshot(userId, account.ConnectedAt, ZerodhaBrokerName);
+        if (staleIds.Count > 0)
+            await RemoveStaleAccountsByIdsAsync(staleIds, ct).ConfigureAwait(false);
+
+        return new BrokerSetupSnapshot(userId, null, null);
     }
 
     /// <summary>Deletes encrypted broker rows when ciphertext no longer decrypts so status and UX match API reality.</summary>
-    private async Task RemoveStaleZerodhaAccountsAsync(Guid userId, CancellationToken ct)
+    private async Task RemoveStaleAccountsByIdsAsync(IReadOnlyList<Guid> accountIds, CancellationToken ct)
     {
         var rows = await _db.BrokerAccounts
-            .Where(a => a.UserId == userId && a.BrokerName == ZerodhaBrokerName)
+            .Where(a => accountIds.Contains(a.Id))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -81,14 +90,17 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
 
     public async Task CompleteBrokerSetupAsync(Guid userId, CancellationToken ct)
     {
-        var account = await _db.BrokerAccounts
-            .FirstOrDefaultAsync(a => a.UserId == userId && a.BrokerName == ZerodhaBrokerName, ct);
-
-        if (account is null || string.IsNullOrEmpty(account.AccessTokenProtected))
+        var accounts = await _db.BrokerAccounts
+            .Where(a => a.UserId == userId && !string.IsNullOrEmpty(a.AccessTokenProtected))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (accounts.Count == 0)
             return;
 
-        account.ConnectedAt = DateTimeOffset.UtcNow;
-        await _db.SaveChangesAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var account in accounts)
+            account.ConnectedAt = now;
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     public async Task PersistKiteSessionAsync(Guid userId, BrokerKitePersistRequest session, CancellationToken ct)
@@ -122,10 +134,41 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task DisconnectBrokerAsync(Guid userId, CancellationToken ct)
+    public async Task PersistGrowwSessionAsync(Guid userId, BrokerGrowwPersistRequest session, CancellationToken ct)
     {
+        _ = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct)
+            ?? throw new InvalidOperationException("User not found.");
+
+        var account = await _db.BrokerAccounts
+            .FirstOrDefaultAsync(a => a.UserId == userId && a.BrokerName == GrowwBrokerName, ct);
+
+        var now = DateTimeOffset.UtcNow;
+        if (account is null)
+        {
+            account = new BrokerAccount
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                BrokerName = GrowwBrokerName,
+                ConnectedAt = now,
+            };
+            _db.BrokerAccounts.Add(account);
+        }
+
+        account.ApiKey = string.IsNullOrWhiteSpace(session.ApiKey) ? null : session.ApiKey.Trim();
+        account.AccessTokenProtected = _tokens.Protect(session.AccessToken);
+        account.RefreshTokenProtected = null;
+        account.TokenExpiresAt = session.TokenExpiresAt;
+        account.ConnectedAt = now;
+
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task DisconnectBrokerAsync(Guid userId, string? brokerName, CancellationToken ct)
+    {
+        var broker = string.IsNullOrWhiteSpace(brokerName) ? null : brokerName.Trim().ToLowerInvariant();
         var rows = await _db.BrokerAccounts
-            .Where(a => a.UserId == userId && a.BrokerName == ZerodhaBrokerName)
+            .Where(a => a.UserId == userId && (broker == null || a.BrokerName.ToLower() == broker))
             .ToListAsync(ct);
 
         if (rows.Count > 0)
@@ -145,9 +188,9 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
         if (string.IsNullOrWhiteSpace(brokerName))
             return null;
 
-        var broker = brokerName.Trim();
+        var broker = brokerName.Trim().ToLowerInvariant();
         var blob = await _db.BrokerAccounts.AsNoTracking()
-            .Where(a => a.UserId == userId && a.BrokerName == broker)
+            .Where(a => a.UserId == userId && a.BrokerName.ToLower() == broker)
             .Select(a => a.AccessTokenProtected)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);

@@ -17,8 +17,10 @@ public interface IBrokerService
     /// <summary>Completes OAuth using request_token and state from Kite redirect.</summary>
     Task<BrokerStatusDto> CompleteKiteOAuthAsync(string requestToken, string state, CancellationToken ct = default);
 
+    Task<BrokerStatusDto> ConnectGrowwAsync(Guid userId, GrowwConnectRequestDto body, CancellationToken ct = default);
+
     /// <summary>Clears stored broker session and onboarding completion for the user.</summary>
-    Task<BrokerStatusDto> DisconnectAsync(Guid userId, CancellationToken ct = default);
+    Task<BrokerStatusDto> DisconnectAsync(Guid userId, string? broker = null, CancellationToken ct = default);
 
     /// <summary>
     /// Full F&O master (NFO + BFO) and MCX commodity instruments from Kite’s daily CSV dumps.

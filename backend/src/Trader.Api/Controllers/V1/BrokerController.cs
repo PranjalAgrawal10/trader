@@ -60,10 +60,33 @@ public sealed class BrokerController : ControllerBase
 
     [Authorize]
     [HttpPost("disconnect")]
-    public async Task<ActionResult<BrokerStatusDto>> Disconnect(CancellationToken ct)
+    public async Task<ActionResult<BrokerStatusDto>> Disconnect([FromQuery] string? broker, CancellationToken ct)
     {
-        var dto = await _broker.DisconnectAsync(User.GetUserId(), ct);
+        var dto = await _broker.DisconnectAsync(User.GetUserId(), broker, ct);
         return Ok(dto);
+    }
+
+    [Authorize]
+    [HttpPost("groww/connect")]
+    public async Task<ActionResult<BrokerStatusDto>> ConnectGroww([FromBody] GrowwConnectRequestDto? body, CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send accessToken, or apiKey with apiSecret/totp to create a Groww token.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.ConnectGrowwAsync(User.GetUserId(), body, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     [Authorize]

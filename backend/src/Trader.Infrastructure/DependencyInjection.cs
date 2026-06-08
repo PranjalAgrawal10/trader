@@ -34,6 +34,7 @@ public static class DependencyInjection
         services.Configure<SmtpOptions>(configuration.GetSection(SmtpOptions.SectionName));
         // Kite ApiKey/ApiSecret/RedirectUrl: environment variables (ZerodhaKite__*) and Development .env — not committed appsettings.
         services.Configure<ZerodhaKiteOptions>(configuration.GetSection(ZerodhaKiteOptions.SectionName));
+        services.Configure<GrowwOptions>(configuration.GetSection(GrowwOptions.SectionName));
         services.Configure<LiveCandlesOptions>(configuration.GetSection(LiveCandlesOptions.SectionName));
         services.Configure<DemoAutoTradeOptions>(configuration.GetSection(DemoAutoTradeOptions.SectionName));
 
@@ -66,10 +67,14 @@ public static class DependencyInjection
                 AutomaticDecompression = DecompressionMethods.All,
             });
         services.AddHttpClient<IGrowwTradingClient, GrowwTradingClient>(client =>
-        {
-            client.BaseAddress = new Uri("https://api.groww.in/v1/");
-            client.Timeout = TimeSpan.FromSeconds(30);
-        });
+            {
+                var groww = configuration.GetSection(GrowwOptions.SectionName).Get<GrowwOptions>() ?? new GrowwOptions();
+                var baseUrl = string.IsNullOrWhiteSpace(groww.ApiBaseUrl) ? "https://api.groww.in/v1/" : groww.ApiBaseUrl.Trim();
+                if (!baseUrl.EndsWith("/", StringComparison.Ordinal))
+                    baseUrl += "/";
+                client.BaseAddress = new Uri(baseUrl);
+                client.Timeout = TimeSpan.FromSeconds(30);
+            });
 
         var provider = configuration["Database:Provider"] ?? "MySQL";
         if (string.Equals(provider, "InMemory", StringComparison.OrdinalIgnoreCase))
