@@ -14,6 +14,8 @@ namespace Trader.Application.Broker;
 
 public sealed class BrokerService : IBrokerService
 {
+    private const string BrokerZerodha = "zerodha";
+    private const string BrokerGroww = "groww";
     private const int ChartZoomMinBars = 1;
     private const int ChartZoomMaxBars = 500_000;
     private const int FavoriteMlThrottleMinMinutes = 1;
@@ -60,6 +62,7 @@ public sealed class BrokerService : IBrokerService
     private readonly IKiteOAuthStateCodec _stateCodec;
     private readonly IKiteSessionExchange _kiteSessionExchange;
     private readonly IKiteInstrumentsClient _kiteInstruments;
+    private readonly IGrowwTradingClient _growwTrading;
     private readonly IKiteFavoriteInstrumentRepository _kiteFavoriteInstruments;
     private readonly IKiteTradingLockInstrumentRepository _kiteTradingLocks;
     private readonly IKiteInstrumentsChartSettingsGateway _kiteChartSettings;
@@ -76,6 +79,7 @@ public sealed class BrokerService : IBrokerService
         IKiteOAuthStateCodec stateCodec,
         IKiteSessionExchange kiteSessionExchange,
         IKiteInstrumentsClient kiteInstruments,
+        IGrowwTradingClient growwTrading,
         IKiteFavoriteInstrumentRepository kiteFavoriteInstruments,
         IKiteTradingLockInstrumentRepository kiteTradingLocks,
         IKiteInstrumentsChartSettingsGateway kiteChartSettings,
@@ -91,6 +95,7 @@ public sealed class BrokerService : IBrokerService
         _stateCodec = stateCodec;
         _kiteSessionExchange = kiteSessionExchange;
         _kiteInstruments = kiteInstruments;
+        _growwTrading = growwTrading;
         _kiteFavoriteInstruments = kiteFavoriteInstruments;
         _kiteTradingLocks = kiteTradingLocks;
         _kiteChartSettings = kiteChartSettings;
@@ -112,6 +117,18 @@ public sealed class BrokerService : IBrokerService
         var provider = snapshot.BrokerProvider;
         var at = snapshot.BrokerConnectedAt;
         return new BrokerStatusDto(!string.IsNullOrEmpty(provider), at, provider);
+    }
+
+    public async Task<IReadOnlyList<BrokerProviderAvailabilityDto>> GetOrderBrokerProvidersAsync(Guid userId, CancellationToken ct = default)
+    {
+        await RequireUserExistsAsync(userId, ct).ConfigureAwait(false);
+        var connected = await _brokerSetup.GetConnectedBrokerProvidersAsync(userId, ct).ConfigureAwait(false);
+        var set = new HashSet<string>(connected.Select(x => x.Trim().ToLowerInvariant()), StringComparer.OrdinalIgnoreCase);
+        return new[]
+        {
+            new BrokerProviderAvailabilityDto(BrokerZerodha, "Zerodha Kite", set.Contains(BrokerZerodha)),
+            new BrokerProviderAvailabilityDto(BrokerGroww, "Groww", set.Contains(BrokerGroww)),
+        };
     }
 
     public Task CompleteSetupAsync(Guid userId, CancellationToken ct = default) =>
@@ -512,6 +529,38 @@ public sealed class BrokerService : IBrokerService
             .ToList();
     }
 
+    public async Task<IReadOnlyList<KiteNetPositionDto>> GetNetPositionsAsync(
+        Guid userId,
+        string? broker,
+        CancellationToken ct = default)
+    {
+        var provider = await ResolveOrderBrokerAsync(userId, broker, ct).ConfigureAwait(false);
+        if (provider == BrokerZerodha)
+            return await GetKiteNetPositionsAsync(userId, ct).ConfigureAwait(false);
+
+        if (provider == BrokerGroww)
+        {
+            var token = await _brokerSetup.GetBrokerAccessTokenAsync(userId, "Groww", ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("Groww is not connected.");
+
+            var fetched = await _growwTrading.FetchPositionsAsync(token, segment: null, ct).ConfigureAwait(false);
+            if (!fetched.Success)
+                throw new InvalidOperationException(fetched.ErrorMessage ?? "Could not load positions from Groww.");
+
+            return fetched.Items
+                .Where(x => x.Quantity != 0)
+                .Select(x => new KiteNetPositionDto(
+                    x.Exchange,
+                    x.TradingSymbol,
+                    x.Product,
+                    x.Quantity))
+                .ToList();
+        }
+
+        throw new InvalidOperationException($"Unsupported broker provider: {provider}.");
+    }
+
     public async Task<KiteOrderActionResultDto> CancelKiteOrderAsync(
         Guid userId,
         string orderId,
@@ -652,6 +701,50 @@ public sealed class BrokerService : IBrokerService
             throw new InvalidOperationException(action.ErrorMessage ?? "Could not place order on Kite.");
 
         return new KiteOrderActionResultDto(action.OrderId ?? "unknown", "place", "Order placement request accepted.");
+    }
+
+    public async Task<KiteOrderActionResultDto> PlaceOrderAsync(
+        Guid userId,
+        KiteOrderPlaceRequestDto body,
+        CancellationToken ct = default)
+    {
+        if (body is null)
+            throw new InvalidOperationException("Request body is required.");
+        if (body.Quantity < 1)
+            throw new InvalidOperationException("quantity must be greater than zero.");
+
+        var provider = await ResolveOrderBrokerAsync(userId, body.Broker, ct).ConfigureAwait(false);
+        if (provider == BrokerZerodha)
+            return await PlaceKiteOrderAsync(userId, body, ct).ConfigureAwait(false);
+
+        if (provider == BrokerGroww)
+        {
+            var token = await _brokerSetup.GetBrokerAccessTokenAsync(userId, "Groww", ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException("Groww is not connected.");
+
+            var segment = NormalizeGrowwSegment(body.Segment, body.Exchange, body.Tradingsymbol);
+            var req = new GrowwOrderCreateRequest(
+                TradingSymbol: NormalizeRequired(body.Tradingsymbol, "tradingsymbol"),
+                Quantity: body.Quantity,
+                Price: NormalizeNullablePrice(body.Price),
+                TriggerPrice: NormalizeNullablePrice(body.TriggerPrice),
+                Validity: NormalizeValidity(body.Validity),
+                Exchange: NormalizeRequired(body.Exchange, "exchange").ToUpperInvariant(),
+                Segment: segment,
+                Product: NormalizeRequired(body.Product, "product").ToUpperInvariant(),
+                OrderType: NormalizeRequired(body.OrderType, "orderType").ToUpperInvariant(),
+                TransactionType: NormalizeRequired(body.TransactionType, "transactionType").ToUpperInvariant(),
+                OrderReferenceId: NormalizeGrowwOrderReference(body.Tag));
+            ValidateOrderTypePayload(req.OrderType, req.Price, req.TriggerPrice);
+
+            var action = await _growwTrading.PlaceOrderAsync(req, token, ct).ConfigureAwait(false);
+            if (!action.Success)
+                throw new InvalidOperationException(action.ErrorMessage ?? "Could not place order on Groww.");
+            return new KiteOrderActionResultDto(action.OrderId ?? "unknown", "place", action.Remark ?? "Order placement request accepted.");
+        }
+
+        throw new InvalidOperationException($"Unsupported broker provider: {provider}.");
     }
 
     /// <summary>Validated composite; cache hit skips Kite + session churn when parallel chart routes share the window.</summary>
@@ -1583,6 +1676,66 @@ public sealed class BrokerService : IBrokerService
         if (string.IsNullOrWhiteSpace(value))
             return "DAY";
         return value.Trim().ToUpperInvariant();
+    }
+
+    private async Task<string> ResolveOrderBrokerAsync(Guid userId, string? requestedBroker, CancellationToken ct)
+    {
+        var providers = await _brokerSetup.GetConnectedBrokerProvidersAsync(userId, ct).ConfigureAwait(false);
+        var normalized = providers
+            .Select(x => x.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalized.Count == 0)
+            throw new InvalidOperationException("No connected broker found. Connect Zerodha or Groww first.");
+
+        var requested = string.IsNullOrWhiteSpace(requestedBroker) ? null : requestedBroker.Trim().ToLowerInvariant();
+        if (requested is not null)
+        {
+            if (!normalized.Contains(requested, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Broker '{requested}' is not connected for this user.");
+            return requested;
+        }
+
+        if (normalized.Contains(BrokerZerodha, StringComparer.OrdinalIgnoreCase))
+            return BrokerZerodha;
+        if (normalized.Contains(BrokerGroww, StringComparer.OrdinalIgnoreCase))
+            return BrokerGroww;
+        return normalized[0]!;
+    }
+
+    private static string NormalizeGrowwSegment(string? explicitSegment, string? exchangeRaw, string? tradingsymbol)
+    {
+        var seg = string.IsNullOrWhiteSpace(explicitSegment) ? null : explicitSegment.Trim().ToUpperInvariant();
+        if (seg is "CASH" or "FNO" or "COMMODITY")
+            return seg;
+
+        var exchange = string.IsNullOrWhiteSpace(exchangeRaw) ? "" : exchangeRaw.Trim().ToUpperInvariant();
+        if (exchange == "MCX")
+            return "COMMODITY";
+        if (exchange is "NFO" or "BFO")
+            return "FNO";
+
+        var ts = string.IsNullOrWhiteSpace(tradingsymbol) ? "" : tradingsymbol.Trim().ToUpperInvariant();
+        if (ts.Contains("FUT", StringComparison.Ordinal) || ts.EndsWith("CE", StringComparison.Ordinal) || ts.EndsWith("PE", StringComparison.Ordinal))
+            return "FNO";
+
+        return "CASH";
+    }
+
+    private static string? NormalizeGrowwOrderReference(string? rawTag)
+    {
+        var t = NormalizeOptional(rawTag);
+        if (t is null)
+            return null;
+
+        var safe = new string(t.Where(ch => char.IsLetterOrDigit(ch) || ch == '-').ToArray());
+        if (safe.Length < 8)
+            return null;
+        if (safe.Length > 20)
+            safe = safe[..20];
+        var hyphenCount = safe.Count(ch => ch == '-');
+        return hyphenCount <= 2 ? safe : new string(safe.Where(ch => ch != '-').Take(20).ToArray());
     }
 
     private static string NormalizeKiteOrderVariety(string? value)

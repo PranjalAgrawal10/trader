@@ -137,10 +137,20 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
 
     public async Task<string?> GetKiteAccessTokenAsync(Guid userId, CancellationToken ct)
     {
+        return await GetBrokerAccessTokenAsync(userId, ZerodhaBrokerName, ct).ConfigureAwait(false);
+    }
+
+    public async Task<string?> GetBrokerAccessTokenAsync(Guid userId, string brokerName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(brokerName))
+            return null;
+
+        var broker = brokerName.Trim();
         var blob = await _db.BrokerAccounts.AsNoTracking()
-            .Where(a => a.UserId == userId && a.BrokerName == ZerodhaBrokerName)
+            .Where(a => a.UserId == userId && a.BrokerName == broker)
             .Select(a => a.AccessTokenProtected)
-            .FirstOrDefaultAsync(ct);
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
 
         if (string.IsNullOrEmpty(blob))
             return null;
@@ -153,5 +163,35 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
         {
             return null;
         }
+    }
+
+    public async Task<IReadOnlyList<string>> GetConnectedBrokerProvidersAsync(Guid userId, CancellationToken ct)
+    {
+        var rows = await _db.BrokerAccounts.AsNoTracking()
+            .Where(a => a.UserId == userId && !string.IsNullOrEmpty(a.AccessTokenProtected))
+            .Select(a => new { a.BrokerName, a.AccessTokenProtected })
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+
+        var list = new List<string>();
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.BrokerName) || string.IsNullOrWhiteSpace(row.AccessTokenProtected))
+                continue;
+            try
+            {
+                var token = _tokens.Unprotect(row.AccessTokenProtected);
+                if (!string.IsNullOrWhiteSpace(token))
+                    list.Add(row.BrokerName.Trim());
+            }
+            catch (CryptographicException)
+            {
+                // ignore invalid rows for provider listing
+            }
+        }
+
+        return list
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 }

@@ -4,6 +4,8 @@ namespace Trader.Application.Broker;
 
 public sealed record BrokerStatusDto(bool Connected, DateTimeOffset? ConnectedAt, string? Provider);
 
+public sealed record BrokerProviderAvailabilityDto(string Key, string Label, bool Connected);
+
 public sealed record KiteLoginUrlDto(string LoginUrl);
 
 /// <summary>
@@ -147,11 +149,13 @@ public sealed class KiteOrderRepeatRequestDto
 
 public sealed class KiteOrderPlaceRequestDto
 {
+    public string? Broker { get; set; }
     public string? Variety { get; set; }
     public string? Exchange { get; set; }
     public string? Tradingsymbol { get; set; }
     public string? TransactionType { get; set; }
     public int Quantity { get; set; }
+    public string? Segment { get; set; }
     public string? Product { get; set; }
     public string? OrderType { get; set; }
     public string? Validity { get; set; }

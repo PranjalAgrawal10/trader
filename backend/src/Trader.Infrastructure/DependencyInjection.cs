@@ -65,6 +65,11 @@ public static class DependencyInjection
             {
                 AutomaticDecompression = DecompressionMethods.All,
             });
+        services.AddHttpClient<IGrowwTradingClient, GrowwTradingClient>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.groww.in/v1/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
 
         var provider = configuration["Database:Provider"] ?? "MySQL";
         if (string.Equals(provider, "InMemory", StringComparison.OrdinalIgnoreCase))

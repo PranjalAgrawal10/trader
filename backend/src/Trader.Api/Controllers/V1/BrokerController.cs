@@ -42,6 +42,14 @@ public sealed class BrokerController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("providers")]
+    public async Task<ActionResult<IReadOnlyList<BrokerProviderAvailabilityDto>>> Providers(CancellationToken ct)
+    {
+        var providers = await _broker.GetOrderBrokerProvidersAsync(User.GetUserId(), ct);
+        return Ok(providers);
+    }
+
+    [Authorize]
     [HttpPost("complete-setup")]
     public async Task<ActionResult<BrokerStatusDto>> CompleteSetup(CancellationToken ct)
     {
@@ -317,6 +325,23 @@ public sealed class BrokerController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("positions/net")]
+    public async Task<ActionResult<IReadOnlyList<KiteNetPositionDto>>> NetPositions(
+        [FromQuery] string? broker,
+        CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetNetPositionsAsync(User.GetUserId(), broker, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
     [HttpGet("kite/scalper-settings")]
     public async Task<ActionResult<ScalperSettingsDto>> GetScalperSettings(CancellationToken ct)
     {
@@ -451,6 +476,31 @@ public sealed class BrokerController : ControllerBase
         try
         {
             var dto = await _broker.PlaceKiteOrderAsync(User.GetUserId(), body, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPost("orders/place")]
+    public async Task<ActionResult<KiteOrderActionResultDto>> PlaceOrder(
+        [FromBody] KiteOrderPlaceRequestDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with optional broker plus symbol, side, quantity, product, orderType and optional price/trigger.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.PlaceOrderAsync(User.GetUserId(), body, ct);
             return Ok(dto);
         }
         catch (InvalidOperationException ex)

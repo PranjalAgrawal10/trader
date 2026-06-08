@@ -12,6 +12,12 @@ public interface IBrokerSetupGateway
 
     /// <summary>Decrypts the stored Kite access token, or null if missing.</summary>
     Task<string?> GetKiteAccessTokenAsync(Guid userId, CancellationToken ct);
+
+    /// <summary>Decrypts the stored broker access token by broker name, or null if missing.</summary>
+    Task<string?> GetBrokerAccessTokenAsync(Guid userId, string brokerName, CancellationToken ct);
+
+    /// <summary>Connected brokers (decryptable token present) for the user.</summary>
+    Task<IReadOnlyList<string>> GetConnectedBrokerProvidersAsync(Guid userId, CancellationToken ct);
 }
 
 public sealed record BrokerSetupSnapshot(Guid UserId, DateTimeOffset? BrokerConnectedAt, string? BrokerProvider);

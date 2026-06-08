@@ -4,6 +4,8 @@ public interface IBrokerService
 {
     Task<BrokerStatusDto> GetStatusAsync(Guid userId, CancellationToken ct = default);
 
+    Task<IReadOnlyList<BrokerProviderAvailabilityDto>> GetOrderBrokerProvidersAsync(Guid userId, CancellationToken ct = default);
+
     /// <summary>Marks broker setup complete without a live broker (demo / placeholder).</summary>
     Task CompleteSetupAsync(Guid userId, CancellationToken ct = default);
 
@@ -76,6 +78,11 @@ public interface IBrokerService
     /// <summary>Current Kite net positions (from <c>GET /portfolio/positions</c> net array).</summary>
     Task<IReadOnlyList<KiteNetPositionDto>> GetKiteNetPositionsAsync(Guid userId, CancellationToken ct = default);
 
+    Task<IReadOnlyList<KiteNetPositionDto>> GetNetPositionsAsync(
+        Guid userId,
+        string? broker,
+        CancellationToken ct = default);
+
     Task<KiteOrderActionResultDto> CancelKiteOrderAsync(
         Guid userId,
         string orderId,
@@ -95,6 +102,11 @@ public interface IBrokerService
         CancellationToken ct = default);
 
     Task<KiteOrderActionResultDto> PlaceKiteOrderAsync(
+        Guid userId,
+        KiteOrderPlaceRequestDto body,
+        CancellationToken ct = default);
+
+    Task<KiteOrderActionResultDto> PlaceOrderAsync(
         Guid userId,
         KiteOrderPlaceRequestDto body,
         CancellationToken ct = default);
