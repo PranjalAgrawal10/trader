@@ -155,7 +155,8 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
             _db.BrokerAccounts.Add(account);
         }
 
-        account.ApiKey = string.IsNullOrWhiteSpace(session.ApiKey) ? null : session.ApiKey.Trim();
+        // Groww API keys can exceed historical BrokerAccounts.ApiKey width; keep only encrypted access token.
+        account.ApiKey = null;
         account.AccessTokenProtected = _tokens.Protect(session.AccessToken);
         account.RefreshTokenProtected = null;
         account.TokenExpiresAt = session.TokenExpiresAt;
