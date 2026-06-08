@@ -488,16 +488,23 @@ export function ScalperPage() {
         return
       }
 
+      const inferredEntrySide = lastEntrySide ?? activeTradeSide
+      if (intent === 'EXIT' && !inferredEntrySide) {
+        setTradeError('No active position side found to exit. Place Buy/Sell first.')
+        return
+      }
+
       const transactionType: 'BUY' | 'SELL' =
         intent === 'EXIT'
-          ? lastEntrySide === 'BUY'
+          ? inferredEntrySide === 'BUY'
             ? 'SELL'
-            : lastEntrySide === 'SELL'
-              ? 'BUY'
-              : 'SELL'
+            : 'BUY'
           : intent
 
-      const effectiveOrderType = overrides?.orderType ?? tradeOrderType
+      const effectiveOrderType =
+        intent === 'EXIT'
+          ? 'MARKET'
+          : (overrides?.orderType ?? tradeOrderType)
       const price = overrides?.price ?? parsePositiveNumber(tradePrice)
       const trigger = overrides?.triggerPrice ?? parsePositiveNumber(tradeTriggerPrice)
       if (effectiveOrderType === 'LIMIT' && price == null) {
@@ -656,6 +663,7 @@ export function ScalperPage() {
       isZerodha,
       isSafeMode,
       lastEntrySide,
+      activeTradeSide,
       safeSellTriggerPoints,
       safeStopLossPoints,
       selected,
