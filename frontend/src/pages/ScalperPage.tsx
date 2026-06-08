@@ -576,6 +576,7 @@ export function ScalperPage() {
             : null
 
         const stopLoss = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
+        const targetTrigger = computedTrigger ?? parsePositiveNumber(tradeTriggerPrice)
         if (intent !== 'EXIT' && stopLoss != null) {
           const protectiveSide = transactionType === 'BUY' ? 'SELL' : 'BUY'
           const slRes = await api.post<KiteOrderActionResultResponse>('/broker/kite/orders/place', {
@@ -593,7 +594,22 @@ export function ScalperPage() {
           notes.push(`SL trigger set (${protectiveSide}) · order ${slRes.data.orderId}`)
         }
 
-        if (computedTrigger != null) {
+        if (intent !== 'EXIT' && targetTrigger != null) {
+          const targetSide = transactionType === 'BUY' ? 'SELL' : 'BUY'
+          const targetRes = await api.post<KiteOrderActionResultResponse>('/broker/kite/orders/place', {
+            variety: 'regular',
+            exchange: selected.exchange,
+            tradingsymbol: selected.tradingsymbol,
+            transactionType: targetSide,
+            quantity,
+            product: tradeProduct,
+            orderType: 'LIMIT',
+            validity: 'DAY',
+            price: targetTrigger,
+            tag: 'scalper-target',
+          })
+          notes.push(`Target set @ ${targetTrigger.toFixed(2)} (${targetSide}) · order ${targetRes.data.orderId}`)
+        } else if (computedTrigger != null) {
           notes.push(`Auto trigger ${computedTrigger.toFixed(2)} (${transactionType === 'BUY' ? 'target up' : 'target down'})`)
         }
 
