@@ -126,7 +126,8 @@ public sealed record KiteOrderUpsertRequest(
     decimal? Price,
     decimal? TriggerPrice,
     int? DisclosedQuantity,
-    string? Tag);
+    string? Tag,
+    int? MarketProtection);
 
 public sealed record KiteOrderListItemDto(
     string OrderId,

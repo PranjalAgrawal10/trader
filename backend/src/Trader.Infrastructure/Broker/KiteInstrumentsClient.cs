@@ -745,6 +745,8 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
             values.Add(new("disclosed_quantity", request.DisclosedQuantity.Value.ToString(CultureInfo.InvariantCulture)));
         if (!string.IsNullOrWhiteSpace(request.Tag))
             values.Add(new("tag", request.Tag.Trim()));
+        if (request.MarketProtection.HasValue)
+            values.Add(new("market_protection", request.MarketProtection.Value.ToString(CultureInfo.InvariantCulture)));
 
         return new FormUrlEncodedContent(values);
     }

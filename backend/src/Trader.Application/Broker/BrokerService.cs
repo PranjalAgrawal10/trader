@@ -544,7 +544,8 @@ public sealed class BrokerService : IBrokerService
             NormalizeNullablePrice(body.Price),
             NormalizeNullablePrice(body.TriggerPrice),
             body.DisclosedQuantity > 0 ? body.DisclosedQuantity : null,
-            NormalizeOptional(body.Tag));
+            NormalizeOptional(body.Tag),
+            NormalizeMarketProtection(NormalizeRequired(body.OrderType, "orderType"), body.MarketProtection));
         ValidateOrderTypePayload(request.OrderType, request.Price, request.TriggerPrice);
 
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
@@ -592,7 +593,8 @@ public sealed class BrokerService : IBrokerService
             NormalizeNullablePrice(source.Price),
             NormalizeNullablePrice(source.TriggerPrice),
             null,
-            NormalizeOptional(source.Tag));
+            NormalizeOptional(source.Tag),
+            NormalizeMarketProtection(NormalizeRequired(source.OrderType, "orderType"), null));
 
         var action = await _kiteInstruments.PlaceOrderAsync(variety, request, apiKey, accessToken, ct).ConfigureAwait(false);
         if (!action.Success)
@@ -623,7 +625,8 @@ public sealed class BrokerService : IBrokerService
             NormalizeNullablePrice(body.Price),
             NormalizeNullablePrice(body.TriggerPrice),
             body.DisclosedQuantity > 0 ? body.DisclosedQuantity : null,
-            NormalizeOptional(body.Tag));
+            NormalizeOptional(body.Tag),
+            NormalizeMarketProtection(NormalizeRequired(body.OrderType, "orderType"), body.MarketProtection));
         ValidateOrderTypePayload(request.OrderType, request.Price, request.TriggerPrice);
 
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
@@ -1569,6 +1572,35 @@ public sealed class BrokerService : IBrokerService
     {
         var v = string.IsNullOrWhiteSpace(value) ? "regular" : value.Trim().ToLowerInvariant();
         return v is "regular" or "amo" or "co" or "bo" ? v : "regular";
+    }
+
+    private static int? NormalizeMarketProtection(string orderTypeRaw, int? requested)
+    {
+        var orderType = orderTypeRaw.Trim().ToUpperInvariant();
+        var isMarketLike = orderType is "MARKET" or "SL-M";
+
+        // Kite now rejects unprotected API MARKET/SL-M orders; default to auto protection.
+        if (isMarketLike)
+        {
+            if (!requested.HasValue || requested.Value == 0)
+                return -1;
+
+            if (requested.Value == -1)
+                return -1;
+
+            if (requested.Value is >= 1 and <= 100)
+                return requested.Value;
+
+            throw new InvalidOperationException("marketProtection must be -1 (auto) or 1..100 for MARKET/SL-M orders.");
+        }
+
+        if (!requested.HasValue || requested.Value == 0)
+            return null;
+
+        if (requested.Value == -1 || requested.Value is >= 1 and <= 100)
+            return requested.Value;
+
+        throw new InvalidOperationException("marketProtection must be 0, -1, or 1..100.");
     }
 
     private static void ValidateOrderTypePayload(string orderTypeRaw, decimal? price, decimal? triggerPrice)

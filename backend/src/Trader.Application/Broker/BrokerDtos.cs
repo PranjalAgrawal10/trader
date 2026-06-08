@@ -131,6 +131,7 @@ public sealed class KiteOrderModifyRequestDto
     public decimal? TriggerPrice { get; set; }
     public int? DisclosedQuantity { get; set; }
     public string? Tag { get; set; }
+    public int? MarketProtection { get; set; }
 }
 
 public sealed class KiteOrderRepeatRequestDto
@@ -152,6 +153,7 @@ public sealed class KiteOrderPlaceRequestDto
     public decimal? TriggerPrice { get; set; }
     public int? DisclosedQuantity { get; set; }
     public string? Tag { get; set; }
+    public int? MarketProtection { get; set; }
 }
 
 public sealed record ScalperSettingsDto(
