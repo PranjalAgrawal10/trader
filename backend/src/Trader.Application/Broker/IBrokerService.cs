@@ -19,6 +19,8 @@ public interface IBrokerService
 
     Task<BrokerStatusDto> ConnectGrowwAsync(Guid userId, GrowwConnectRequestDto body, CancellationToken ct = default);
 
+    Task<BrokerStatusDto> SetActiveBrokerAsync(Guid userId, string broker, CancellationToken ct = default);
+
     /// <summary>Clears stored broker session and onboarding completion for the user.</summary>
     Task<BrokerStatusDto> DisconnectAsync(Guid userId, string? broker = null, CancellationToken ct = default);
 

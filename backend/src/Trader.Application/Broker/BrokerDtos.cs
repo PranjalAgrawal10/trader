@@ -16,6 +16,11 @@ public sealed class GrowwConnectRequestDto
     public string? Totp { get; set; }
 }
 
+public sealed class BrokerSelectionPutDto
+{
+    public string? Broker { get; set; }
+}
+
 /// <summary>
 /// <see cref="LoginUrl"/> goes to the client; <see cref="PendingOAuthStateKey"/> mirrors the OAuth <c>state</c> query (short server-side key) for the HttpOnly cookie fallback.
 /// </summary>

@@ -223,6 +223,15 @@ public sealed class BrokerService : IBrokerService
         return await GetStatusAsync(userId, ct).ConfigureAwait(false);
     }
 
+    public async Task<BrokerStatusDto> SetActiveBrokerAsync(Guid userId, string broker, CancellationToken ct = default)
+    {
+        var normalized = NormalizeRequired(broker, "broker").ToLowerInvariant();
+        var ok = await _brokerSetup.SetActiveBrokerAsync(userId, normalized, ct).ConfigureAwait(false);
+        if (!ok)
+            throw new InvalidOperationException($"Broker '{normalized}' is not connected for this user.");
+        return await GetStatusAsync(userId, ct).ConfigureAwait(false);
+    }
+
     public async Task<BrokerStatusDto> DisconnectAsync(Guid userId, string? broker = null, CancellationToken ct = default)
     {
         var normalized = string.IsNullOrWhiteSpace(broker) ? null : broker.Trim();
@@ -1743,10 +1752,14 @@ public sealed class BrokerService : IBrokerService
             return requested;
         }
 
-        if (normalized.Contains(BrokerZerodha, StringComparer.OrdinalIgnoreCase))
-            return BrokerZerodha;
-        if (normalized.Contains(BrokerGroww, StringComparer.OrdinalIgnoreCase))
-            return BrokerGroww;
+        var status = await _brokerSetup.GetSnapshotAsync(userId, ct).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(status?.BrokerProvider))
+        {
+            var active = status.BrokerProvider.Trim().ToLowerInvariant();
+            if (normalized.Contains(active, StringComparer.OrdinalIgnoreCase))
+                return active;
+        }
+
         return normalized[0]!;
     }
 

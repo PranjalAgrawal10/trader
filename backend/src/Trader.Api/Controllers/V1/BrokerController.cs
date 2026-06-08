@@ -90,6 +90,29 @@ public sealed class BrokerController : ControllerBase
     }
 
     [Authorize]
+    [HttpPut("active-provider")]
+    public async Task<ActionResult<BrokerStatusDto>> SetActiveProvider([FromBody] BrokerSelectionPutDto? body, CancellationToken ct)
+    {
+        if (body is null || string.IsNullOrWhiteSpace(body.Broker))
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with broker key (e.g. zerodha or groww).",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.SetActiveBrokerAsync(User.GetUserId(), body.Broker, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
     [HttpGet("kite/instruments/fno-commodities")]
     public async Task<ActionResult<KiteFnoCommodityListsDto>> KiteFnoCommodityInstruments(CancellationToken ct)
     {

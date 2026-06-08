@@ -10,6 +10,7 @@ public interface IBrokerSetupGateway
     Task PersistKiteSessionAsync(Guid userId, BrokerKitePersistRequest session, CancellationToken ct);
     Task PersistGrowwSessionAsync(Guid userId, BrokerGrowwPersistRequest session, CancellationToken ct);
     Task DisconnectBrokerAsync(Guid userId, string? brokerName, CancellationToken ct);
+    Task<bool> SetActiveBrokerAsync(Guid userId, string brokerName, CancellationToken ct);
 
     /// <summary>Decrypts the stored Kite access token, or null if missing.</summary>
     Task<string?> GetKiteAccessTokenAsync(Guid userId, CancellationToken ct);

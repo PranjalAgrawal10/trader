@@ -178,6 +178,44 @@ public sealed class BrokerSetupGateway : IBrokerSetupGateway
         }
     }
 
+    public async Task<bool> SetActiveBrokerAsync(Guid userId, string brokerName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(brokerName))
+            return false;
+
+        var broker = brokerName.Trim().ToLowerInvariant();
+        var rows = await _db.BrokerAccounts
+            .Where(a => a.UserId == userId && !string.IsNullOrEmpty(a.AccessTokenProtected))
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (rows.Count == 0)
+            return false;
+
+        BrokerAccount? selected = null;
+        foreach (var row in rows)
+        {
+            try
+            {
+                var token = _tokens.Unprotect(row.AccessTokenProtected!);
+                if (string.IsNullOrWhiteSpace(token))
+                    continue;
+                if (row.BrokerName.Trim().ToLowerInvariant() == broker)
+                    selected = row;
+            }
+            catch (CryptographicException)
+            {
+                // ignore stale encrypted rows here; status cleanup handles them.
+            }
+        }
+
+        if (selected is null)
+            return false;
+
+        selected.ConnectedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
+    }
+
     public async Task<string?> GetKiteAccessTokenAsync(Guid userId, CancellationToken ct)
     {
         return await GetBrokerAccessTokenAsync(userId, ZerodhaBrokerName, ct).ConfigureAwait(false);

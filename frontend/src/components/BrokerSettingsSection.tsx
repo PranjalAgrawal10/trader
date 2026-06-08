@@ -207,6 +207,8 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
   const selectedProviderMeta = providers.find((p) => p.key.toLowerCase() === selectedProvider) ?? null
   const selectedIsConnected = selectedProviderMeta?.connected ?? false
   const selectedIsGroww = selectedProvider === 'groww'
+  const activeProviderKey = (provider ?? '').trim().toLowerCase()
+  const selectedIsLocked = selectedProvider === activeProviderKey && selectedIsConnected
 
   const disconnectBroker = async () => {
     setBusy(true)
@@ -217,6 +219,28 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
       })
       await loadBroker()
       await loadProviders()
+    } catch (err) {
+      setError(problemDetail(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const lockBrokerForTrading = async () => {
+    if (!selectedProvider || !selectedIsConnected) {
+      setError('Connect this broker first, then lock it for trading.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await api.put('/broker/active-provider', { broker: selectedProvider })
+      await loadBroker()
+      await loadProviders()
+      setKiteBanner({
+        kind: 'success',
+        text: `${selectedProviderMeta?.label ?? selectedProvider} is now locked for trading.`,
+      })
     } catch (err) {
       setError(problemDetail(err))
     } finally {
@@ -302,6 +326,7 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
                         >
                           {p.label}{' '}
                           {p.connected ? <Badge bg="success" pill>connected</Badge> : null}
+                          {activeProviderKey === key && p.connected ? <Badge bg="primary" pill className="ms-1">locked</Badge> : null}
                         </Button>
                       )
                     })}
@@ -387,6 +412,13 @@ export function BrokerSettingsSection({ brokerSetupRequired, twoFaEpoch = 0 }: P
                   </Button>
                   {isZerodha || selectedIsConnected ? (
                     <>
+                      <Button
+                        variant={selectedIsLocked ? 'primary' : 'outline-primary'}
+                        disabled={busy || gated || !selectedIsConnected}
+                        onClick={() => void lockBrokerForTrading()}
+                      >
+                        {selectedIsLocked ? 'Locked for trading' : 'Lock for trading'}
+                      </Button>
                       <Button
                         variant="outline-secondary"
                         disabled={busy || gated}
