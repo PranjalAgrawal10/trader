@@ -202,6 +202,7 @@ public sealed class GrowwTradingClient : IGrowwTradingClient
         CancellationToken ct)
     {
         using var http = new HttpRequestMessage(HttpMethod.Post, "token/api/access");
+        http.Headers.TryAddWithoutValidation(ApiVersionHeader, ApiVersionValue);
         http.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
         http.Content = JsonContent.Create(body);
 
@@ -220,7 +221,13 @@ public sealed class GrowwTradingClient : IGrowwTradingClient
         try
         {
             using var doc = JsonDocument.Parse(payload);
-            var token = doc.RootElement.TryGetProperty("token", out var tok) ? tok.ToString() : null;
+            var token = doc.RootElement.TryGetProperty("token", out var tok)
+                ? tok.ToString()
+                : doc.RootElement.TryGetProperty("payload", out var payloadObj)
+                    && payloadObj.ValueKind == JsonValueKind.Object
+                    && payloadObj.TryGetProperty("token", out var nestedTok)
+                        ? nestedTok.ToString()
+                        : null;
             if (string.IsNullOrWhiteSpace(token))
             {
                 return new GrowwTokenAccessResult(

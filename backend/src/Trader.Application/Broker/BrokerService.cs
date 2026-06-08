@@ -212,10 +212,6 @@ public sealed class BrokerService : IBrokerService
             accessToken = generated.AccessToken.Trim();
         }
 
-        var probe = await _growwTrading.FetchPositionsAsync(accessToken, segment: null, ct).ConfigureAwait(false);
-        if (!probe.Success)
-            throw new InvalidOperationException(probe.ErrorMessage ?? "Groww token is invalid or expired.");
-
         await _brokerSetup.PersistGrowwSessionAsync(
             userId,
             new BrokerGrowwPersistRequest(
