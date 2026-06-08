@@ -109,6 +109,12 @@ public sealed record KiteOrderBookItemDto(
 
 public sealed record KiteOrderBookDto(IReadOnlyList<KiteOrderBookItemDto> Items);
 
+public sealed record KiteNetPositionDto(
+    string Exchange,
+    string Tradingsymbol,
+    string Product,
+    int Quantity);
+
 public sealed record KiteOrderActionResultDto(string OrderId, string Action, string Message);
 
 public sealed class KiteOrderCancelRequestDto

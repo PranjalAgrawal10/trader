@@ -112,6 +112,13 @@ interface KiteOrderActionResultResponse {
   message: string
 }
 
+interface KiteNetPositionResponse {
+  exchange: string
+  tradingsymbol: string
+  product: string
+  quantity: number
+}
+
 interface ScalperSettingsResponse {
   interval: ScalperInterval
   rangePreset: ScalperRange
@@ -482,24 +489,38 @@ export function ScalperPage() {
     ) => {
       if (!selected || !isZerodha) return
       const qtyN = Number(tradeQty)
-      const quantity = Number.isFinite(qtyN) ? Math.max(1, Math.floor(qtyN)) : 0
+      let quantity = Number.isFinite(qtyN) ? Math.max(1, Math.floor(qtyN)) : 0
       if (quantity < 1) {
         setTradeError('Quantity must be at least 1.')
         return
       }
+      let resolvedProduct: 'MIS' | 'NRML' = tradeProduct
+      let transactionType: 'BUY' | 'SELL' = intent === 'SELL' ? 'SELL' : 'BUY'
 
-      const inferredEntrySide = lastEntrySide ?? activeTradeSide
-      if (intent === 'EXIT' && !inferredEntrySide) {
-        setTradeError('No active position side found to exit. Place Buy/Sell first.')
-        return
+      if (intent === 'EXIT') {
+        const { data } = await api.get<KiteNetPositionResponse[]>('/broker/kite/positions/net')
+        const positionRows = (data ?? []).filter(
+          (p) =>
+            p.exchange?.toUpperCase() === selected.exchange.toUpperCase() &&
+            p.tradingsymbol?.toUpperCase() === selected.tradingsymbol.toUpperCase() &&
+            Number.isFinite(p.quantity) &&
+            p.quantity !== 0,
+        )
+        const preferred =
+          positionRows.find((p) => p.product?.toUpperCase() === tradeProduct.toUpperCase()) ??
+          positionRows[0] ??
+          null
+        if (!preferred) {
+          setTradeError('No open net position found in Kite for this instrument to exit.')
+          return
+        }
+
+        transactionType = preferred.quantity > 0 ? 'SELL' : 'BUY'
+        quantity = Math.max(1, Math.abs(Math.trunc(preferred.quantity)))
+        resolvedProduct = preferred.product?.toUpperCase() === 'NRML' ? 'NRML' : 'MIS'
+      } else {
+        transactionType = intent
       }
-
-      const transactionType: 'BUY' | 'SELL' =
-        intent === 'EXIT'
-          ? inferredEntrySide === 'BUY'
-            ? 'SELL'
-            : 'BUY'
-          : intent
 
       const effectiveOrderType =
         intent === 'EXIT'
@@ -539,7 +560,7 @@ export function ScalperPage() {
           tradingsymbol: selected.tradingsymbol,
           transactionType,
           quantity,
-          product: tradeProduct,
+          product: resolvedProduct,
           orderType: effectiveOrderType,
           validity: 'DAY',
           price: normalizedPrice,
@@ -592,7 +613,7 @@ export function ScalperPage() {
             tradingsymbol: selected.tradingsymbol,
             transactionType: protectiveSide,
             quantity,
-            product: tradeProduct,
+            product: resolvedProduct,
             orderType: 'SL-M',
             validity: 'DAY',
             triggerPrice: stopLoss,
@@ -609,7 +630,7 @@ export function ScalperPage() {
             tradingsymbol: selected.tradingsymbol,
             transactionType: targetSide,
             quantity,
-            product: tradeProduct,
+            product: resolvedProduct,
             orderType: 'LIMIT',
             validity: 'DAY',
             price: targetTrigger,

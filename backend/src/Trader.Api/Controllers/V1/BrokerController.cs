@@ -300,6 +300,22 @@ public sealed class BrokerController : ControllerBase
         }
     }
 
+    /// <summary>Current Kite net positions (non-zero quantity rows from positions/net).</summary>
+    [Authorize]
+    [HttpGet("kite/positions/net")]
+    public async Task<ActionResult<IReadOnlyList<KiteNetPositionDto>>> KiteNetPositions(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetKiteNetPositionsAsync(User.GetUserId(), ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
     [Authorize]
     [HttpGet("kite/scalper-settings")]
     public async Task<ActionResult<ScalperSettingsDto>> GetScalperSettings(CancellationToken ct)

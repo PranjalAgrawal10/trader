@@ -329,6 +329,90 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         }
     }
 
+    public async Task<KitePositionsFetchResult> FetchPositionsAsync(
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "portfolio/positions");
+        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+
+        using var response = await _http.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for positions.";
+            return new KitePositionsFetchResult(false, msg, Array.Empty<KitePositionNetItemDto>());
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("status", out var st)
+                || !string.Equals(st.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+            {
+                var msg = TryParseKiteMessage(body) ?? "Unexpected positions response from Kite.";
+                return new KitePositionsFetchResult(false, msg, Array.Empty<KitePositionNetItemDto>());
+            }
+
+            if (!doc.RootElement.TryGetProperty("data", out var data)
+                || data.ValueKind != JsonValueKind.Object
+                || !data.TryGetProperty("net", out var net)
+                || net.ValueKind != JsonValueKind.Array)
+            {
+                return new KitePositionsFetchResult(true, null, Array.Empty<KitePositionNetItemDto>());
+            }
+
+            var items = new List<KitePositionNetItemDto>();
+            foreach (var row in net.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                string? ReadString(string key) =>
+                    row.TryGetProperty(key, out var v) && v.ValueKind != JsonValueKind.Null
+                        ? v.ToString()
+                        : null;
+
+                int ReadInt(string key)
+                {
+                    if (!row.TryGetProperty(key, out var v) || v.ValueKind == JsonValueKind.Null)
+                        return 0;
+                    if (v.ValueKind == JsonValueKind.Number)
+                    {
+                        if (v.TryGetInt32(out var i)) return i;
+                        if (v.TryGetInt64(out var l)) return (int)l;
+                        return (int)v.GetDouble();
+                    }
+
+                    return int.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                        ? parsed
+                        : 0;
+                }
+
+                var exchange = ReadString("exchange")?.Trim() ?? string.Empty;
+                var tradingsymbol = ReadString("tradingsymbol")?.Trim() ?? string.Empty;
+                var product = ReadString("product")?.Trim() ?? string.Empty;
+                if (exchange.Length == 0 || tradingsymbol.Length == 0 || product.Length == 0)
+                    continue;
+
+                items.Add(new KitePositionNetItemDto(
+                    exchange,
+                    tradingsymbol,
+                    product,
+                    ReadInt("quantity")));
+            }
+
+            return new KitePositionsFetchResult(true, null, items);
+        }
+        catch (JsonException)
+        {
+            return new KitePositionsFetchResult(false, "Could not parse Kite positions response.", Array.Empty<KitePositionNetItemDto>());
+        }
+    }
+
     public Task<KiteOrderActionResult> CancelOrderAsync(
         string variety,
         string orderId,

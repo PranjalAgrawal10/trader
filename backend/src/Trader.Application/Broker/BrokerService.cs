@@ -495,6 +495,23 @@ public sealed class BrokerService : IBrokerService
         return new KiteOrderBookDto(items);
     }
 
+    public async Task<IReadOnlyList<KiteNetPositionDto>> GetKiteNetPositionsAsync(Guid userId, CancellationToken ct = default)
+    {
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var fetched = await _kiteInstruments.FetchPositionsAsync(apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!fetched.Success)
+            throw new InvalidOperationException(fetched.ErrorMessage ?? "Could not load positions from Kite.");
+
+        return fetched.NetItems
+            .Where(x => x.Quantity != 0)
+            .Select(x => new KiteNetPositionDto(
+                x.Exchange,
+                x.Tradingsymbol,
+                x.Product,
+                x.Quantity))
+            .ToList();
+    }
+
     public async Task<KiteOrderActionResultDto> CancelKiteOrderAsync(
         Guid userId,
         string orderId,

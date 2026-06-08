@@ -73,6 +73,9 @@ public interface IBrokerService
     /// <summary>Kite orderbook for the day (<c>GET /orders</c>), including all interim/final statuses.</summary>
     Task<KiteOrderBookDto> GetKiteOrdersAsync(Guid userId, CancellationToken ct = default);
 
+    /// <summary>Current Kite net positions (from <c>GET /portfolio/positions</c> net array).</summary>
+    Task<IReadOnlyList<KiteNetPositionDto>> GetKiteNetPositionsAsync(Guid userId, CancellationToken ct = default);
+
     Task<KiteOrderActionResultDto> CancelKiteOrderAsync(
         Guid userId,
         string orderId,

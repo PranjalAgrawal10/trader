@@ -59,6 +59,12 @@ public interface IKiteInstrumentsClient
         string accessToken,
         CancellationToken ct = default);
 
+    /// <summary>Kite <c>GET /portfolio/positions</c> — current net/day positions.</summary>
+    Task<KitePositionsFetchResult> FetchPositionsAsync(
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
+
     /// <summary>Kite <c>DELETE /orders/{variety}/{order_id}</c>.</summary>
     Task<KiteOrderActionResult> CancelOrderAsync(
         string variety,
@@ -110,6 +116,11 @@ public sealed record KiteOrdersFetchResult(
     string? ErrorMessage,
     IReadOnlyList<KiteOrderListItemDto> Items);
 
+public sealed record KitePositionsFetchResult(
+    bool Success,
+    string? ErrorMessage,
+    IReadOnlyList<KitePositionNetItemDto> NetItems);
+
 public sealed record KiteOrderActionResult(
     bool Success,
     string? ErrorMessage,
@@ -128,6 +139,12 @@ public sealed record KiteOrderUpsertRequest(
     int? DisclosedQuantity,
     string? Tag,
     int? MarketProtection);
+
+public sealed record KitePositionNetItemDto(
+    string Exchange,
+    string Tradingsymbol,
+    string Product,
+    int Quantity);
 
 public sealed record KiteOrderListItemDto(
     string OrderId,
