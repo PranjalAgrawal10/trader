@@ -19,7 +19,7 @@ export function useLiveMarketTick(instrumentToken: string | null, enabled: boole
     }
 
     const token = instrumentToken.trim()
-    const conn = createMarketHubConnection()
+    let conn = createMarketHubConnection()
 
     const onTicks = (batch: MarketTickBatchItem[]) => {
       const want = Number(token)
@@ -33,12 +33,11 @@ export function useLiveMarketTick(instrumentToken: string | null, enabled: boole
       }
     }
 
-    conn.on('ticks', onTicks)
-
     let cancelled = false
     ;(async () => {
       try {
-        await startMarketHub(conn)
+        conn = await startMarketHub(conn)
+        conn.on('ticks', onTicks)
         if (cancelled) return
         await conn.invoke('SubscribeInstrument', token)
       } catch {
