@@ -263,12 +263,26 @@ function pickNearestFutureExpiry(options: KiteInstrumentRow[]): string | null {
   return anyMs.length > 0 ? new Date(anyMs[0]!).toISOString() : null
 }
 
+function listDistinctExpiries(options: KiteInstrumentRow[]): string[] {
+  const byMs = new Set<number>()
+  for (const row of options) {
+    const ms = parseExpiryIsoToMs(row.expiry)
+    if (ms != null) byMs.add(ms)
+  }
+  return [...byMs].sort((a, b) => a - b).map((ms) => new Date(ms).toISOString())
+}
+
 function pickAtmLegs(
   options: KiteInstrumentRow[],
   spotLtp: number,
+  preferredExpiryIso?: string | null,
 ): { expiry: string | null; strike: number | null; ce: KiteInstrumentRow | null; pe: KiteInstrumentRow | null } {
   if (!Number.isFinite(spotLtp) || options.length === 0) return { expiry: null, strike: null, ce: null, pe: null }
-  const expiryIso = pickNearestFutureExpiry(options)
+  const preferredMs = parseExpiryIsoToMs(preferredExpiryIso ?? null)
+  const hasPreferred =
+    preferredMs != null &&
+    options.some((r) => parseExpiryIsoToMs(r.expiry) === preferredMs)
+  const expiryIso = hasPreferred ? new Date(preferredMs!).toISOString() : pickNearestFutureExpiry(options)
   if (!expiryIso) return { expiry: null, strike: null, ce: null, pe: null }
   const expiryMs = Date.parse(expiryIso)
   const bucket = options.filter((r) => parseExpiryIsoToMs(r.expiry) === expiryMs && r.strike != null)
@@ -346,6 +360,7 @@ export function ScalperPage() {
   const [atmLastUpdatedAt, setAtmLastUpdatedAt] = useState<string | null>(null)
   const [atmSpotRow, setAtmSpotRow] = useState<KiteInstrumentRow | null>(null)
   const [atmOptionRows, setAtmOptionRows] = useState<KiteInstrumentRow[]>([])
+  const [atmSelectedExpiryIso, setAtmSelectedExpiryIso] = useState<string>('')
   const [atmSnapshot, setAtmSnapshot] = useState<ScalperAtmSnapshot>(EMPTY_ATM_SNAPSHOT)
   const [atmChainStrikesAboveAtm, setAtmChainStrikesAboveAtm] = useState(3)
   const [atmChainStrikesBelowAtm, setAtmChainStrikesBelowAtm] = useState(3)
@@ -785,7 +800,11 @@ export function ScalperPage() {
 
       const previous = atmSnapshot
       const spotQuote = await fetchQuote(atmSpotRow)
-      const atm = pickAtmLegs(atmOptionRows, spotQuote?.lastPrice ?? previous.spotQuote?.lastPrice ?? Number.NaN)
+      const atm = pickAtmLegs(
+        atmOptionRows,
+        spotQuote?.lastPrice ?? previous.spotQuote?.lastPrice ?? Number.NaN,
+        atmSelectedExpiryIso || null,
+      )
       const chainRowsSeed = buildAtmChainRows(
         atmOptionRows,
         atm.expiry,
@@ -856,6 +875,7 @@ export function ScalperPage() {
     atmChainStrikesAboveAtm,
     atmChainStrikesBelowAtm,
     atmOptionRows,
+    atmSelectedExpiryIso,
     atmSnapshot,
     atmSpotRow,
     atmTarget.key,
@@ -886,7 +906,23 @@ export function ScalperPage() {
   useEffect(() => {
     setAtmChainStrikesAboveAtm(3)
     setAtmChainStrikesBelowAtm(3)
+    setAtmSelectedExpiryIso('')
   }, [atmTarget.key])
+
+  useEffect(() => {
+    if (atmOptionRows.length === 0) {
+      if (atmSelectedExpiryIso) setAtmSelectedExpiryIso('')
+      return
+    }
+    const expiries = listDistinctExpiries(atmOptionRows)
+    if (expiries.length === 0) {
+      if (atmSelectedExpiryIso) setAtmSelectedExpiryIso('')
+      return
+    }
+    if (atmSelectedExpiryIso && expiries.includes(atmSelectedExpiryIso)) return
+    const nearest = pickNearestFutureExpiry(atmOptionRows) ?? expiries[0] ?? ''
+    if (nearest && nearest !== atmSelectedExpiryIso) setAtmSelectedExpiryIso(nearest)
+  }, [atmOptionRows, atmSelectedExpiryIso])
 
   useEffect(() => {
     const cached = loadScalperAtmFromCache(atmTarget.key)
@@ -1023,6 +1059,8 @@ export function ScalperPage() {
       peQuote: row.peRow ? (quoteByToken.get(row.peRow.instrumentToken) ?? null) : null,
     }))
   }, [atmChainStrikesAboveAtm, atmChainStrikesBelowAtm, atmOptionRows, atmSnapshot])
+
+  const atmExpiryOptions = useMemo(() => listDistinctExpiries(atmOptionRows), [atmOptionRows])
 
   useEffect(() => {
     if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
@@ -1390,6 +1428,24 @@ export function ScalperPage() {
                                 {t.label}
                               </option>
                             ))}
+                          </Form.Select>
+                          <Form.Select
+                            size="sm"
+                            value={atmSelectedExpiryIso}
+                            style={{ width: '11rem' }}
+                            onChange={(e) => setAtmSelectedExpiryIso(e.target.value)}
+                            aria-label="Scalper ATM expiry"
+                            disabled={atmExpiryOptions.length === 0}
+                          >
+                            {atmExpiryOptions.length === 0 ? (
+                              <option value="">No expiry</option>
+                            ) : (
+                              atmExpiryOptions.map((iso) => (
+                                <option key={`atm-exp-${iso}`} value={iso}>
+                                  {new Date(iso).toLocaleDateString()}
+                                </option>
+                              ))
+                            )}
                           </Form.Select>
                         </div>
                         <Button
