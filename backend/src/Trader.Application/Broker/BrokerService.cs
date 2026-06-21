@@ -758,6 +758,95 @@ public sealed class BrokerService : IBrokerService
         return new KiteOrderActionResultDto(action.OrderId ?? "unknown", "place", "Order placement request accepted.");
     }
 
+    public async Task<KiteGttActionResultDto> CreateKiteGttOcoAsync(
+        Guid userId,
+        KiteGttCreateRequestDto body,
+        CancellationToken ct = default)
+    {
+        if (body is null)
+            throw new InvalidOperationException("Request body is required.");
+        if (body.Quantity < 1)
+            throw new InvalidOperationException("quantity must be greater than zero.");
+
+        var exchange = NormalizeRequired(body.Exchange, "exchange").ToUpperInvariant();
+        var tradingsymbol = NormalizeRequired(body.Tradingsymbol, "tradingsymbol");
+        var entrySide = NormalizeRequired(body.EntryTransactionType, "entryTransactionType").ToUpperInvariant();
+        if (entrySide is not ("BUY" or "SELL"))
+            throw new InvalidOperationException("entryTransactionType must be BUY or SELL.");
+
+        var product = NormalizeRequired(body.Product, "product").ToUpperInvariant();
+        var stopPct = body.StopLossPercent > 0 ? body.StopLossPercent : 5m;
+        var targetPct = body.TriggerPercent > 0 ? body.TriggerPercent : 5m;
+
+        var reference = NormalizeNullablePrice(body.ReferencePrice);
+        var lastPrice = NormalizeNullablePrice(body.LastPrice);
+        if (reference is null or <= 0)
+        {
+            if (lastPrice is null or <= 0)
+            {
+                var quote = await GetKiteInstrumentLiveQuoteAsync(userId, exchange, tradingsymbol, ct).ConfigureAwait(false);
+                lastPrice = quote.LastPrice;
+                reference = quote.LastPrice;
+            }
+            else
+            {
+                reference = lastPrice;
+            }
+        }
+        else if (lastPrice is null or <= 0)
+        {
+            lastPrice = reference;
+        }
+
+        var stopOverride = NormalizeNullablePrice(body.StopLossPrice);
+        var targetOverride = NormalizeNullablePrice(body.TriggerPrice);
+        var (stopLoss, target, exitSide) = ComputeGttOcoLegPrices(
+            entrySide,
+            reference.Value,
+            stopOverride,
+            targetOverride,
+            stopPct,
+            targetPct);
+
+        if (stopLoss <= 0 || target <= 0)
+            throw new InvalidOperationException("Stop-loss and target prices must be greater than zero.");
+        if (entrySide == "BUY" && stopLoss >= target)
+            throw new InvalidOperationException("For a BUY entry, stop-loss must be below the target price.");
+        if (entrySide == "SELL" && stopLoss <= target)
+            throw new InvalidOperationException("For a SELL entry, stop-loss must be above the target price.");
+
+        var lowerTrigger = stopLoss;
+        var upperTrigger = target;
+        if (entrySide == "SELL")
+        {
+            lowerTrigger = target;
+            upperTrigger = stopLoss;
+        }
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var gttRequest = new KiteGttOcoRequest(
+            exchange,
+            tradingsymbol,
+            lastPrice.Value,
+            lowerTrigger,
+            upperTrigger,
+            exitSide,
+            body.Quantity,
+            product,
+            NormalizeOptional(body.Tag));
+
+        var action = await _kiteInstruments.PlaceGttOcoAsync(gttRequest, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!action.Success)
+            throw new InvalidOperationException(action.ErrorMessage ?? "Could not place GTT on Kite.");
+
+        return new KiteGttActionResultDto(
+            action.TriggerId ?? "unknown",
+            "gtt-oco",
+            $"GTT OCO placed (SL {stopLoss:0.##}, target {target:0.##}).",
+            stopLoss,
+            target);
+    }
+
     public async Task<KiteOrderActionResultDto> PlaceOrderAsync(
         Guid userId,
         KiteOrderPlaceRequestDto body,
@@ -1831,6 +1920,34 @@ public sealed class BrokerService : IBrokerService
 
         throw new InvalidOperationException("marketProtection must be 0, -1, or 1..100.");
     }
+
+    private static (decimal StopLoss, decimal Target, string ExitSide) ComputeGttOcoLegPrices(
+        string entrySide,
+        decimal referencePrice,
+        decimal? stopOverride,
+        decimal? targetOverride,
+        decimal stopLossPercent,
+        decimal targetPercent)
+    {
+        if (string.Equals(entrySide, "BUY", StringComparison.OrdinalIgnoreCase))
+        {
+            var stop = stopOverride ?? RoundGttPrice(referencePrice * (1m - stopLossPercent / 100m));
+            var target = targetOverride ?? RoundGttPrice(referencePrice * (1m + targetPercent / 100m));
+            return (stop, target, "SELL");
+        }
+
+        if (string.Equals(entrySide, "SELL", StringComparison.OrdinalIgnoreCase))
+        {
+            var stop = stopOverride ?? RoundGttPrice(referencePrice * (1m + stopLossPercent / 100m));
+            var target = targetOverride ?? RoundGttPrice(referencePrice * (1m - targetPercent / 100m));
+            return (stop, target, "BUY");
+        }
+
+        throw new InvalidOperationException("entryTransactionType must be BUY or SELL.");
+    }
+
+    private static decimal RoundGttPrice(decimal value) =>
+        Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
     private static void ValidateOrderTypePayload(string orderTypeRaw, decimal? price, decimal? triggerPrice)
     {

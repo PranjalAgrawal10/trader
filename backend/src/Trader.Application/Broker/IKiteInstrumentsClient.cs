@@ -90,6 +90,13 @@ public interface IKiteInstrumentsClient
         string apiKey,
         string accessToken,
         CancellationToken ct = default);
+
+    /// <summary>Kite <c>POST /gtt/triggers</c> — two-leg OCO (stop-loss + target).</summary>
+    Task<KiteGttActionResult> PlaceGttOcoAsync(
+        KiteGttOcoRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
 }
 
 public sealed record KiteQuoteOhlcFetchResult(
@@ -125,6 +132,22 @@ public sealed record KiteOrderActionResult(
     bool Success,
     string? ErrorMessage,
     string? OrderId);
+
+public sealed record KiteGttOcoRequest(
+    string Exchange,
+    string Tradingsymbol,
+    decimal LastPrice,
+    decimal LowerTriggerPrice,
+    decimal UpperTriggerPrice,
+    string ExitTransactionType,
+    int Quantity,
+    string Product,
+    string? Tag);
+
+public sealed record KiteGttActionResult(
+    bool Success,
+    string? ErrorMessage,
+    string? TriggerId);
 
 public sealed record KiteOrderUpsertRequest(
     string Exchange,

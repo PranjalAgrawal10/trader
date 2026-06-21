@@ -112,6 +112,14 @@ interface KiteOrderActionResultResponse {
   message: string
 }
 
+interface KiteGttActionResultResponse {
+  triggerId: string
+  action: string
+  message: string
+  stopLossPrice: number
+  targetPrice: number
+}
+
 interface KiteNetPositionResponse {
   exchange: string
   tradingsymbol: string
@@ -132,6 +140,8 @@ interface ScalperSettingsResponse {
 type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
 
 const SCALPER_TICKET_ORDER_TYPES: ReadonlyArray<ScalperTicketOrderType> = ['MARKET', 'LIMIT', 'SL', 'SL-M']
+const DEFAULT_GTT_STOP_LOSS_PCT = 5
+const DEFAULT_GTT_TRIGGER_PCT = 5
 const SAFE_SCALPER_POINT_PRESETS: ReadonlyArray<{ stop: string; trigger: string; label: string }> = [
   { stop: '10', trigger: '20', label: 'N10 / M20' },
   { stop: '15', trigger: '30', label: 'N15 / M30' },
@@ -620,40 +630,30 @@ export function ScalperPage() {
 
         const stopLoss = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
         const targetTrigger = computedTrigger ?? parsePositiveNumber(tradeTriggerPrice)
-        if (intent !== 'EXIT' && stopLoss != null) {
-          const protectiveSide = transactionType === 'BUY' ? 'SELL' : 'BUY'
-          const slRes = await api.post<KiteOrderActionResultResponse>('/broker/kite/orders/place', {
-            variety: 'regular',
-            exchange: selected.exchange,
-            tradingsymbol: selected.tradingsymbol,
-            transactionType: protectiveSide,
-            quantity,
-            product: resolvedProduct,
-            orderType: 'SL-M',
-            validity: 'DAY',
-            triggerPrice: stopLoss,
-            tag: 'scalper-sl',
-          })
-          notes.push(`SL trigger set (${protectiveSide}) · order ${slRes.data.orderId}`)
-        }
-
-        if (intent !== 'EXIT' && targetTrigger != null) {
-          const targetSide = transactionType === 'BUY' ? 'SELL' : 'BUY'
-          const targetRes = await api.post<KiteOrderActionResultResponse>('/broker/kite/orders/place', {
-            variety: 'regular',
-            exchange: selected.exchange,
-            tradingsymbol: selected.tradingsymbol,
-            transactionType: targetSide,
-            quantity,
-            product: resolvedProduct,
-            orderType: 'LIMIT',
-            validity: 'DAY',
-            price: targetTrigger,
-            tag: 'scalper-target',
-          })
-          notes.push(`Target set @ ${targetTrigger.toFixed(2)} (${targetSide}) · order ${targetRes.data.orderId}`)
-        } else if (computedTrigger != null) {
-          notes.push(`Auto trigger ${computedTrigger.toFixed(2)} (${transactionType === 'BUY' ? 'target up' : 'target down'})`)
+        if (intent !== 'EXIT') {
+          const gttReference =
+            executionLikePrice ?? (live.lastPrice != null && Number.isFinite(live.lastPrice) ? live.lastPrice : null)
+          if (gttReference == null || !Number.isFinite(gttReference)) {
+            notes.push('GTT skipped: need entry/LTP for reference price.')
+          } else {
+            const gttRes = await api.post<KiteGttActionResultResponse>('/broker/kite/gtt', {
+              exchange: selected.exchange,
+              tradingsymbol: selected.tradingsymbol,
+              entryTransactionType: transactionType,
+              quantity,
+              product: resolvedProduct,
+              referencePrice: gttReference,
+              lastPrice: live.lastPrice ?? gttReference,
+              stopLossPrice: stopLoss,
+              triggerPrice: targetTrigger,
+              stopLossPercent: DEFAULT_GTT_STOP_LOSS_PCT,
+              triggerPercent: DEFAULT_GTT_TRIGGER_PCT,
+              tag: 'scalper-gtt',
+            })
+            notes.push(
+              `GTT OCO · SL ${gttRes.data.stopLossPrice.toFixed(2)} / target ${gttRes.data.targetPrice.toFixed(2)} · trigger ${gttRes.data.triggerId}`,
+            )
+          }
         }
 
         if (intent === 'BUY' || intent === 'SELL') setLastEntrySide(intent)
@@ -664,15 +664,23 @@ export function ScalperPage() {
           setActiveTradeSide(side)
           setEntryLinePrice(executionLikePrice)
           if (side === 'BUY') {
-            const nextTrigger = Number((manualTrigger ?? executionLikePrice * 1.003).toFixed(2))
-            const nextStop = Number((manualStop ?? executionLikePrice * 0.997).toFixed(2))
+            const nextTrigger = Number(
+              (manualTrigger ?? executionLikePrice * (1 + DEFAULT_GTT_TRIGGER_PCT / 100)).toFixed(2),
+            )
+            const nextStop = Number(
+              (manualStop ?? executionLikePrice * (1 - DEFAULT_GTT_STOP_LOSS_PCT / 100)).toFixed(2),
+            )
             setTriggerLinePrice(nextTrigger)
             setStopLinePrice(nextStop)
             setTradeTriggerPrice(nextTrigger.toFixed(2))
             setTradeStopLossPrice(nextStop.toFixed(2))
           } else {
-            const nextTrigger = Number((manualTrigger ?? executionLikePrice * 0.997).toFixed(2))
-            const nextStop = Number((manualStop ?? executionLikePrice * 1.003).toFixed(2))
+            const nextTrigger = Number(
+              (manualTrigger ?? executionLikePrice * (1 - DEFAULT_GTT_TRIGGER_PCT / 100)).toFixed(2),
+            )
+            const nextStop = Number(
+              (manualStop ?? executionLikePrice * (1 + DEFAULT_GTT_STOP_LOSS_PCT / 100)).toFixed(2),
+            )
             setTriggerLinePrice(nextTrigger)
             setStopLinePrice(nextStop)
             setTradeTriggerPrice(nextTrigger.toFixed(2))
@@ -1671,7 +1679,7 @@ export function ScalperPage() {
                           />
                         </Col>
                         <Col xs={4}>
-                          <Form.Label className="small text-secondary mb-1">Sell trigger</Form.Label>
+                          <Form.Label className="small text-secondary mb-1">Target (GTT)</Form.Label>
                           <Form.Control
                             size="sm"
                             type="number"
@@ -1679,11 +1687,11 @@ export function ScalperPage() {
                             step="0.05"
                             value={tradeTriggerPrice}
                             onChange={(e) => onTradeTriggerInputChange(e.target.value)}
-                            placeholder="SL/SL-M"
+                            placeholder={`+${DEFAULT_GTT_TRIGGER_PCT}%`}
                           />
                         </Col>
                         <Col xs={4}>
-                          <Form.Label className="small text-secondary mb-1">Stop loss</Form.Label>
+                          <Form.Label className="small text-secondary mb-1">Stop loss (GTT)</Form.Label>
                           <Form.Control
                             size="sm"
                             type="number"
@@ -1691,7 +1699,7 @@ export function ScalperPage() {
                             step="0.05"
                             value={tradeStopLossPrice}
                             onChange={(e) => onTradeStopInputChange(e.target.value)}
-                            placeholder="auto SL-M"
+                            placeholder={`-${DEFAULT_GTT_STOP_LOSS_PCT}%`}
                           />
                         </Col>
                       </Row>
@@ -1707,10 +1715,10 @@ export function ScalperPage() {
                         </Button>
                         <InputGroup.Text className="small text-muted">
                           {isSafeMode
-                            ? `Safe mode: auto SL ${safeStopLossPoints || 'N'} pts, auto trigger ${safeSellTriggerPoints || 'M'} pts`
+                            ? `Safe mode: auto SL ${safeStopLossPoints || 'N'} pts, auto target ${safeSellTriggerPoints || 'M'} pts (GTT OCO)`
                             : lastEntrySide
-                              ? `Last entry: ${lastEntrySide} · drag green/red lines on chart to adjust trigger/SL`
-                              : 'SL: set Stop loss for protective order'}
+                              ? `Last entry: ${lastEntrySide} · GTT defaults ${DEFAULT_GTT_STOP_LOSS_PCT}% SL / ${DEFAULT_GTT_TRIGGER_PCT}% target · drag lines on chart`
+                              : `After entry, GTT OCO uses ${DEFAULT_GTT_STOP_LOSS_PCT}% stop-loss and ${DEFAULT_GTT_TRIGGER_PCT}% target unless overridden`}
                         </InputGroup.Text>
                       </InputGroup>
                     </div>

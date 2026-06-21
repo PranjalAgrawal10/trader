@@ -110,6 +110,11 @@ public interface IBrokerService
         KiteOrderPlaceRequestDto body,
         CancellationToken ct = default);
 
+    Task<KiteGttActionResultDto> CreateKiteGttOcoAsync(
+        Guid userId,
+        KiteGttCreateRequestDto body,
+        CancellationToken ct = default);
+
     Task<KiteOrderActionResultDto> PlaceOrderAsync(
         Guid userId,
         KiteOrderPlaceRequestDto body,

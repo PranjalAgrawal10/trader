@@ -457,6 +457,16 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         return SendOrderActionAsync(HttpMethod.Post, path, content, apiKey, accessToken, ct);
     }
 
+    public Task<KiteGttActionResult> PlaceGttOcoAsync(
+        KiteGttOcoRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        var content = BuildGttOcoContent(request);
+        return SendGttActionAsync(HttpMethod.Post, "gtt/triggers", content, apiKey, accessToken, ct);
+    }
+
     public async Task<KiteInstrumentsFetchResult> FetchExchangeInstrumentsAsync(
         string exchange,
         string apiKey,
@@ -835,6 +845,48 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         return new FormUrlEncodedContent(values);
     }
 
+    private static FormUrlEncodedContent BuildGttOcoContent(KiteGttOcoRequest request)
+    {
+        var condition = JsonSerializer.Serialize(new
+        {
+            exchange = request.Exchange.Trim(),
+            tradingsymbol = request.Tradingsymbol.Trim(),
+            trigger_values = new[] { request.LowerTriggerPrice, request.UpperTriggerPrice },
+            last_price = request.LastPrice,
+        });
+        var exitSide = request.ExitTransactionType.Trim();
+        var orders = JsonSerializer.Serialize(new object[]
+        {
+            new
+            {
+                exchange = request.Exchange.Trim(),
+                tradingsymbol = request.Tradingsymbol.Trim(),
+                transaction_type = exitSide,
+                quantity = request.Quantity,
+                order_type = "LIMIT",
+                product = request.Product.Trim(),
+                price = request.LowerTriggerPrice,
+            },
+            new
+            {
+                exchange = request.Exchange.Trim(),
+                tradingsymbol = request.Tradingsymbol.Trim(),
+                transaction_type = exitSide,
+                quantity = request.Quantity,
+                order_type = "LIMIT",
+                product = request.Product.Trim(),
+                price = request.UpperTriggerPrice,
+            },
+        });
+
+        return new FormUrlEncodedContent(new[]
+        {
+            new KeyValuePair<string, string>("type", "two-leg"),
+            new KeyValuePair<string, string>("condition", condition),
+            new KeyValuePair<string, string>("orders", orders),
+        });
+    }
+
     private async Task<KiteOrderActionResult> SendOrderActionAsync(
         HttpMethod method,
         string path,
@@ -880,6 +932,54 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         catch (JsonException)
         {
             return new KiteOrderActionResult(false, "Could not parse Kite order action response.", null);
+        }
+    }
+
+    private async Task<KiteGttActionResult> SendGttActionAsync(
+        HttpMethod method,
+        string path,
+        HttpContent? content,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(method, path);
+        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+        if (content is not null)
+            request.Content = content;
+
+        using var response = await _http.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for GTT action.";
+            return new KiteGttActionResult(false, msg, null);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("status", out var st)
+                || !string.Equals(st.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+            {
+                var msg = TryParseKiteMessage(body) ?? "Unexpected GTT action response from Kite.";
+                return new KiteGttActionResult(false, msg, null);
+            }
+
+            string? triggerId = null;
+            if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
+            {
+                if (data.TryGetProperty("trigger_id", out var idEl) && idEl.ValueKind != JsonValueKind.Null)
+                    triggerId = idEl.ToString();
+            }
+
+            return new KiteGttActionResult(true, null, triggerId);
+        }
+        catch (JsonException)
+        {
+            return new KiteGttActionResult(false, "Could not parse Kite GTT action response.", null);
         }
     }
 }

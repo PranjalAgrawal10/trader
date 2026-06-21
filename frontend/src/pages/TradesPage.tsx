@@ -55,6 +55,14 @@ interface KiteOrderActionResult {
   message: string
 }
 
+interface KiteGttActionResult {
+  triggerId: string
+  action: string
+  message: string
+  stopLossPrice: number
+  targetPrice: number
+}
+
 const KITE_ORDER_STATUSES: readonly string[] = [
   'OPEN',
   'COMPLETE',
@@ -310,6 +318,32 @@ export function TradesPage() {
       setOrdersActionInfo(
         `${order.tradingsymbol}: qty ${order.quantity}, filled ${order.filledQuantity}, pending ${order.pendingQuantity}, status ${order.status}.`,
       )
+      return
+    }
+    if (action === 'Create GTT / GTC') {
+      const qty = order.filledQuantity > 0 ? order.filledQuantity : order.quantity
+      if (qty < 1) {
+        setOrdersActionInfo(`Order ${order.orderId} has no quantity for GTT.`)
+        return
+      }
+      try {
+        const res = await api.post<KiteGttActionResult>('/broker/kite/gtt', {
+          exchange: order.exchange,
+          tradingsymbol: order.tradingsymbol,
+          entryTransactionType: order.transactionType,
+          quantity: qty,
+          product: order.product,
+          referencePrice: order.averagePrice ?? order.price,
+          stopLossPercent: 5,
+          triggerPercent: 5,
+          tag: 'trades-gtt',
+        })
+        setOrdersActionInfo(
+          `GTT OCO for ${order.tradingsymbol}: SL ${res.data.stopLossPrice.toFixed(2)}, target ${res.data.targetPrice.toFixed(2)} (trigger ${res.data.triggerId}).`,
+        )
+      } catch {
+        setOrdersActionInfo(`Create GTT failed for ${order.tradingsymbol}.`)
+      }
       return
     }
     setOrdersActionInfo(`${action} is available in the action menu.`)

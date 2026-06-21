@@ -506,6 +506,31 @@ public sealed class BrokerController : ControllerBase
     }
 
     [Authorize]
+    [HttpPost("kite/gtt")]
+    public async Task<ActionResult<KiteGttActionResultDto>> CreateKiteGtt(
+        [FromBody] KiteGttCreateRequestDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON with exchange, tradingsymbol, entryTransactionType, quantity, product, and optional reference/last price or SL/target overrides.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var dto = await _broker.CreateKiteGttOcoAsync(User.GetUserId(), body, ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
     [HttpPost("kite/orders/place")]
     public async Task<ActionResult<KiteOrderActionResultDto>> PlaceKiteOrder(
         [FromBody] KiteOrderPlaceRequestDto? body,
