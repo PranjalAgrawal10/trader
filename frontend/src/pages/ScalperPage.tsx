@@ -400,8 +400,6 @@ export function ScalperPage() {
   const [searchBusy, setSearchBusy] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [atmTargetKey, setAtmTargetKey] = useState<string>(SCALPER_ATM_TARGETS[0]!.key)
-  const [atmReferenceLoading, setAtmReferenceLoading] = useState(false)
-  const [atmLiveLoading, setAtmLiveLoading] = useState(false)
   const [atmError, setAtmError] = useState<string | null>(null)
   const [atmLastUpdatedAt, setAtmLastUpdatedAt] = useState<string | null>(null)
   const [atmSpotRow, setAtmSpotRow] = useState<KiteInstrumentRow | null>(null)
@@ -411,6 +409,9 @@ export function ScalperPage() {
   const [atmChainStrikesAboveAtm, setAtmChainStrikesAboveAtm] = useState(3)
   const [atmChainStrikesBelowAtm, setAtmChainStrikesBelowAtm] = useState(3)
   const [atmPanelMode, setAtmPanelMode] = useState<ScalperAtmPanelMode>(() => loadScalperAtmPanelMode())
+  const atmSnapshotRef = useRef<ScalperAtmSnapshot>(EMPTY_ATM_SNAPSHOT)
+  const atmReferenceLoadInFlightRef = useRef(false)
+  const atmLiveRefreshInFlightRef = useRef(false)
   const [isLivePullWindow, setIsLivePullWindow] = useState<boolean>(() => isIstMarketLiveWindow())
   const [tradeQty, setTradeQty] = useState('1')
   const [tradeProduct, setTradeProduct] = useState<'MIS' | 'NRML'>('MIS')
@@ -843,6 +844,22 @@ export function ScalperPage() {
     return () => window.clearInterval(id)
   }, [])
 
+  useEffect(() => {
+    atmSnapshotRef.current = atmSnapshot
+  }, [atmSnapshot])
+
+  const applyAtmTargetKey = useCallback((key: string) => {
+    const cached = loadScalperAtmFromCache(key)
+    if (cached) {
+      setAtmSnapshot(cached.snapshot)
+      setAtmLastUpdatedAt(cached.updatedAt)
+    } else {
+      setAtmSnapshot(EMPTY_ATM_SNAPSHOT)
+      setAtmLastUpdatedAt(null)
+    }
+    setAtmTargetKey(key)
+  }, [])
+
   const loadAtmReferences = useCallback(async () => {
     if (!atmPanelOpen) return
     if (!isZerodha) {
@@ -851,8 +868,8 @@ export function ScalperPage() {
       setAtmError(null)
       return
     }
-    setAtmReferenceLoading(true)
-    setAtmError(null)
+    if (atmReferenceLoadInFlightRef.current) return
+    atmReferenceLoadInFlightRef.current = true
     try {
       const [spotRes, optRes] = await Promise.all([
         api.get<InstrumentSearchResponse>('/broker/kite/instruments/search', {
@@ -864,18 +881,19 @@ export function ScalperPage() {
       ])
       setAtmSpotRow(chooseAtmSpotRow(spotRes.data.items ?? [], atmTarget))
       setAtmOptionRows(filterOptionsForUnderlying(optRes.data.items ?? [], atmTarget))
+      setAtmError(null)
     } catch (err) {
       setAtmError(problemDetail(err))
     } finally {
-      setAtmReferenceLoading(false)
+      atmReferenceLoadInFlightRef.current = false
     }
   }, [atmPanelOpen, atmTarget, isZerodha])
 
   const refreshAtmLive = useCallback(async () => {
     if (!atmPanelOpen) return
     if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
-    setAtmLiveLoading(true)
-    setAtmError(null)
+    if (atmLiveRefreshInFlightRef.current) return
+    atmLiveRefreshInFlightRef.current = true
     try {
       const fetchQuote = async (row: KiteInstrumentRow | null): Promise<KiteInstrumentLiveQuoteResponse | null> => {
         if (!row) return null
@@ -889,7 +907,7 @@ export function ScalperPage() {
         }
       }
 
-      const previous = atmSnapshot
+      const previous = atmSnapshotRef.current
       const spotQuote = await fetchQuote(atmSpotRow)
       const atm = pickAtmLegs(
         atmOptionRows,
@@ -957,17 +975,17 @@ export function ScalperPage() {
       setAtmSnapshot(nextSnapshot)
       setAtmLastUpdatedAt(updatedAt)
       saveScalperAtmToCache(atmTarget.key, nextSnapshot, updatedAt)
+      setAtmError(null)
     } catch (err) {
       setAtmError(problemDetail(err))
     } finally {
-      setAtmLiveLoading(false)
+      atmLiveRefreshInFlightRef.current = false
     }
   }, [
     atmChainStrikesAboveAtm,
     atmChainStrikesBelowAtm,
     atmOptionRows,
     atmSelectedExpiryIso,
-    atmSnapshot,
     atmSpotRow,
     atmTarget.key,
     atmPanelOpen,
@@ -1564,7 +1582,7 @@ export function ScalperPage() {
                             size="sm"
                             value={atmTarget.key}
                             style={{ width: '11rem' }}
-                            onChange={(e) => setAtmTargetKey(e.target.value)}
+                            onChange={(e) => applyAtmTargetKey(e.target.value)}
                             aria-label="Scalper ATM underlying"
                           >
                             {SCALPER_ATM_TARGETS.map((t) => (
@@ -1611,9 +1629,6 @@ export function ScalperPage() {
                           </Button>
                         </div>
                       </div>
-                      {atmReferenceLoading || atmLiveLoading ? (
-                        <div className="small text-muted mb-2">Loading ATM chain…</div>
-                      ) : null}
                       {atmError ? <Alert variant="warning" className="py-1 small mb-2">{atmError}</Alert> : null}
                       <div className="small text-muted mb-1">
                         Spot:{' '}
