@@ -57,7 +57,6 @@ const SCALPER_TREND_INTERVAL_OPTIONS: ReadonlyArray<{ id: string; label: string 
   { id: '4h', label: '4h' },
   { id: '8h', label: '8h' },
 ]
-const SCALPER_ATM_POLL_MS = 2_000
 
 interface KiteInstrumentLiveQuoteResponse {
   exchange: string
@@ -946,11 +945,16 @@ export function ScalperPage() {
   useEffect(() => {
     if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
     void refreshAtmLive()
-    const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void refreshAtmLive()
-    }, SCALPER_ATM_POLL_MS)
-    return () => window.clearInterval(id)
-  }, [atmSpotRow, isZerodha, isLivePullWindow, refreshAtmLive])
+  }, [
+    atmChainStrikesAboveAtm,
+    atmChainStrikesBelowAtm,
+    atmSelectedExpiryIso,
+    atmSpotRow,
+    atmTarget.key,
+    isLivePullWindow,
+    isZerodha,
+    refreshAtmLive,
+  ])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -1069,11 +1073,6 @@ export function ScalperPage() {
   }, [atmChainStrikesAboveAtm, atmChainStrikesBelowAtm, atmOptionRows, atmSnapshot])
 
   const atmExpiryOptions = useMemo(() => listDistinctExpiries(atmOptionRows), [atmOptionRows])
-
-  useEffect(() => {
-    if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
-    void refreshAtmLive()
-  }, [atmChainStrikesAboveAtm, atmChainStrikesBelowAtm, atmSpotRow, isLivePullWindow, isZerodha, refreshAtmLive])
 
   const { loadOlderBars, loadingOlderBars, canLoadOlderBars } = useChartOlderBars({
     instrumentToken: selected?.instrumentToken ?? '',
@@ -1256,7 +1255,7 @@ export function ScalperPage() {
                   {candleMeta ? (
                     <div className="small text-muted mb-2 font-monospace">
                       {candleMeta.interval} · {formatLocalDateTime(candleMeta.from)} → {formatLocalDateTime(candleMeta.to)} ·
-                      refresh ~{SCALPER_POLL_MS / 1000}s + ticks
+                      live ticks · OHLC ~{SCALPER_POLL_MS / 1000}s
                     </div>
                   ) : null}
                   {selected ? (
@@ -1416,8 +1415,8 @@ export function ScalperPage() {
                           {!isLivePullWindow ? (
                             <span
                               role="img"
-                              aria-label="Live ATM schedule info"
-                              title="Live ATM pull resumes during market window (IST 09:10-15:30)."
+                              aria-label="ATM chain schedule info"
+                              title="ATM chain quotes load once when you change underlying or expiry (no auto-refresh). Chart stays live via ticks."
                               className="text-muted"
                               style={{ cursor: 'help', fontSize: '0.78rem', userSelect: 'none' }}
                             >
@@ -1456,19 +1455,10 @@ export function ScalperPage() {
                             )}
                           </Form.Select>
                         </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline-secondary"
-                          disabled={!isLivePullWindow || atmReferenceLoading || atmLiveLoading}
-                          onClick={() => {
-                            void loadAtmReferences()
-                            void refreshAtmLive()
-                          }}
-                        >
-                          {atmReferenceLoading || atmLiveLoading ? 'Refreshing…' : 'Refresh ATM'}
-                        </Button>
                       </div>
+                      {atmReferenceLoading || atmLiveLoading ? (
+                        <div className="small text-muted mb-2">Loading ATM chain…</div>
+                      ) : null}
                       {atmError ? <Alert variant="warning" className="py-1 small mb-2">{atmError}</Alert> : null}
                       <div className="small text-muted mb-1">
                         Spot:{' '}
