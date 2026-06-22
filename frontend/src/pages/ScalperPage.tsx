@@ -182,6 +182,27 @@ const EMPTY_ATM_SNAPSHOT: ScalperAtmSnapshot = {
 }
 
 const SCALPER_ATM_CACHE_PREFIX = 'scalper:atm:last:'
+const SCALPER_ATM_PANEL_MODE_KEY = 'scalper:atmPanelMode'
+
+type ScalperAtmPanelMode = 'open' | 'minimized' | 'hidden'
+
+function loadScalperAtmPanelMode(): ScalperAtmPanelMode {
+  try {
+    const raw = window.localStorage.getItem(SCALPER_ATM_PANEL_MODE_KEY)
+    if (raw === 'open' || raw === 'minimized' || raw === 'hidden') return raw
+  } catch {
+    /* ignore */
+  }
+  return 'open'
+}
+
+function saveScalperAtmPanelMode(mode: ScalperAtmPanelMode): void {
+  try {
+    window.localStorage.setItem(SCALPER_ATM_PANEL_MODE_KEY, mode)
+  } catch {
+    /* ignore */
+  }
+}
 
 function scalperAtmCacheKey(targetKey: string): string {
   return `${SCALPER_ATM_CACHE_PREFIX}${targetKey}`
@@ -373,6 +394,7 @@ export function ScalperPage() {
   const [atmSnapshot, setAtmSnapshot] = useState<ScalperAtmSnapshot>(EMPTY_ATM_SNAPSHOT)
   const [atmChainStrikesAboveAtm, setAtmChainStrikesAboveAtm] = useState(3)
   const [atmChainStrikesBelowAtm, setAtmChainStrikesBelowAtm] = useState(3)
+  const [atmPanelMode, setAtmPanelMode] = useState<ScalperAtmPanelMode>(() => loadScalperAtmPanelMode())
   const [isLivePullWindow, setIsLivePullWindow] = useState<boolean>(() => isIstMarketLiveWindow())
   const [tradeQty, setTradeQty] = useState('1')
   const [tradeProduct, setTradeProduct] = useState<'MIS' | 'NRML'>('MIS')
@@ -394,6 +416,11 @@ export function ScalperPage() {
   const [chartContextPriceMenu, setChartContextPriceMenu] = useState<ChartContextPriceMenuState>(null)
 
   const isZerodha = broker?.connected === true && (broker?.provider ?? '').toLowerCase() === 'zerodha'
+  const atmPanelOpen = atmPanelMode === 'open'
+  const setAtmPanelModePersisted = useCallback((mode: ScalperAtmPanelMode) => {
+    setAtmPanelMode(mode)
+    saveScalperAtmPanelMode(mode)
+  }, [])
   const atmTarget = useMemo(
     () => SCALPER_ATM_TARGETS.find((t) => t.key === atmTargetKey) ?? SCALPER_ATM_TARGETS[0]!,
     [atmTargetKey],
@@ -762,6 +789,7 @@ export function ScalperPage() {
   }, [])
 
   const loadAtmReferences = useCallback(async () => {
+    if (!atmPanelOpen) return
     if (!isZerodha) {
       setAtmSpotRow(null)
       setAtmOptionRows([])
@@ -786,9 +814,10 @@ export function ScalperPage() {
     } finally {
       setAtmReferenceLoading(false)
     }
-  }, [atmTarget, isZerodha])
+  }, [atmPanelOpen, atmTarget, isZerodha])
 
   const refreshAtmLive = useCallback(async () => {
+    if (!atmPanelOpen) return
     if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
     setAtmLiveLoading(true)
     setAtmError(null)
@@ -886,6 +915,7 @@ export function ScalperPage() {
     atmSnapshot,
     atmSpotRow,
     atmTarget.key,
+    atmPanelOpen,
     isLivePullWindow,
     isZerodha,
   ])
@@ -906,17 +936,19 @@ export function ScalperPage() {
   }, [])
 
   useEffect(() => {
-    if (!isZerodha) return
+    if (!isZerodha || !atmPanelOpen) return
     void loadAtmReferences()
-  }, [isZerodha, loadAtmReferences])
+  }, [atmPanelOpen, isZerodha, loadAtmReferences])
 
   useEffect(() => {
+    if (!atmPanelOpen) return
     setAtmChainStrikesAboveAtm(3)
     setAtmChainStrikesBelowAtm(3)
     setAtmSelectedExpiryIso('')
-  }, [atmTarget.key])
+  }, [atmPanelOpen, atmTarget.key])
 
   useEffect(() => {
+    if (!atmPanelOpen) return
     if (atmOptionRows.length === 0) {
       if (atmSelectedExpiryIso) setAtmSelectedExpiryIso('')
       return
@@ -929,9 +961,10 @@ export function ScalperPage() {
     if (atmSelectedExpiryIso && expiries.includes(atmSelectedExpiryIso)) return
     const nearest = pickNearestFutureExpiry(atmOptionRows) ?? expiries[0] ?? ''
     if (nearest && nearest !== atmSelectedExpiryIso) setAtmSelectedExpiryIso(nearest)
-  }, [atmOptionRows, atmSelectedExpiryIso])
+  }, [atmOptionRows, atmPanelOpen, atmSelectedExpiryIso])
 
   useEffect(() => {
+    if (!atmPanelOpen) return
     const cached = loadScalperAtmFromCache(atmTarget.key)
     if (cached) {
       setAtmSnapshot(cached.snapshot)
@@ -940,14 +973,15 @@ export function ScalperPage() {
     }
     setAtmSnapshot(EMPTY_ATM_SNAPSHOT)
     setAtmLastUpdatedAt(null)
-  }, [atmTarget.key])
+  }, [atmPanelOpen, atmTarget.key])
 
   useEffect(() => {
-    if (!isZerodha || !atmSpotRow || !isLivePullWindow) return
+    if (!atmPanelOpen || !isZerodha || !atmSpotRow || !isLivePullWindow) return
     void refreshAtmLive()
   }, [
     atmChainStrikesAboveAtm,
     atmChainStrikesBelowAtm,
+    atmPanelOpen,
     atmSelectedExpiryIso,
     atmSpotRow,
     atmTarget.key,
@@ -1407,7 +1441,46 @@ export function ScalperPage() {
                   ) : null}
                 </Col>
                 <Col lg={5} xl={4}>
-                  {isZerodha ? (
+                  {isZerodha && atmPanelMode === 'hidden' ? (
+                    <div className="mb-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline-secondary"
+                        onClick={() => setAtmPanelModePersisted('open')}
+                      >
+                        Show ATM chain
+                      </Button>
+                    </div>
+                  ) : null}
+                  {isZerodha && atmPanelMode === 'minimized' ? (
+                    <div className="border rounded border-secondary-subtle p-2 bg-body text-body mb-2">
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
+                        <div className="small text-muted">
+                          ATM chain hidden · no live quote requests
+                        </div>
+                        <div className="d-flex flex-wrap gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline-primary"
+                            onClick={() => setAtmPanelModePersisted('open')}
+                          >
+                            Expand
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline-secondary"
+                            onClick={() => setAtmPanelModePersisted('hidden')}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                  {isZerodha && atmPanelOpen ? (
                     <div className="border rounded border-secondary-subtle p-2 bg-body text-body mb-2">
                       <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                         <div className="d-flex flex-wrap align-items-center gap-2">
@@ -1454,6 +1527,24 @@ export function ScalperPage() {
                               ))
                             )}
                           </Form.Select>
+                        </div>
+                        <div className="d-flex flex-wrap gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline-secondary"
+                            onClick={() => setAtmPanelModePersisted('minimized')}
+                          >
+                            Minimize
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline-secondary"
+                            onClick={() => setAtmPanelModePersisted('hidden')}
+                          >
+                            Remove
+                          </Button>
                         </div>
                       </div>
                       {atmReferenceLoading || atmLiveLoading ? (
