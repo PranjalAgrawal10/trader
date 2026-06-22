@@ -123,7 +123,8 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
                 u.ScalperShowVolume,
                 u.ScalperSafeModeEnabled,
                 u.ScalperSafeStopLossPoints,
-                u.ScalperSafeTriggerPoints))
+                u.ScalperSafeTriggerPoints,
+                u.ScalperGttEnabled))
             .FirstOrDefaultAsync(ct);
 
     public async Task SaveScalperSettingsAsync(Guid userId, ScalperSettingsState settings, CancellationToken ct = default)
@@ -137,6 +138,7 @@ public sealed class KiteInstrumentsChartSettingsGateway : IKiteInstrumentsChartS
         user.ScalperSafeModeEnabled = settings.SafeModeEnabled;
         user.ScalperSafeStopLossPoints = settings.SafeStopLossPoints;
         user.ScalperSafeTriggerPoints = settings.SafeTriggerPoints;
+        user.ScalperGttEnabled = settings.GttEnabled;
         await _db.SaveChangesAsync(ct);
     }
 }

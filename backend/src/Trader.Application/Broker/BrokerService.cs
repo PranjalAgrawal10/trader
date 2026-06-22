@@ -778,6 +778,9 @@ public sealed class BrokerService : IBrokerService
         var stopPct = body.StopLossPercent > 0 ? body.StopLossPercent : 5m;
         var targetPct = body.TriggerPercent > 0 ? body.TriggerPercent : 5m;
 
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var tickSize = await ResolveKiteTickSizeAsync(exchange, tradingsymbol, apiKey, accessToken, ct).ConfigureAwait(false);
+
         var reference = NormalizeNullablePrice(body.ReferencePrice);
         var lastPrice = NormalizeNullablePrice(body.LastPrice);
         if (reference is null or <= 0)
@@ -798,15 +801,24 @@ public sealed class BrokerService : IBrokerService
             lastPrice = reference;
         }
 
+        reference = KiteTickPriceRounding.RoundToTickSize(reference.Value, tickSize);
+        lastPrice = KiteTickPriceRounding.RoundToTickSize(lastPrice.Value, tickSize);
+
         var stopOverride = NormalizeNullablePrice(body.StopLossPrice);
         var targetOverride = NormalizeNullablePrice(body.TriggerPrice);
+        if (stopOverride is > 0)
+            stopOverride = KiteTickPriceRounding.RoundToTickSize(stopOverride.Value, tickSize);
+        if (targetOverride is > 0)
+            targetOverride = KiteTickPriceRounding.RoundToTickSize(targetOverride.Value, tickSize);
+
         var (stopLoss, target, exitSide) = ComputeGttOcoLegPrices(
             entrySide,
             reference.Value,
             stopOverride,
             targetOverride,
             stopPct,
-            targetPct);
+            targetPct,
+            tickSize);
 
         if (stopLoss <= 0 || target <= 0)
             throw new InvalidOperationException("Stop-loss and target prices must be greater than zero.");
@@ -823,7 +835,6 @@ public sealed class BrokerService : IBrokerService
             upperTrigger = stopLoss;
         }
 
-        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
         var gttRequest = new KiteGttOcoRequest(
             exchange,
             tradingsymbol,
@@ -1210,7 +1221,8 @@ public sealed class BrokerService : IBrokerService
             row.ShowVolume,
             row.SafeModeEnabled,
             stopPts,
-            triggerPts);
+            triggerPts,
+            row.GttEnabled);
     }
 
     public async Task SaveScalperSettingsAsync(Guid userId, ScalperSettingsPutDto body, CancellationToken ct = default)
@@ -1231,7 +1243,8 @@ public sealed class BrokerService : IBrokerService
                 body.ShowVolume,
                 body.SafeModeEnabled,
                 stopPts,
-                triggerPts),
+                triggerPts,
+                body.GttEnabled),
             ct).ConfigureAwait(false);
     }
 
@@ -1927,27 +1940,50 @@ public sealed class BrokerService : IBrokerService
         decimal? stopOverride,
         decimal? targetOverride,
         decimal stopLossPercent,
-        decimal targetPercent)
+        decimal targetPercent,
+        decimal tickSize)
     {
         if (string.Equals(entrySide, "BUY", StringComparison.OrdinalIgnoreCase))
         {
-            var stop = stopOverride ?? RoundGttPrice(referencePrice * (1m - stopLossPercent / 100m));
-            var target = targetOverride ?? RoundGttPrice(referencePrice * (1m + targetPercent / 100m));
+            var stop = stopOverride ?? RoundGttPrice(referencePrice * (1m - stopLossPercent / 100m), tickSize);
+            var target = targetOverride ?? RoundGttPrice(referencePrice * (1m + targetPercent / 100m), tickSize);
             return (stop, target, "SELL");
         }
 
         if (string.Equals(entrySide, "SELL", StringComparison.OrdinalIgnoreCase))
         {
-            var stop = stopOverride ?? RoundGttPrice(referencePrice * (1m + stopLossPercent / 100m));
-            var target = targetOverride ?? RoundGttPrice(referencePrice * (1m - targetPercent / 100m));
+            var stop = stopOverride ?? RoundGttPrice(referencePrice * (1m + stopLossPercent / 100m), tickSize);
+            var target = targetOverride ?? RoundGttPrice(referencePrice * (1m - targetPercent / 100m), tickSize);
             return (stop, target, "BUY");
         }
 
         throw new InvalidOperationException("entryTransactionType must be BUY or SELL.");
     }
 
-    private static decimal RoundGttPrice(decimal value) =>
-        Math.Round(value, 2, MidpointRounding.AwayFromZero);
+    private static decimal RoundGttPrice(decimal value, decimal tickSize) =>
+        KiteTickPriceRounding.RoundToTickSize(value, tickSize);
+
+    private async Task<decimal> ResolveKiteTickSizeAsync(
+        string exchange,
+        string tradingsymbol,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct)
+    {
+        var fetched = await _kiteInstruments
+            .FetchInstrumentRowByTradingsymbolAsync(exchange, tradingsymbol, apiKey, accessToken, ct)
+            .ConfigureAwait(false);
+        if (fetched.Success
+            && fetched.Items.Count > 0
+            && fetched.Items[0].TickSize is decimal tick
+            && tick > 0)
+        {
+            return tick;
+        }
+
+        throw new InvalidOperationException(
+            $"Could not resolve tick size for {exchange}:{tradingsymbol}. GTT prices must be multiples of the instrument tick size.");
+    }
 
     private static void ValidateOrderTypePayload(string orderTypeRaw, decimal? price, decimal? triggerPrice)
     {

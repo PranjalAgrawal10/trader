@@ -117,3 +117,78 @@ export function pctChange(prev: number, next: number): string {
   const p = ((next - prev) / prev) * 100
   return p >= 0 ? `+${p.toFixed(2)}%` : `${p.toFixed(2)}%`
 }
+
+export function roundScalperPrice(price: number): number {
+  return Number(price.toFixed(2))
+}
+
+export interface ScalperLiveQuoteSnapshot {
+  lastPrice: number | null
+  tickPrice: number | null
+}
+
+/** Price anchor at order submit — before the broker round-trip can move LTP. */
+export function snapshotScalperSubmitReferencePrice(
+  normalizedPrice: number | null,
+  normalizedTrigger: number | null,
+  orderType: 'MARKET' | 'LIMIT' | 'SL' | 'SL-M',
+  liveQuote: ScalperLiveQuoteSnapshot,
+  lastBarClose: number | null,
+): number | null {
+  if (normalizedPrice != null && Number.isFinite(normalizedPrice)) return roundScalperPrice(normalizedPrice)
+  if (orderType === 'SL-M' && normalizedTrigger != null && Number.isFinite(normalizedTrigger)) {
+    return roundScalperPrice(normalizedTrigger)
+  }
+  if (liveQuote.tickPrice != null && Number.isFinite(liveQuote.tickPrice)) {
+    return roundScalperPrice(liveQuote.tickPrice)
+  }
+  if (liveQuote.lastPrice != null && Number.isFinite(liveQuote.lastPrice)) {
+    return roundScalperPrice(liveQuote.lastPrice)
+  }
+  if (lastBarClose != null && Number.isFinite(lastBarClose)) return roundScalperPrice(lastBarClose)
+  return null
+}
+
+export interface ScalperKiteOrderFillRow {
+  orderId: string
+  status: string
+  averagePrice: number | null
+  price: number | null
+  filledQuantity: number
+}
+
+const KITE_ORDER_TERMINAL_STATUSES = new Set(['COMPLETE', 'CANCELLED', 'REJECTED'])
+
+/** Poll Kite orderbook briefly for average fill price; falls back to submit reference. */
+export async function resolveKiteOrderExecutionPrice(
+  orderId: string,
+  fallbackPrice: number,
+  listOrders: () => Promise<readonly ScalperKiteOrderFillRow[]>,
+): Promise<number> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 350))
+    try {
+      const items = await listOrders()
+      const row = items.find((o) => o.orderId === orderId)
+      if (!row) continue
+      if (
+        row.averagePrice != null &&
+        row.averagePrice > 0 &&
+        row.filledQuantity > 0 &&
+        Number.isFinite(row.averagePrice)
+      ) {
+        return roundScalperPrice(row.averagePrice)
+      }
+      const status = row.status.trim().toUpperCase()
+      if (KITE_ORDER_TERMINAL_STATUSES.has(status)) {
+        if (row.price != null && row.price > 0 && Number.isFinite(row.price)) {
+          return roundScalperPrice(row.price)
+        }
+        break
+      }
+    } catch {
+      /* retry */
+    }
+  }
+  return roundScalperPrice(fallbackPrice)
+}

@@ -57,6 +57,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.ScalperSafeModeEnabled).HasDefaultValue(false);
             e.Property(x => x.ScalperSafeStopLossPoints).HasPrecision(18, 4);
             e.Property(x => x.ScalperSafeTriggerPoints).HasPrecision(18, 4);
+            e.Property(x => x.ScalperGttEnabled).HasDefaultValue(true);
             e.Property(x => x.WalletBalance).HasPrecision(18, 2).HasDefaultValue(0);
             e.Property(x => x.DemoAutoTradeEnabled).HasDefaultValue(false);
             e.Property(x => x.DemoAutoTradeStrategy).HasMaxLength(32).HasDefaultValue("equal_split");

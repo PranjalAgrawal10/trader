@@ -35,7 +35,8 @@ public sealed record KiteInstrumentListItemDto(
     string? Segment,
     string? Expiry,
     decimal? Strike,
-    int? LotSize);
+    int? LotSize,
+    decimal? TickSize = null);
 
 public sealed record KiteFnoCommodityListsDto(
     IReadOnlyList<KiteInstrumentListItemDto> Fno,
@@ -221,7 +222,8 @@ public sealed record ScalperSettingsDto(
     bool ShowVolume,
     bool SafeModeEnabled,
     decimal SafeStopLossPoints,
-    decimal SafeTriggerPoints);
+    decimal SafeTriggerPoints,
+    bool GttEnabled);
 
 public sealed class ScalperSettingsPutDto
 {
@@ -232,6 +234,7 @@ public sealed class ScalperSettingsPutDto
     public bool SafeModeEnabled { get; set; }
     public decimal SafeStopLossPoints { get; set; }
     public decimal SafeTriggerPoints { get; set; }
+    public bool GttEnabled { get; set; } = true;
 }
 
 /// <summary>OHLCV series from Kite historical API (possibly after server-side resampling for 2m / 4m).</summary>

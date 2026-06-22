@@ -23,7 +23,8 @@ public sealed record ScalperSettingsState(
     bool ShowVolume,
     bool SafeModeEnabled,
     decimal? SafeStopLossPoints,
-    decimal? SafeTriggerPoints);
+    decimal? SafeTriggerPoints,
+    bool GttEnabled);
 
 public interface IKiteInstrumentsChartSettingsGateway
 {

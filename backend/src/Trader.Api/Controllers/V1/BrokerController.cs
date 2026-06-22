@@ -412,7 +412,7 @@ public sealed class BrokerController : ControllerBase
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON with interval, rangePreset, graphType, showVolume, safeModeEnabled, safeStopLossPoints, and safeTriggerPoints.",
+                detail: "Send JSON with interval, rangePreset, graphType, showVolume, safeModeEnabled, safeStopLossPoints, safeTriggerPoints, and gttEnabled.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 

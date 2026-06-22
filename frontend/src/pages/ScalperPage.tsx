@@ -24,6 +24,8 @@ import { type ChartGraphType } from '../utils/kiteInstrumentChartShared'
 import {
   chartPointsFromHistorical,
   mergeScalperLiveIntoSeries,
+  resolveKiteOrderExecutionPrice,
+  snapshotScalperSubmitReferencePrice,
   pctChange,
   SCALPER_INTERVALS,
   SCALPER_MA,
@@ -126,6 +128,18 @@ interface KiteNetPositionResponse {
   quantity: number
 }
 
+interface KiteOrderBookRowResponse {
+  orderId: string
+  status: string
+  averagePrice: number | null
+  price: number | null
+  filledQuantity: number
+}
+
+interface KiteOrderBookResponse {
+  items: KiteOrderBookRowResponse[]
+}
+
 interface ScalperSettingsResponse {
   interval: ScalperInterval
   rangePreset: ScalperRange
@@ -134,6 +148,7 @@ interface ScalperSettingsResponse {
   safeModeEnabled: boolean
   safeStopLossPoints: number
   safeTriggerPoints: number
+  gttEnabled: boolean
 }
 
 type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
@@ -363,6 +378,7 @@ function buildAtmChainRows(
 
 export function ScalperPage() {
   const [isSafeMode, setIsSafeMode] = useState(false)
+  const [isGttEnabled, setIsGttEnabled] = useState(true)
   const [broker, setBroker] = useState<BrokerStatusResponse | null>(null)
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
@@ -426,10 +442,22 @@ export function ScalperPage() {
     [atmTargetKey],
   )
 
+  const liveQuoteRef = useRef<{ lastPrice: number | null; tickPrice: number | null }>({
+    lastPrice: null,
+    tickPrice: null,
+  })
+
   const live = useLiveMarketTick(
     selected?.instrumentToken ?? null,
     isZerodha && selected != null && isLivePullWindow,
   )
+
+  useEffect(() => {
+    liveQuoteRef.current = {
+      lastPrice: live.lastPrice,
+      tickPrice: live.lastTick?.p ?? null,
+    }
+  }, [live.lastPrice, live.lastTick])
 
   const parsePositiveNumber = (raw: string): number | null => {
     const n = Number(raw)
@@ -465,6 +493,7 @@ export function ScalperPage() {
           setGraphType(data.graphType)
         setShowVolume(Boolean(data.showVolume))
         setIsSafeMode(Boolean(data.safeModeEnabled))
+        setIsGttEnabled(data.gttEnabled !== false)
         setSafeStopLossPoints(
           typeof data.safeStopLossPoints === 'number' && Number.isFinite(data.safeStopLossPoints) && data.safeStopLossPoints > 0
             ? String(data.safeStopLossPoints)
@@ -497,6 +526,7 @@ export function ScalperPage() {
         graphType,
         showVolume,
         safeModeEnabled: isSafeMode,
+        gttEnabled: isGttEnabled,
         safeStopLossPoints:
           Number.isFinite(stopPts) && stopPts > 0 ? stopPts : 10,
         safeTriggerPoints:
@@ -509,6 +539,7 @@ export function ScalperPage() {
   }, [
     graphType,
     interval,
+    isGttEnabled,
     isSafeMode,
     rangePreset,
     safeSellTriggerPoints,
@@ -601,6 +632,16 @@ export function ScalperPage() {
           ? trigger
           : null
 
+      const series = rawSeriesRef.current ?? []
+      const lastBarClose = series.length > 0 ? (series[series.length - 1]?.close ?? null) : null
+      const submitReferencePrice = snapshotScalperSubmitReferencePrice(
+        normalizedPrice,
+        normalizedTrigger,
+        effectiveOrderType,
+        liveQuoteRef.current,
+        lastBarClose,
+      )
+
       setTradeBusy(true)
       setTradeError(null)
       setTradeInfo(null)
@@ -623,8 +664,22 @@ export function ScalperPage() {
           `${intent} placed (${transactionType}) · order ${placeRes.data.orderId}`,
         ]
 
-        const executionLikePrice = normalizedPrice ?? (live.lastPrice != null ? Number(live.lastPrice.toFixed(2)) : null)
-        if (isSafeMode && intent !== 'EXIT' && (executionLikePrice == null || !Number.isFinite(executionLikePrice))) {
+        let executionPrice = submitReferencePrice
+        if (intent !== 'EXIT' && executionPrice != null && Number.isFinite(executionPrice)) {
+          executionPrice = await resolveKiteOrderExecutionPrice(
+            placeRes.data.orderId,
+            executionPrice,
+            async () => {
+              const { data } = await api.get<KiteOrderBookResponse>('/broker/kite/orders')
+              return data.items ?? []
+            },
+          )
+          if (effectiveOrderType === 'MARKET') {
+            setTradePrice(executionPrice.toFixed(2))
+          }
+        }
+
+        if (isSafeMode && intent !== 'EXIT' && (executionPrice == null || !Number.isFinite(executionPrice))) {
           throw new Error('Safe Scalper needs a valid execution price (LTP/limit) to compute auto trigger and stop-loss.')
         }
 
@@ -636,30 +691,28 @@ export function ScalperPage() {
         const autoFromSafe =
           isSafeMode &&
           intent !== 'EXIT' &&
-          executionLikePrice != null &&
-          Number.isFinite(executionLikePrice) &&
+          executionPrice != null &&
+          Number.isFinite(executionPrice) &&
           safeStopPts != null &&
           safeTriggerPts != null
 
         const computedStopLoss =
           autoFromSafe
             ? transactionType === 'BUY'
-              ? Number((executionLikePrice - safeStopPts).toFixed(2))
-              : Number((executionLikePrice + safeStopPts).toFixed(2))
+              ? Number((executionPrice - safeStopPts).toFixed(2))
+              : Number((executionPrice + safeStopPts).toFixed(2))
             : null
         const computedTrigger =
           autoFromSafe
             ? transactionType === 'BUY'
-              ? Number((executionLikePrice + safeTriggerPts).toFixed(2))
-              : Number((executionLikePrice - safeTriggerPts).toFixed(2))
+              ? Number((executionPrice + safeTriggerPts).toFixed(2))
+              : Number((executionPrice - safeTriggerPts).toFixed(2))
             : null
 
         const stopLoss = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
         const targetTrigger = computedTrigger ?? parsePositiveNumber(tradeTriggerPrice)
-        if (intent !== 'EXIT') {
-          const gttReference =
-            executionLikePrice ?? (live.lastPrice != null && Number.isFinite(live.lastPrice) ? live.lastPrice : null)
-          if (gttReference == null || !Number.isFinite(gttReference)) {
+        if (intent !== 'EXIT' && isGttEnabled) {
+          if (executionPrice == null || !Number.isFinite(executionPrice)) {
             notes.push('GTT skipped: need entry/LTP for reference price.')
           } else {
             const gttRes = await api.post<KiteGttActionResultResponse>('/broker/kite/gtt', {
@@ -668,8 +721,8 @@ export function ScalperPage() {
               entryTransactionType: transactionType,
               quantity,
               product: resolvedProduct,
-              referencePrice: gttReference,
-              lastPrice: live.lastPrice ?? gttReference,
+              referencePrice: executionPrice,
+              lastPrice: liveQuoteRef.current.lastPrice ?? executionPrice,
               stopLossPrice: stopLoss,
               triggerPrice: targetTrigger,
               stopLossPercent: DEFAULT_GTT_STOP_LOSS_PCT,
@@ -680,21 +733,23 @@ export function ScalperPage() {
               `GTT OCO · SL ${gttRes.data.stopLossPrice.toFixed(2)} / target ${gttRes.data.targetPrice.toFixed(2)} · trigger ${gttRes.data.triggerId}`,
             )
           }
+        } else if (intent !== 'EXIT' && !isGttEnabled) {
+          notes.push('GTT off — entry placed without OCO.')
         }
 
         if (intent === 'BUY' || intent === 'SELL') setLastEntrySide(intent)
-        if ((intent === 'BUY' || intent === 'SELL') && executionLikePrice != null && Number.isFinite(executionLikePrice)) {
+        if ((intent === 'BUY' || intent === 'SELL') && executionPrice != null && Number.isFinite(executionPrice)) {
           const side = intent
           const manualTrigger = computedTrigger ?? parsePositiveNumber(tradeTriggerPrice)
           const manualStop = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
           setActiveTradeSide(side)
-          setEntryLinePrice(executionLikePrice)
+          setEntryLinePrice(executionPrice)
           if (side === 'BUY') {
             const nextTrigger = Number(
-              (manualTrigger ?? executionLikePrice * (1 + DEFAULT_GTT_TRIGGER_PCT / 100)).toFixed(2),
+              (manualTrigger ?? executionPrice * (1 + DEFAULT_GTT_TRIGGER_PCT / 100)).toFixed(2),
             )
             const nextStop = Number(
-              (manualStop ?? executionLikePrice * (1 - DEFAULT_GTT_STOP_LOSS_PCT / 100)).toFixed(2),
+              (manualStop ?? executionPrice * (1 - DEFAULT_GTT_STOP_LOSS_PCT / 100)).toFixed(2),
             )
             setTriggerLinePrice(nextTrigger)
             setStopLinePrice(nextStop)
@@ -702,10 +757,10 @@ export function ScalperPage() {
             setTradeStopLossPrice(nextStop.toFixed(2))
           } else {
             const nextTrigger = Number(
-              (manualTrigger ?? executionLikePrice * (1 - DEFAULT_GTT_TRIGGER_PCT / 100)).toFixed(2),
+              (manualTrigger ?? executionPrice * (1 - DEFAULT_GTT_TRIGGER_PCT / 100)).toFixed(2),
             )
             const nextStop = Number(
-              (manualStop ?? executionLikePrice * (1 + DEFAULT_GTT_STOP_LOSS_PCT / 100)).toFixed(2),
+              (manualStop ?? executionPrice * (1 + DEFAULT_GTT_STOP_LOSS_PCT / 100)).toFixed(2),
             )
             setTriggerLinePrice(nextTrigger)
             setStopLinePrice(nextStop)
@@ -731,6 +786,7 @@ export function ScalperPage() {
     },
     [
       isZerodha,
+      isGttEnabled,
       isSafeMode,
       lastEntrySide,
       activeTradeSide,
@@ -743,7 +799,6 @@ export function ScalperPage() {
       tradeQty,
       tradeStopLossPrice,
       tradeTriggerPrice,
-      live.lastPrice,
     ],
   )
 
@@ -1171,6 +1226,15 @@ export function ScalperPage() {
           </span>
         </div>
         <div className="d-flex flex-wrap align-items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={isGttEnabled ? 'primary' : 'outline-secondary'}
+            onClick={() => setIsGttEnabled((v) => !v)}
+            title="After BUY/SELL, place a Kite GTT OCO with default 5% stop-loss and target."
+          >
+            {isGttEnabled ? 'GTT: ON' : 'GTT: OFF'}
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -1795,11 +1859,13 @@ export function ScalperPage() {
                           {tradeBusy ? 'Placing…' : 'Exit'}
                         </Button>
                         <InputGroup.Text className="small text-muted">
-                          {isSafeMode
-                            ? `Safe mode: auto SL ${safeStopLossPoints || 'N'} pts, auto target ${safeSellTriggerPoints || 'M'} pts (GTT OCO)`
-                            : lastEntrySide
-                              ? `Last entry: ${lastEntrySide} · GTT defaults ${DEFAULT_GTT_STOP_LOSS_PCT}% SL / ${DEFAULT_GTT_TRIGGER_PCT}% target · drag lines on chart`
-                              : `After entry, GTT OCO uses ${DEFAULT_GTT_STOP_LOSS_PCT}% stop-loss and ${DEFAULT_GTT_TRIGGER_PCT}% target unless overridden`}
+                          {!isGttEnabled
+                            ? 'GTT off — entries place without OCO (chart lines are planning guides only)'
+                            : isSafeMode
+                              ? `Safe mode: auto SL ${safeStopLossPoints || 'N'} pts, auto target ${safeSellTriggerPoints || 'M'} pts (GTT OCO)`
+                              : lastEntrySide
+                                ? `Last entry: ${lastEntrySide} · GTT defaults ${DEFAULT_GTT_STOP_LOSS_PCT}% SL / ${DEFAULT_GTT_TRIGGER_PCT}% target · drag lines on chart`
+                                : `After entry, GTT OCO uses ${DEFAULT_GTT_STOP_LOSS_PCT}% stop-loss and ${DEFAULT_GTT_TRIGGER_PCT}% target unless overridden`}
                         </InputGroup.Text>
                       </InputGroup>
                     </div>
