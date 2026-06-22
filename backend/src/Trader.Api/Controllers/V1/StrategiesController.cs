@@ -1,17 +1,13 @@
-using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Trader.Api.Extensions;
+using Trader.Api.Routing;
 using Trader.Application.Strategies;
 
 namespace Trader.Api.Controllers.V1;
 
-[ApiController]
 [Authorize]
-[Route("api/v{version:apiVersion}/[controller]")]
-[ApiVersion("1.0")]
-[ApiExplorerSettings(GroupName = "v1")]
-public sealed class StrategiesController : ControllerBase
+public sealed class StrategiesController : V1NamedControllerBase
 {
     private readonly IStrategyService _strategies;
 

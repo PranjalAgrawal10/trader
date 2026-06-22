@@ -82,6 +82,9 @@ public interface IBrokerService
     /// <summary>Current Kite net positions (from <c>GET /portfolio/positions</c> net array).</summary>
     Task<IReadOnlyList<KiteNetPositionDto>> GetKiteNetPositionsAsync(Guid userId, CancellationToken ct = default);
 
+    /// <summary>Kite funds and margins (<c>GET /user/margins</c>).</summary>
+    Task<KiteUserMarginsDto> GetKiteUserMarginsAsync(Guid userId, CancellationToken ct = default);
+
     Task<IReadOnlyList<KiteNetPositionDto>> GetNetPositionsAsync(
         Guid userId,
         string? broker,

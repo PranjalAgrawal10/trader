@@ -1,8 +1,10 @@
 import axios from 'axios'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { Alert, Button, Card, Col, Form, Row, Spinner } from 'react-bootstrap'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Layout } from '../components/Layout'
+import { BROKER_PROFILE_SECTION_ID } from '../constants/profileSections'
 
 const inrFmt = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -10,6 +12,26 @@ const inrFmt = new Intl.NumberFormat('en-IN', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
+
+interface BrokerStatusResponse {
+  connected: boolean
+  provider: string | null
+}
+
+interface KiteMarginSegment {
+  enabled: boolean
+  net: number
+  availableCash: number
+  liveBalance: number
+  openingBalance: number
+  intradayPayin: number
+  utilisedDebits: number
+}
+
+interface KiteUserMarginsResponse {
+  equity: KiteMarginSegment | null
+  commodity: KiteMarginSegment | null
+}
 
 function problemDetail(err: unknown): string | null {
   if (axios.isAxiosError(err)) {
@@ -20,30 +42,98 @@ function problemDetail(err: unknown): string | null {
   return null
 }
 
+function MarginSegmentTable({ label, segment }: { label: string; segment: KiteMarginSegment }) {
+  if (!segment.enabled) {
+    return (
+      <p className="small text-secondary mb-0">
+        {label}: segment not enabled on your Kite account.
+      </p>
+    )
+  }
+
+  return (
+    <div className="mb-3">
+      <div className="small fw-semibold mb-1">{label}</div>
+      <div className="small font-monospace d-grid gap-1" style={{ gridTemplateColumns: '1fr auto' }}>
+        <span className="text-secondary">Net (available to trade)</span>
+        <span>{inrFmt.format(segment.net)}</span>
+        <span className="text-secondary">Live balance</span>
+        <span>{inrFmt.format(segment.liveBalance)}</span>
+        <span className="text-secondary">Available cash</span>
+        <span>{inrFmt.format(segment.availableCash)}</span>
+        <span className="text-secondary">Opening balance</span>
+        <span>{inrFmt.format(segment.openingBalance)}</span>
+        {segment.intradayPayin > 0 ? (
+          <>
+            <span className="text-secondary">Intraday pay-in</span>
+            <span>{inrFmt.format(segment.intradayPayin)}</span>
+          </>
+        ) : null}
+        {segment.utilisedDebits > 0 ? (
+          <>
+            <span className="text-secondary">Utilised margin</span>
+            <span>{inrFmt.format(segment.utilisedDebits)}</span>
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function WalletPage() {
   const [balance, setBalance] = useState<number | null>(null)
+  const [kiteMargins, setKiteMargins] = useState<KiteUserMarginsResponse | null>(null)
+  const [kiteConnected, setKiteConnected] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [kiteLoading, setKiteLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [amountText, setAmountText] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [kiteError, setKiteError] = useState<string | null>(null)
 
-  const loadBalance = useCallback(async () => {
+  const loadKiteMargins = useCallback(async (connected: boolean, provider: string | null) => {
+    const isZerodha = connected && (provider ?? '').toLowerCase() === 'zerodha'
+    setKiteConnected(isZerodha)
+    if (!isZerodha) {
+      setKiteMargins(null)
+      setKiteError(null)
+      return
+    }
+
+    setKiteLoading(true)
+    setKiteError(null)
+    try {
+      const { data } = await api.get<KiteUserMarginsResponse>('/broker/kite/margins')
+      setKiteMargins(data)
+    } catch (e) {
+      setKiteMargins(null)
+      setKiteError(problemDetail(e) ?? 'Could not load Kite balance.')
+    } finally {
+      setKiteLoading(false)
+    }
+  }, [])
+
+  const loadWallet = useCallback(async () => {
     setError(null)
     setLoading(true)
     try {
-      const { data } = await api.get<{ balance: number }>('/wallet')
-      setBalance(data.balance)
+      const [walletRes, brokerRes] = await Promise.all([
+        api.get<{ balance: number }>('/wallet'),
+        api.get<BrokerStatusResponse>('/broker/status'),
+      ])
+      setBalance(walletRes.data.balance)
+      await loadKiteMargins(brokerRes.data.connected, brokerRes.data.provider)
     } catch (e) {
       setBalance(null)
       setError(problemDetail(e) ?? 'Could not load wallet balance.')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadKiteMargins])
 
   useEffect(() => {
-    void loadBalance()
-  }, [loadBalance])
+    void loadWallet()
+  }, [loadWallet])
 
   const onSubmit = async (ev: FormEvent) => {
     ev.preventDefault()
@@ -66,16 +156,58 @@ export function WalletPage() {
     }
   }
 
+  const refreshKite = () => {
+    void loadKiteMargins(kiteConnected, kiteConnected ? 'zerodha' : null)
+  }
+
   return (
     <Layout>
-      <Row className="justify-content-center">
+      <Row className="justify-content-center g-3">
         <Col xs={12} md={8} lg={6}>
           <h1 className="h4 mb-3">Wallet</h1>
+
+          <Card className="border-secondary shadow-sm mb-3">
+            <Card.Body>
+              <Card.Title className="h6 mb-3">Zerodha Kite balance</Card.Title>
+              <p className="text-secondary small mb-3">
+                Live funds and margin from your linked Zerodha Kite account.
+              </p>
+              {kiteError ? (
+                <Alert variant="warning" className="py-2 small">
+                  {kiteError}
+                </Alert>
+              ) : null}
+              {!kiteConnected && !kiteLoading && !loading ? (
+                <p className="small text-secondary mb-0">
+                  Connect Zerodha under{' '}
+                  <Link to={`/profile#${BROKER_PROFILE_SECTION_ID}`}>Profile → Brokers</Link> to see your Kite balance here.
+                </p>
+              ) : null}
+              {kiteLoading || (loading && kiteConnected) ? (
+                <div className="d-flex align-items-center gap-2 text-secondary">
+                  <Spinner animation="border" size="sm" />
+                  Loading Kite balance…
+                </div>
+              ) : kiteConnected && kiteMargins ? (
+                <>
+                  {kiteMargins.equity ? <MarginSegmentTable label="Equity (F&O / cash)" segment={kiteMargins.equity} /> : null}
+                  {kiteMargins.commodity ? <MarginSegmentTable label="Commodity (MCX)" segment={kiteMargins.commodity} /> : null}
+                  {!kiteMargins.equity && !kiteMargins.commodity ? (
+                    <p className="small text-secondary mb-0">No margin segments returned from Kite.</p>
+                  ) : null}
+                  <Button type="button" variant="outline-secondary" size="sm" onClick={refreshKite} disabled={kiteLoading}>
+                    Refresh Kite balance
+                  </Button>
+                </>
+              ) : null}
+            </Card.Body>
+          </Card>
+
           <Card className="border-secondary shadow-sm">
             <Card.Body>
               <Card.Title className="h6 mb-3">Paper balance</Card.Title>
               <p className="text-secondary small mb-3">
-                Add funds manually for now—there is no payment gateway. Amounts are stored in INR (simulated).
+                Simulated INR for demo auto-trade and manual paper trades — not your broker account. Add funds manually; there is no payment gateway.
               </p>
               {error ? (
                 <Alert variant="danger" className="py-2 small">
@@ -85,7 +217,7 @@ export function WalletPage() {
               {loading ? (
                 <div className="d-flex align-items-center gap-2 text-secondary">
                   <Spinner animation="border" size="sm" />
-                  Loading balance…
+                  Loading paper balance…
                 </div>
               ) : (
                 <>
@@ -114,8 +246,14 @@ export function WalletPage() {
                           'Add funds'
                         )}
                       </Button>
-                      <Button type="button" variant="outline-secondary" size="sm" onClick={() => void loadBalance()} disabled={submitting}>
-                        Refresh
+                      <Button
+                        type="button"
+                        variant="outline-secondary"
+                        size="sm"
+                        onClick={() => void loadWallet()}
+                        disabled={submitting || loading}
+                      >
+                        Refresh all
                       </Button>
                     </div>
                   </Form>

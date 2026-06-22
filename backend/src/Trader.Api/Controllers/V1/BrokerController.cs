@@ -1,4 +1,3 @@
-using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -6,16 +5,14 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Globalization;
 using Trader.Api.Extensions;
+using Trader.Api.Routing;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
 
 namespace Trader.Api.Controllers.V1;
 
-[ApiController]
-[Route("api/v{version:apiVersion}/broker")]
-[ApiVersion("1.0")]
-[ApiExplorerSettings(GroupName = "v1")]
-public sealed class BrokerController : ControllerBase
+[V1Route("broker")]
+public sealed class BrokerController : V1ControllerBase
 {
     private const string KiteOAuthStateCookie = "Trader.KiteOAuth.State";
 
@@ -47,6 +44,21 @@ public sealed class BrokerController : ControllerBase
     {
         var providers = await _broker.GetOrderBrokerProvidersAsync(User.GetUserId(), ct);
         return Ok(providers);
+    }
+
+    [Authorize]
+    [HttpGet("kite/margins")]
+    public async Task<ActionResult<KiteUserMarginsDto>> GetKiteMargins(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _broker.GetKiteUserMarginsAsync(User.GetUserId(), ct);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     [Authorize]

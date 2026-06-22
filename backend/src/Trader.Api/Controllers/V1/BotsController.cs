@@ -1,17 +1,13 @@
-using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Trader.Api.Extensions;
+using Trader.Api.Routing;
 using Trader.Application.Bots;
 
 namespace Trader.Api.Controllers.V1;
 
-[ApiController]
 [Authorize]
-[Route("api/v{version:apiVersion}/[controller]")]
-[ApiVersion("1.0")]
-[ApiExplorerSettings(GroupName = "v1")]
-public sealed class BotsController : ControllerBase
+public sealed class BotsController : V1NamedControllerBase
 {
     private readonly IBotService _bots;
 

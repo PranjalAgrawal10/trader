@@ -1,18 +1,14 @@
-using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Trader.Api.Extensions;
 using Trader.Api.Models;
+using Trader.Api.Routing;
 using Trader.Application.Auth;
 
 namespace Trader.Api.Controllers.V1;
 
-[ApiController]
-[Route("api/v{version:apiVersion}/[controller]")]
-[ApiVersion("1.0")]
-[ApiExplorerSettings(GroupName = "v1")]
-public sealed class AuthController : ControllerBase
+public sealed class AuthController : V1NamedControllerBase
 {
     private readonly IAuthService _auth;
     private readonly IEmailOtpService _emailOtp;

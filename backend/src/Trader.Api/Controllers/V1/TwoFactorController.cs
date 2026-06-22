@@ -1,17 +1,14 @@
-using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Trader.Api.Extensions;
+using Trader.Api.Routing;
 using Trader.Application.Auth;
 
 namespace Trader.Api.Controllers.V1;
 
 /// <summary>Spec-aligned 2FA routes (snake_case JSON). Password login stays on <see cref="AuthController"/>.</summary>
-[ApiController]
-[Route("api/v{version:apiVersion}/2fa")]
-[ApiVersion("1.0")]
-[ApiExplorerSettings(GroupName = "v1")]
-public sealed class TwoFactorController : ControllerBase
+[V1Route("2fa")]
+public sealed class TwoFactorController : V1ControllerBase
 {
     private readonly IAuthService _auth;
 

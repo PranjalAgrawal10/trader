@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Trader.Api.Extensions;
+using Trader.Api.Routing;
 using Trader.Application.Streaming;
 
 namespace Trader.Api.Hubs;
@@ -10,7 +11,7 @@ namespace Trader.Api.Hubs;
 [Authorize]
 public sealed class MarketHub : Hub
 {
-    public const string Path = "/hubs/market";
+    public const string Path = ApiRoutes.HubsMarket;
 
     private readonly IKiteTickerSessionManager _sessions;
 

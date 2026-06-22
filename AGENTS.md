@@ -7,6 +7,8 @@ Facts that stay stable across chats; **architecture rules live in `.cursor/rules
 | Area | Path |
 |------|------|
 | API host | `backend/src/Trader.Api` |
+| API routing (version prefix, health, SignalR map) | `backend/src/Trader.Api/Routing` |
+| V1 controllers | `backend/src/Trader.Api/Controllers/V1` |
 | Application (use cases, DTOs) | `backend/src/Trader.Application` |
 | Ports / abstractions | `backend/src/Trader.Application/Abstractions` |
 | Domain | `backend/src/Trader.Domain` |

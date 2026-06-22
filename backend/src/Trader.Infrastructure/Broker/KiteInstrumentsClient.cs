@@ -413,6 +413,52 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         }
     }
 
+    public async Task<KiteUserMarginsFetchResult> FetchUserMarginsAsync(
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "user/margins");
+        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
+        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+
+        using var response = await _http.SendAsync(request, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for user margins.";
+            return new KiteUserMarginsFetchResult(false, msg, null);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("status", out var st)
+                || !string.Equals(st.GetString(), "success", StringComparison.OrdinalIgnoreCase))
+            {
+                var msg = TryParseKiteMessage(body) ?? "Unexpected user margins response from Kite.";
+                return new KiteUserMarginsFetchResult(false, msg, null);
+            }
+
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object)
+                return new KiteUserMarginsFetchResult(true, null, new KiteUserMarginsDto(null, null));
+
+            KiteMarginSegmentDto? equity = null;
+            KiteMarginSegmentDto? commodity = null;
+            if (data.TryGetProperty("equity", out var equityEl))
+                equity = TryParseMarginSegment(equityEl);
+            if (data.TryGetProperty("commodity", out var commodityEl))
+                commodity = TryParseMarginSegment(commodityEl);
+
+            return new KiteUserMarginsFetchResult(true, null, new KiteUserMarginsDto(equity, commodity));
+        }
+        catch (JsonException)
+        {
+            return new KiteUserMarginsFetchResult(false, "Could not parse Kite user margins response.", null);
+        }
+    }
+
     public Task<KiteOrderActionResult> CancelOrderAsync(
         string variety,
         string orderId,
@@ -859,6 +905,58 @@ public sealed partial class KiteInstrumentsClient : IKiteInstrumentsClient
         }
 
         return TimeZoneInfo.Utc;
+    }
+
+    private static KiteMarginSegmentDto? TryParseMarginSegment(JsonElement row)
+    {
+        if (row.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var enabled = row.TryGetProperty("enabled", out var enabledEl)
+                      && enabledEl.ValueKind == JsonValueKind.True;
+
+        if (!TryReadDecimalProperty(row, "net", out var net))
+            net = 0m;
+
+        decimal availableCash = 0m;
+        decimal liveBalance = 0m;
+        decimal openingBalance = 0m;
+        decimal intradayPayin = 0m;
+        if (row.TryGetProperty("available", out var availableEl) && availableEl.ValueKind == JsonValueKind.Object)
+        {
+            TryReadDecimalProperty(availableEl, "cash", out availableCash);
+            TryReadDecimalProperty(availableEl, "live_balance", out liveBalance);
+            TryReadDecimalProperty(availableEl, "opening_balance", out openingBalance);
+            TryReadDecimalProperty(availableEl, "intraday_payin", out intradayPayin);
+        }
+
+        decimal utilisedDebits = 0m;
+        if (row.TryGetProperty("utilised", out var utilisedEl) && utilisedEl.ValueKind == JsonValueKind.Object)
+            TryReadDecimalProperty(utilisedEl, "debits", out utilisedDebits);
+
+        return new KiteMarginSegmentDto(
+            enabled,
+            net,
+            availableCash,
+            liveBalance,
+            openingBalance,
+            intradayPayin,
+            utilisedDebits);
+    }
+
+    private static bool TryReadDecimalProperty(JsonElement parent, string key, out decimal value)
+    {
+        value = 0m;
+        if (!parent.TryGetProperty(key, out var el) || el.ValueKind == JsonValueKind.Null)
+            return false;
+
+        if (el.ValueKind == JsonValueKind.Number)
+        {
+            value = el.GetDecimal();
+            return true;
+        }
+
+        return decimal.TryParse(el.ToString(), NumberStyles.Number, CultureInfo.InvariantCulture, out value);
     }
 
     private static string? NullableTrim(string value)

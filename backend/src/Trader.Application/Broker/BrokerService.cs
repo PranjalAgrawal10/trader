@@ -584,6 +584,23 @@ public sealed class BrokerService : IBrokerService
             .ToList();
     }
 
+    public async Task<KiteUserMarginsDto> GetKiteUserMarginsAsync(Guid userId, CancellationToken ct = default)
+    {
+        var status = await GetStatusAsync(userId, ct).ConfigureAwait(false);
+        if (!status.Connected
+            || !string.Equals(status.Provider, BrokerZerodha, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Connect Zerodha to view Kite account balance.");
+        }
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var fetched = await _kiteInstruments.FetchUserMarginsAsync(apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!fetched.Success || fetched.Margins is null)
+            throw new InvalidOperationException(fetched.ErrorMessage ?? "Could not load Kite margins.");
+
+        return fetched.Margins;
+    }
+
     public async Task<IReadOnlyList<KiteNetPositionDto>> GetNetPositionsAsync(
         Guid userId,
         string? broker,

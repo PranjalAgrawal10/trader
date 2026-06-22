@@ -131,6 +131,21 @@ public sealed record KiteNetPositionDto(
     string Product,
     int Quantity);
 
+/// <summary>One segment from Kite <c>GET /user/margins</c> (equity or commodity).</summary>
+public sealed record KiteMarginSegmentDto(
+    bool Enabled,
+    decimal Net,
+    decimal AvailableCash,
+    decimal LiveBalance,
+    decimal OpeningBalance,
+    decimal IntradayPayin,
+    decimal UtilisedDebits);
+
+/// <summary>Funds and margin snapshot from Kite <c>GET /user/margins</c>.</summary>
+public sealed record KiteUserMarginsDto(
+    KiteMarginSegmentDto? Equity,
+    KiteMarginSegmentDto? Commodity);
+
 public sealed record KiteOrderActionResultDto(string OrderId, string Action, string Message);
 
 /// <summary>Two-leg GTT OCO (stop-loss + target). Percent fields default to 5 when omitted.</summary>

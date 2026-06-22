@@ -75,6 +75,12 @@ public interface IKiteInstrumentsClient
         string accessToken,
         CancellationToken ct = default);
 
+    /// <summary>Kite <c>GET /user/margins</c> — equity and commodity funds/margins.</summary>
+    Task<KiteUserMarginsFetchResult> FetchUserMarginsAsync(
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
+
     /// <summary>Kite <c>DELETE /orders/{variety}/{order_id}</c>.</summary>
     Task<KiteOrderActionResult> CancelOrderAsync(
         string variety,
@@ -137,6 +143,11 @@ public sealed record KitePositionsFetchResult(
     bool Success,
     string? ErrorMessage,
     IReadOnlyList<KitePositionNetItemDto> NetItems);
+
+public sealed record KiteUserMarginsFetchResult(
+    bool Success,
+    string? ErrorMessage,
+    KiteUserMarginsDto? Margins);
 
 public sealed record KiteOrderActionResult(
     bool Success,

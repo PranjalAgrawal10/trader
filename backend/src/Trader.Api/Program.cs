@@ -1,5 +1,4 @@
 using System.Text;
-using Asp.Versioning;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -16,9 +15,8 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
 using Serilog.Exceptions;
-using Trader.Api.Filters;
 using Trader.Api.Hosting;
-using Trader.Api.Hubs;
+using Trader.Api.Routing;
 using Trader.Api.Streaming;
 using Trader.Application;
 using Trader.Application.Configuration;
@@ -57,14 +55,7 @@ public sealed class Program
                     .Enrich.WithExceptionDetails();
             });
 
-            builder.Services.AddScoped<ApplicationExceptionFilter>();
-
-            builder.Services.AddControllers(options => options.Filters.AddService<ApplicationExceptionFilter>())
-                .AddJsonOptions(options =>
-                {
-                    options.JsonSerializerOptions.Converters.Add(
-                        new System.Text.Json.Serialization.JsonStringEnumConverter(System.Text.Json.JsonNamingPolicy.CamelCase));
-                });
+            builder.Services.AddTraderApiControllers();
 
         // Single registration: TOTP secrets, pending login tickets, and broker OAuth state all use this key ring.
         var dataProtectionBuilder = builder.Services.AddDataProtection().SetApplicationName("Trader");
@@ -88,13 +79,6 @@ public sealed class Program
             builder.Services.AddSignalR();
             builder.Services.AddSingleton<SignalRMarketTickDispatcher>();
             builder.Services.AddSingleton<IMarketTickDispatcher, FanOutMarketTickDispatcher>();
-
-            builder.Services.AddApiVersioning(options =>
-            {
-                options.DefaultApiVersion = new ApiVersion(1, 0);
-                options.AssumeDefaultVersionWhenUnspecified = true;
-                options.ReportApiVersions = true;
-            }).AddMvc();
 
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(c =>
@@ -309,26 +293,7 @@ public sealed class Program
             app.UseAuthentication();
             app.UseAuthorization();
 
-            app.MapGet("/health", () => Results.Ok(new { status = "ok" }))
-                .AllowAnonymous();
-
-        // Same payload; use this path when App Platform ingress only forwards `/api/*` to the API (root `/health` would hit the static site).
-            app.MapGet("/api/health", () => Results.Ok(new { status = "ok" }))
-                .AllowAnonymous();
-
-            app.MapGet("/", () => Results.Json(new
-                {
-                    service = "Trader.Api",
-                    health = "/health",
-                    api = "/api/v1",
-                    swagger = app.Configuration.GetValue("Swagger:Enabled", false) || app.Environment.IsDevelopment()
-                        ? "/swagger"
-                        : (string?)null,
-                }))
-                .AllowAnonymous();
-
-            app.MapHub<MarketHub>(MarketHub.Path);
-            app.MapControllers();
+            app.MapTraderEndpoints();
 
             await app.RunAsync();
         }
