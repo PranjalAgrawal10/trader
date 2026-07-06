@@ -51,7 +51,7 @@ public sealed record KiteUserMarginsDto(
 
 public sealed record KiteOrderActionResultDto(string OrderId, string Action, string Message);
 
-/// <summary>Two-leg GTT OCO (stop-loss + target). Percent fields default to 5 when omitted.</summary>
+/// <summary>GTT stop-loss / profit target (single leg or two-leg OCO). Percent fields default to 5 when omitted.</summary>
 public sealed class KiteGttCreateRequestDto
 {
     public string? Exchange { get; set; }
@@ -76,6 +76,13 @@ public sealed class KiteGttCreateRequestDto
 
     public decimal StopLossPercent { get; set; } = 5m;
     public decimal TriggerPercent { get; set; } = 5m;
+
+    /// <summary>Place the stop-loss GTT leg (default <c>true</c>).</summary>
+    public bool StopLossEnabled { get; set; } = true;
+
+    /// <summary>Place the profit-target GTT leg (default <c>true</c>).</summary>
+    public bool ProfitEnabled { get; set; } = true;
+
     public string? Tag { get; set; }
 }
 

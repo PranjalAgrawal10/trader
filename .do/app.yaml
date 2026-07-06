@@ -33,7 +33,7 @@ ingress:
 services:
   - name: trader
     github:
-      repo: YOUR_GITHUB_USER/Trader
+      repo: PranjalAgrawal10/Trader
       branch: main
       deploy_on_push: true
     source_dir: backend
@@ -52,7 +52,7 @@ services:
 static_sites:
   - name: trader-web
     github:
-      repo: YOUR_GITHUB_USER/Trader
+      repo: PranjalAgrawal10/Trader
       branch: main
       deploy_on_push: true
     source_dir: frontend

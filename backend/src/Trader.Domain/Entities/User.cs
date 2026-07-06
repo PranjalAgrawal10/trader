@@ -62,8 +62,14 @@ public class User
     /// <summary>M points for auto trigger in safe scalper mode.</summary>
     public decimal? ScalperSafeTriggerPoints { get; set; }
 
-    /// <summary>When true, place Kite GTT OCO after scalper BUY/SELL entries.</summary>
+    /// <summary>Legacy mirror: true when either <see cref="ScalperGttLossEnabled"/> or <see cref="ScalperGttProfitEnabled"/> is on.</summary>
     public bool ScalperGttEnabled { get; set; } = true;
+
+    /// <summary>When true, place a Kite GTT stop-loss leg after scalper entries (when any GTT is enabled).</summary>
+    public bool ScalperGttLossEnabled { get; set; } = true;
+
+    /// <summary>When true, place a Kite GTT profit-target leg after scalper entries (when any GTT is enabled).</summary>
+    public bool ScalperGttProfitEnabled { get; set; } = true;
 
     /// <summary>Stored balance for the in-app wallet (simulated top-ups; no payment integration yet).</summary>
     public decimal WalletBalance { get; set; }

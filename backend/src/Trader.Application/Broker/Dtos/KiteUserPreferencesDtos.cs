@@ -10,6 +10,9 @@ public sealed record ScalperSettingsDto(
     bool SafeModeEnabled,
     decimal SafeStopLossPoints,
     decimal SafeTriggerPoints,
+    bool GttLossEnabled,
+    bool GttProfitEnabled,
+    /// <summary><c>true</c> when either leg is enabled (legacy clients).</summary>
     bool GttEnabled);
 
 public sealed class ScalperSettingsPutDto
@@ -21,6 +24,11 @@ public sealed class ScalperSettingsPutDto
     public bool SafeModeEnabled { get; set; }
     public decimal SafeStopLossPoints { get; set; }
     public decimal SafeTriggerPoints { get; set; }
+
+    public bool GttLossEnabled { get; set; } = true;
+    public bool GttProfitEnabled { get; set; } = true;
+
+    /// <summary>Legacy master toggle; when the new leg flags are omitted from older clients, both legs follow this value.</summary>
     public bool GttEnabled { get; set; } = true;
 }
 

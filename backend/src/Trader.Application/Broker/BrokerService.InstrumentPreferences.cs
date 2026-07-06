@@ -203,7 +203,9 @@ public sealed partial class BrokerService
             row.SafeModeEnabled,
             stopPts,
             triggerPts,
-            row.GttEnabled);
+            row.GttLossEnabled,
+            row.GttProfitEnabled,
+            row.GttLossEnabled || row.GttProfitEnabled);
     }
 
     public async Task SaveScalperSettingsAsync(Guid userId, ScalperSettingsPutDto body, CancellationToken ct = default)
@@ -214,6 +216,8 @@ public sealed partial class BrokerService
         var graphType = NormalizeScalperGraphTypeOrDefault(body.GraphType);
         var stopPts = NormalizeScalperPointsOrDefault(body.SafeStopLossPoints, 10m);
         var triggerPts = NormalizeScalperPointsOrDefault(body.SafeTriggerPoints, 20m);
+        var lossEnabled = body.GttLossEnabled;
+        var profitEnabled = body.GttProfitEnabled;
 
         await _kiteChartSettings.SaveScalperSettingsAsync(
             userId,
@@ -225,7 +229,8 @@ public sealed partial class BrokerService
                 body.SafeModeEnabled,
                 stopPts,
                 triggerPts,
-                body.GttEnabled),
+                lossEnabled,
+                profitEnabled),
             ct).ConfigureAwait(false);
     }
 

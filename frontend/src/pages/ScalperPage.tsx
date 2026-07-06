@@ -148,6 +148,8 @@ interface ScalperSettingsResponse {
   safeModeEnabled: boolean
   safeStopLossPoints: number
   safeTriggerPoints: number
+  gttLossEnabled: boolean
+  gttProfitEnabled: boolean
   gttEnabled: boolean
 }
 
@@ -378,7 +380,8 @@ function buildAtmChainRows(
 
 export function ScalperPage() {
   const [isSafeMode, setIsSafeMode] = useState(false)
-  const [isGttEnabled, setIsGttEnabled] = useState(true)
+  const [isGttLossEnabled, setIsGttLossEnabled] = useState(true)
+  const [isGttProfitEnabled, setIsGttProfitEnabled] = useState(true)
   const [broker, setBroker] = useState<BrokerStatusResponse | null>(null)
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
@@ -494,7 +497,14 @@ export function ScalperPage() {
           setGraphType(data.graphType)
         setShowVolume(Boolean(data.showVolume))
         setIsSafeMode(Boolean(data.safeModeEnabled))
-        setIsGttEnabled(data.gttEnabled !== false)
+        if (typeof data.gttLossEnabled === 'boolean' && typeof data.gttProfitEnabled === 'boolean') {
+          setIsGttLossEnabled(data.gttLossEnabled)
+          setIsGttProfitEnabled(data.gttProfitEnabled)
+        } else {
+          const master = data.gttEnabled !== false
+          setIsGttLossEnabled(master)
+          setIsGttProfitEnabled(master)
+        }
         setSafeStopLossPoints(
           typeof data.safeStopLossPoints === 'number' && Number.isFinite(data.safeStopLossPoints) && data.safeStopLossPoints > 0
             ? String(data.safeStopLossPoints)
@@ -527,7 +537,9 @@ export function ScalperPage() {
         graphType,
         showVolume,
         safeModeEnabled: isSafeMode,
-        gttEnabled: isGttEnabled,
+        gttLossEnabled: isGttLossEnabled,
+        gttProfitEnabled: isGttProfitEnabled,
+        gttEnabled: isGttLossEnabled || isGttProfitEnabled,
         safeStopLossPoints:
           Number.isFinite(stopPts) && stopPts > 0 ? stopPts : 10,
         safeTriggerPoints:
@@ -540,7 +552,8 @@ export function ScalperPage() {
   }, [
     graphType,
     interval,
-    isGttEnabled,
+    isGttLossEnabled,
+    isGttProfitEnabled,
     isSafeMode,
     rangePreset,
     safeSellTriggerPoints,
@@ -712,7 +725,8 @@ export function ScalperPage() {
 
         const stopLoss = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
         const targetTrigger = computedTrigger ?? parsePositiveNumber(tradeTriggerPrice)
-        if (intent !== 'EXIT' && isGttEnabled) {
+        const gttAnyEnabled = isGttLossEnabled || isGttProfitEnabled
+        if (intent !== 'EXIT' && gttAnyEnabled) {
           if (executionPrice == null || !Number.isFinite(executionPrice)) {
             notes.push('GTT skipped: need entry/LTP for reference price.')
           } else {
@@ -728,14 +742,23 @@ export function ScalperPage() {
               triggerPrice: targetTrigger,
               stopLossPercent: DEFAULT_GTT_STOP_LOSS_PCT,
               triggerPercent: DEFAULT_GTT_TRIGGER_PCT,
+              stopLossEnabled: isGttLossEnabled,
+              profitEnabled: isGttProfitEnabled,
               tag: 'scalper-gtt',
             })
-            notes.push(
-              `GTT OCO · SL ${gttRes.data.stopLossPrice.toFixed(2)} / target ${gttRes.data.targetPrice.toFixed(2)} · trigger ${gttRes.data.triggerId}`,
-            )
+            const slPart =
+              isGttLossEnabled && gttRes.data.stopLossPrice > 0
+                ? `SL ${gttRes.data.stopLossPrice.toFixed(2)}`
+                : null
+            const tpPart =
+              isGttProfitEnabled && gttRes.data.targetPrice > 0
+                ? `target ${gttRes.data.targetPrice.toFixed(2)}`
+                : null
+            const legLabel = [slPart, tpPart].filter(Boolean).join(' / ') || gttRes.data.action
+            notes.push(`GTT ${legLabel} · trigger ${gttRes.data.triggerId}`)
           }
-        } else if (intent !== 'EXIT' && !isGttEnabled) {
-          notes.push('GTT off — entry placed without OCO.')
+        } else if (intent !== 'EXIT' && !gttAnyEnabled) {
+          notes.push('GTT off — entry placed without exit triggers.')
         }
 
         if (intent === 'BUY' || intent === 'SELL') setLastEntrySide(intent)
@@ -787,7 +810,8 @@ export function ScalperPage() {
     },
     [
       isZerodha,
-      isGttEnabled,
+      isGttLossEnabled,
+      isGttProfitEnabled,
       isSafeMode,
       lastEntrySide,
       activeTradeSide,
@@ -1247,11 +1271,20 @@ export function ScalperPage() {
           <Button
             type="button"
             size="sm"
-            variant={isGttEnabled ? 'primary' : 'outline-secondary'}
-            onClick={() => setIsGttEnabled((v) => !v)}
-            title="After BUY/SELL, place a Kite GTT OCO with default 5% stop-loss and target."
+            variant={isGttLossEnabled ? 'primary' : 'outline-secondary'}
+            onClick={() => setIsGttLossEnabled((v) => !v)}
+            title="After BUY/SELL, place a Kite GTT stop-loss leg (default 5% from entry)."
           >
-            {isGttEnabled ? 'GTT: ON' : 'GTT: OFF'}
+            {isGttLossEnabled ? 'GTT SL: ON' : 'GTT SL: OFF'}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={isGttProfitEnabled ? 'primary' : 'outline-secondary'}
+            onClick={() => setIsGttProfitEnabled((v) => !v)}
+            title="After BUY/SELL, place a Kite GTT profit-target leg (default 5% from entry)."
+          >
+            {isGttProfitEnabled ? 'GTT TP: ON' : 'GTT TP: OFF'}
           </Button>
           <Button
             type="button"
@@ -1874,13 +1907,17 @@ export function ScalperPage() {
                           {tradeBusy ? 'Placing…' : 'Exit'}
                         </Button>
                         <InputGroup.Text className="small text-muted">
-                          {!isGttEnabled
-                            ? 'GTT off — entries place without OCO (chart lines are planning guides only)'
-                            : isSafeMode
-                              ? `Safe mode: auto SL ${safeStopLossPoints || 'N'} pts, auto target ${safeSellTriggerPoints || 'M'} pts (GTT OCO)`
-                              : lastEntrySide
-                                ? `Last entry: ${lastEntrySide} · GTT defaults ${DEFAULT_GTT_STOP_LOSS_PCT}% SL / ${DEFAULT_GTT_TRIGGER_PCT}% target · drag lines on chart`
-                                : `After entry, GTT OCO uses ${DEFAULT_GTT_STOP_LOSS_PCT}% stop-loss and ${DEFAULT_GTT_TRIGGER_PCT}% target unless overridden`}
+                          {!(isGttLossEnabled || isGttProfitEnabled)
+                            ? 'GTT off — entries place without exit triggers (chart lines are planning guides only)'
+                            : isGttLossEnabled && isGttProfitEnabled
+                              ? isSafeMode
+                                ? `Safe mode: auto SL ${safeStopLossPoints || 'N'} pts, auto target ${safeSellTriggerPoints || 'M'} pts (GTT OCO)`
+                                : lastEntrySide
+                                  ? `Last entry: ${lastEntrySide} · GTT OCO ${DEFAULT_GTT_STOP_LOSS_PCT}% SL / ${DEFAULT_GTT_TRIGGER_PCT}% target · drag lines on chart`
+                                  : `After entry, GTT OCO uses ${DEFAULT_GTT_STOP_LOSS_PCT}% stop-loss and ${DEFAULT_GTT_TRIGGER_PCT}% target unless overridden`
+                              : isGttLossEnabled
+                                ? `GTT stop-loss only (${DEFAULT_GTT_STOP_LOSS_PCT}% default) — profit target leg off`
+                                : `GTT profit target only (${DEFAULT_GTT_TRIGGER_PCT}% default) — stop-loss leg off`}
                         </InputGroup.Text>
                       </InputGroup>
                     </div>

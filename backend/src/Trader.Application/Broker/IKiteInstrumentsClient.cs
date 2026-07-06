@@ -113,6 +113,13 @@ public interface IKiteInstrumentsClient
         string apiKey,
         string accessToken,
         CancellationToken ct = default);
+
+    /// <summary>Kite <c>POST /gtt/triggers</c> — single-leg GTT (stop-loss or target only).</summary>
+    Task<KiteGttActionResult> PlaceGttSingleAsync(
+        KiteGttSingleRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
 }
 
 public sealed record KiteQuoteOhlcFetchResult(
@@ -160,6 +167,16 @@ public sealed record KiteGttOcoRequest(
     decimal LastPrice,
     decimal LowerTriggerPrice,
     decimal UpperTriggerPrice,
+    string ExitTransactionType,
+    int Quantity,
+    string Product,
+    string? Tag);
+
+public sealed record KiteGttSingleRequest(
+    string Exchange,
+    string Tradingsymbol,
+    decimal LastPrice,
+    decimal TriggerPrice,
     string ExitTransactionType,
     int Quantity,
     string Product,

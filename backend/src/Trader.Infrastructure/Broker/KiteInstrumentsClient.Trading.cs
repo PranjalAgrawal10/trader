@@ -316,6 +316,16 @@ public sealed partial class KiteInstrumentsClient
         return SendGttActionAsync(HttpMethod.Post, "gtt/triggers", content, apiKey, accessToken, ct);
     }
 
+    public Task<KiteGttActionResult> PlaceGttSingleAsync(
+        KiteGttSingleRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        var content = BuildGttSingleContent(request);
+        return SendGttActionAsync(HttpMethod.Post, "gtt/triggers", content, apiKey, accessToken, ct);
+    }
+
     private async Task<KiteOrderActionResult> SendOrderActionAsync(
         HttpMethod method,
         string path,

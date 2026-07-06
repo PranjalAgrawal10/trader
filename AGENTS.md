@@ -7,9 +7,13 @@ Facts that stay stable across chats; **architecture rules live in `.cursor/rules
 | Area | Path |
 |------|------|
 | API host | `backend/src/Trader.Api` |
+| API bootstrap & pipeline | `backend/src/Trader.Api/Hosting` |
 | API routing (version prefix, health, SignalR map) | `backend/src/Trader.Api/Routing` |
 | V1 controllers | `backend/src/Trader.Api/Controllers/V1` |
+| Broker HTTP surface (partial controller) | `backend/src/Trader.Api/Controllers/V1/Broker` |
 | Application (use cases, DTOs) | `backend/src/Trader.Application` |
+| Broker use cases & DTOs | `backend/src/Trader.Application/Broker` (partials + `Dtos/`) |
+| Kite HTTP client (infra) | `backend/src/Trader.Infrastructure/Broker` (partials) |
 | Ports / abstractions | `backend/src/Trader.Application/Abstractions` |
 | Domain | `backend/src/Trader.Domain` |
 | EF Core, infra, migrations | `backend/src/Trader.Infrastructure` |

@@ -322,41 +322,84 @@ public sealed partial class BrokerService
             targetPct,
             tickSize);
 
-        if (stopLoss <= 0 || target <= 0)
-            throw new InvalidOperationException("Stop-loss and target prices must be greater than zero.");
-        if (entrySide == "BUY" && stopLoss >= target)
-            throw new InvalidOperationException("For a BUY entry, stop-loss must be below the target price.");
-        if (entrySide == "SELL" && stopLoss <= target)
-            throw new InvalidOperationException("For a SELL entry, stop-loss must be above the target price.");
+        var lossEnabled = body.StopLossEnabled;
+        var profitEnabled = body.ProfitEnabled;
+        if (!lossEnabled && !profitEnabled)
+            throw new InvalidOperationException("Enable at least one GTT leg (stop-loss or profit target).");
 
-        var lowerTrigger = stopLoss;
-        var upperTrigger = target;
-        if (entrySide == "SELL")
+        if (lossEnabled && stopLoss <= 0)
+            throw new InvalidOperationException("Stop-loss price must be greater than zero.");
+        if (profitEnabled && target <= 0)
+            throw new InvalidOperationException("Profit target price must be greater than zero.");
+
+        if (lossEnabled && profitEnabled)
         {
-            lowerTrigger = target;
-            upperTrigger = stopLoss;
+            if (entrySide == "BUY" && stopLoss >= target)
+                throw new InvalidOperationException("For a BUY entry, stop-loss must be below the target price.");
+            if (entrySide == "SELL" && stopLoss <= target)
+                throw new InvalidOperationException("For a SELL entry, stop-loss must be above the target price.");
+
+            var lowerTrigger = stopLoss;
+            var upperTrigger = target;
+            if (entrySide == "SELL")
+            {
+                lowerTrigger = target;
+                upperTrigger = stopLoss;
+            }
+
+            var gttRequest = new KiteGttOcoRequest(
+                exchange,
+                tradingsymbol,
+                lastPrice.Value,
+                lowerTrigger,
+                upperTrigger,
+                exitSide,
+                body.Quantity,
+                product,
+                NormalizeOptional(body.Tag));
+
+            var action = await _kiteInstruments.PlaceGttOcoAsync(gttRequest, apiKey, accessToken, ct).ConfigureAwait(false);
+            if (!action.Success)
+                throw new InvalidOperationException(action.ErrorMessage ?? "Could not place GTT on Kite.");
+
+            return new KiteGttActionResultDto(
+                action.TriggerId ?? "unknown",
+                "gtt-oco",
+                $"GTT OCO placed (SL {stopLoss:0.##}, target {target:0.##}).",
+                stopLoss,
+                target);
         }
 
-        var gttRequest = new KiteGttOcoRequest(
+        var singleTrigger = lossEnabled ? stopLoss : target;
+        var singleRequest = new KiteGttSingleRequest(
             exchange,
             tradingsymbol,
             lastPrice.Value,
-            lowerTrigger,
-            upperTrigger,
+            singleTrigger,
             exitSide,
             body.Quantity,
             product,
             NormalizeOptional(body.Tag));
 
-        var action = await _kiteInstruments.PlaceGttOcoAsync(gttRequest, apiKey, accessToken, ct).ConfigureAwait(false);
-        if (!action.Success)
-            throw new InvalidOperationException(action.ErrorMessage ?? "Could not place GTT on Kite.");
+        var singleAction = await _kiteInstruments.PlaceGttSingleAsync(singleRequest, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!singleAction.Success)
+            throw new InvalidOperationException(singleAction.ErrorMessage ?? "Could not place GTT on Kite.");
+
+        if (lossEnabled)
+        {
+            return new KiteGttActionResultDto(
+                singleAction.TriggerId ?? "unknown",
+                "gtt-sl",
+                $"GTT stop-loss placed at {stopLoss:0.##}.",
+                stopLoss,
+                0m);
+        }
 
         return new KiteGttActionResultDto(
-            action.TriggerId ?? "unknown",
-            "gtt-oco",
-            $"GTT OCO placed (SL {stopLoss:0.##}, target {target:0.##}).",
-            stopLoss,
+            singleAction.TriggerId ?? "unknown",
+            "gtt-tp",
+            $"GTT profit target placed at {target:0.##}.",
+            0m,
             target);
     }
 

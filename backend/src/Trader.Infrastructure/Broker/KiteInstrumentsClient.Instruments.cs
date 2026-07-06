@@ -546,4 +546,36 @@ public sealed partial class KiteInstrumentsClient
         });
     }
 
+    private static FormUrlEncodedContent BuildGttSingleContent(KiteGttSingleRequest request)
+    {
+        var condition = JsonSerializer.Serialize(new
+        {
+            exchange = request.Exchange.Trim(),
+            tradingsymbol = request.Tradingsymbol.Trim(),
+            trigger_values = new[] { request.TriggerPrice },
+            last_price = request.LastPrice,
+        });
+        var exitSide = request.ExitTransactionType.Trim();
+        var orders = JsonSerializer.Serialize(new object[]
+        {
+            new
+            {
+                exchange = request.Exchange.Trim(),
+                tradingsymbol = request.Tradingsymbol.Trim(),
+                transaction_type = exitSide,
+                quantity = request.Quantity,
+                order_type = "LIMIT",
+                product = request.Product.Trim(),
+                price = request.TriggerPrice,
+            },
+        });
+
+        return new FormUrlEncodedContent(new[]
+        {
+            new KeyValuePair<string, string>("type", "single"),
+            new KeyValuePair<string, string>("condition", condition),
+            new KeyValuePair<string, string>("orders", orders),
+        });
+    }
+
 }
