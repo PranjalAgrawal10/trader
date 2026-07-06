@@ -40,53 +40,21 @@ public sealed partial class EmailOtpService : IEmailOtpService
             throw new InvalidOperationException("A valid email is required.");
 
         var email = ValidateAndNormalizeEmail(request.Email);
-        return SendSixDigitChallengeAsync(
-            email,
-            EmailOtpPurpose.Generic,
-            "Your verification code",
-            (plainCode, expiryMinutes) =>
-                $"Your verification code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not request this, you can ignore this email.",
-            buildHtmlBody: null,
-            ct);
+        return SendOtpAsync(email, EmailOtpPurpose.Generic, ct);
     }
 
-    public Task SendLoginSecondFactorAsync(string normalizedEmail, CancellationToken ct = default)
+    public Task SendOtpAsync(string normalizedEmail, EmailOtpPurpose purpose, CancellationToken ct = default)
     {
         var email = ValidateAndNormalizeEmail(normalizedEmail);
-        return SendSixDigitChallengeAsync(
-            email,
-            EmailOtpPurpose.LoginSecondFactor,
-            "Your Trader sign-in code",
-            (plainCode, expiryMinutes) =>
-                $"Your Trader sign-in code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not sign in, change your password and contact support.",
-            BuildLoginSecondFactorHtmlBody,
-            ct);
+        return SendSixDigitChallengeAsync(email, purpose, ct);
     }
-
-    public Task SendPasswordResetAsync(string normalizedEmail, CancellationToken ct = default)
-    {
-        var email = ValidateAndNormalizeEmail(normalizedEmail);
-        return SendSixDigitChallengeAsync(
-            email,
-            EmailOtpPurpose.PasswordReset,
-            "Your Trader password reset code",
-            (plainCode, expiryMinutes) =>
-                $"Your password reset code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not request a reset, ignore this email.",
-            buildHtmlBody: null,
-            ct);
-    }
-
-    private static string BuildLoginSecondFactorHtmlBody(string plainCode, int expiryMinutes) =>
-        LoginSecondFactorEmailHtmlBuilder.Build(plainCode, expiryMinutes);
 
     private async Task SendSixDigitChallengeAsync(
         string normalizedEmail,
         EmailOtpPurpose purpose,
-        string subject,
-        Func<string, int, string> buildPlainBody,
-        Func<string, int, string>? buildHtmlBody,
         CancellationToken ct)
     {
+        var template = EmailOtpTemplates.ForPurpose(purpose);
         var plainCode = GenerateSixDigitCode();
         var hash = _passwordHasher.Hash(plainCode);
         var expiryMinutes = EffectiveExpiryMinutes();
@@ -107,27 +75,20 @@ public sealed partial class EmailOtpService : IEmailOtpService
         await _repository.AddAsync(challenge, ct);
         await _repository.SaveChangesAsync(ct);
 
-        var body = buildPlainBody(plainCode, expiryMinutes);
+        var plainBody = EmailOtpTemplates.BuildPlainBody(template, plainCode, expiryMinutes);
+        var htmlBody = EmailOtpHtmlBuilder.Build(template, plainCode, expiryMinutes);
 
         try
         {
-            if (buildHtmlBody is not null)
-            {
-                var html = buildHtmlBody(plainCode, expiryMinutes);
-                await _emailSender.SendEmailAsync(
-                        normalizedEmail,
-                        subject,
-                        body,
-                        html,
-                        Array.Empty<EmbeddedEmailImage>(),
-                        Array.Empty<EmailAttachment>(),
-                        ct)
-                    .ConfigureAwait(false);
-            }
-            else
-            {
-                await _emailSender.SendPlainTextAsync(normalizedEmail, subject, body, ct).ConfigureAwait(false);
-            }
+            await _emailSender.SendEmailAsync(
+                    normalizedEmail,
+                    template.Subject,
+                    plainBody,
+                    htmlBody,
+                    Array.Empty<EmbeddedEmailImage>(),
+                    Array.Empty<EmailAttachment>(),
+                    ct)
+                .ConfigureAwait(false);
         }
         catch
         {
@@ -136,9 +97,10 @@ public sealed partial class EmailOtpService : IEmailOtpService
         }
 
         _logger.LogInformation(
-            "Email OTP sent ({Purpose}) to {Recipient}",
+            "Email OTP sent ({Purpose}) to {Recipient} subject={Subject}",
             purpose,
-            normalizedEmail);
+            normalizedEmail,
+            template.Subject);
     }
 
     public async Task<EmailOtpVerifyResponse> VerifyAsync(

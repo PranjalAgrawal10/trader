@@ -1,18 +1,13 @@
-import axios from 'axios'
 import { type FormEvent, useState } from 'react'
 import { Button, ButtonGroup, Card, Col, Container, Form, Row, Alert, InputGroup } from 'react-bootstrap'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { navigateToAppAfterTwoFactor } from '../navigation/afterTwoFactor'
 import { useAuthStore } from '../store/useAuthStore'
+import { apiProblemDetail } from '../utils/apiProblemDetail'
 
-function problemDetail(err: unknown): string | null {
-  if (axios.isAxiosError(err)) {
-    const body = err.response?.data as { detail?: string; title?: string } | undefined
-    const s = body?.detail ?? body?.title ?? (err.response?.status === 401 ? err.message : null)
-    return s && s.length > 0 ? s : null
-  }
-  return null
+function problemDetail(err: unknown, fallback: string): string {
+  return apiProblemDetail(err, fallback)
 }
 
 type AuthPayload = {
@@ -148,11 +143,11 @@ export function LoginPage() {
       }
 
       await continueAfterAuth(data.token, data.email)
-    } catch {
+    } catch (err) {
       const msg =
         mode === 'login'
-          ? 'Invalid credentials.'
-          : 'Registration failed (email may already exist).'
+          ? apiProblemDetail(err, 'Invalid credentials.')
+          : apiProblemDetail(err, 'Registration failed (email may already exist).')
       setError(msg)
     } finally {
       setBusy(false)
@@ -177,7 +172,7 @@ export function LoginPage() {
       setTotpCode('')
       await continueAfterAuth(data.token, data.email)
     } catch (err) {
-      setError(problemDetail(err) ?? 'Could not verify sign-in. Try again or use Back.')
+      setError(problemDetail(err, 'Could not verify sign-in. Try again or use Back.'))
     } finally {
       setBusy(false)
     }
@@ -190,7 +185,7 @@ export function LoginPage() {
     try {
       await api.post('/auth/resend-login-otp', { temp_token: twoFactor.temp_token })
     } catch (err) {
-      setError(problemDetail(err) ?? 'Could not resend the code.')
+      setError(problemDetail(err, 'Could not resend the code.'))
     } finally {
       setBusy(false)
     }

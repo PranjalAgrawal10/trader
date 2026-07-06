@@ -81,13 +81,21 @@ public sealed class SmtpStartupValidator : IHostedService
         }
 
         _logger.LogInformation(
-            "Outbound email via SMTP {Host}:{Port} (user {User}, TLS {Tls}). " +
-            "On DigitalOcean App Platform, prefer {Section}__SendGridApiKey if SMTP is blocked or auth fails.",
+            "Outbound email via SMTP {Host}:{Port} (user {User}, TLS {Tls}).",
             _options.Host.Trim(),
             _options.Port,
             (_options.User ?? _options.FromEmail)!.Trim(),
-            _options.EnableTls,
-            SmtpOptions.SectionName);
+            _options.EnableTls);
+
+        if (!_environment.IsDevelopment() &&
+            _options.Host.Contains("gmail.com", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError(
+                "Gmail SMTP on App Platform often fails to deliver (auth or blocking). " +
+                "Set {Section}__SendGridApiKey and {Section}__FromEmail instead of Gmail SMTP.",
+                SmtpOptions.SectionName,
+                SmtpOptions.SectionName);
+        }
 
         return Task.CompletedTask;
     }

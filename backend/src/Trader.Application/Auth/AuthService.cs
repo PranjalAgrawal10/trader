@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
@@ -25,6 +26,7 @@ public sealed class AuthService : IAuthService
     private readonly JwtOptions _jwtOptions;
     private readonly AuthOptions _authOptions;
     private readonly PublicWebOptions _publicWeb;
+    private readonly ILogger<AuthService> _logger;
 
     public AuthService(
         IUserRepository users,
@@ -39,7 +41,8 @@ public sealed class AuthService : IAuthService
         IUserLoginAuditRepository loginAudits,
         IOptions<JwtOptions> jwtOptions,
         IOptions<AuthOptions> authOptions,
-        IOptions<PublicWebOptions> publicWeb)
+        IOptions<PublicWebOptions> publicWeb,
+        ILogger<AuthService> logger)
     {
         _users = users;
         _passwordHasher = passwordHasher;
@@ -54,6 +57,7 @@ public sealed class AuthService : IAuthService
         _jwtOptions = jwtOptions.Value;
         _authOptions = authOptions.Value;
         _publicWeb = publicWeb.Value;
+        _logger = logger;
     }
 
     private string RequireConfiguredFrontendOrigin()
@@ -142,14 +146,30 @@ public sealed class AuthService : IAuthService
     public async Task ForgotPasswordAsync(ForgotPasswordRequest request, CancellationToken ct = default)
     {
         if (request.Email is null || string.IsNullOrWhiteSpace(request.Email))
-            return;
+            throw new InvalidOperationException("A valid email is required.");
 
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
         var user = await _users.GetByEmailAsync(normalizedEmail, ct);
         if (user is null)
+        {
+            _logger.LogInformation(
+                "Forgot password: no account for {EmailDomain} (HTTP 204 returned either way).",
+                MaskEmailDomain(normalizedEmail));
             return;
+        }
 
-        await _emailOtp.SendPasswordResetAsync(normalizedEmail, ct);
+        await _emailOtp.SendOtpAsync(normalizedEmail, EmailOtpPurpose.PasswordReset, ct);
+        _logger.LogInformation(
+            "Forgot password: password-reset OTP dispatched for {EmailDomain}.",
+            MaskEmailDomain(normalizedEmail));
+    }
+
+    private static string MaskEmailDomain(string normalizedEmail)
+    {
+        var at = normalizedEmail.IndexOf('@');
+        if (at <= 0)
+            return "***";
+        return "***@" + normalizedEmail[(at + 1)..];
     }
 
     public async Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken ct = default)
@@ -216,7 +236,7 @@ public sealed class AuthService : IAuthService
             throw new InvalidOperationException("Cannot resend code for this sign-in session.");
         }
 
-        await _emailOtp.SendLoginSecondFactorAsync(user.Email, ct);
+        await _emailOtp.SendOtpAsync(user.Email, EmailOtpPurpose.LoginSecondFactor, ct);
     }
 
     public async Task EnableEmailSignInSecondFactorAsync(Guid userId, CancellationToken ct = default)
@@ -274,7 +294,7 @@ public sealed class AuthService : IAuthService
             if (user.SecondFactorMethod == SecondFactorMethod.EmailSignInCode)
             {
                 var ticket = _twoFactorLoginTicket.CreatePendingLoginTicket(user.Id);
-                await _emailOtp.SendLoginSecondFactorAsync(user.Email, ct);
+                await _emailOtp.SendOtpAsync(user.Email, EmailOtpPurpose.LoginSecondFactor, ct);
                 return new LoginRequiresTwoFactor(ticket, "email_otp");
             }
 

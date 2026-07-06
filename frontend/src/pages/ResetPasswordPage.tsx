@@ -1,8 +1,8 @@
-import axios from 'axios'
 import { type FormEvent, useState } from 'react'
 import { Alert, Button, Card, Container, Form } from 'react-bootstrap'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { apiProblemDetail } from '../utils/apiProblemDetail'
 
 export function ResetPasswordPage() {
   const [searchParams] = useSearchParams()
@@ -39,10 +39,7 @@ export function ResetPasswordPage() {
       })
       navigate('/login', { replace: true })
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        const detail = (err.response?.data as { detail?: string } | undefined)?.detail
-        setError(detail ?? 'Could not reset password.')
-      } else setError('Could not reset password.')
+      setError(apiProblemDetail(err, 'Could not reset password.'))
     } finally {
       setBusy(false)
     }

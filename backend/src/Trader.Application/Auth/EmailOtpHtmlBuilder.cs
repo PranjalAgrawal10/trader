@@ -4,8 +4,8 @@ using System.Text.Encodings.Web;
 
 namespace Trader.Application.Auth;
 
-/// <summary>Multipart HTML for login second-factor (email OTP) messages.</summary>
-internal static class LoginSecondFactorEmailHtmlBuilder
+/// <summary>Multipart HTML for all email OTP messages (login 2FA, password reset, generic).</summary>
+internal static class EmailOtpHtmlBuilder
 {
     private const string BrandBlue = "#0d6efd";
     private const string Ink = "#212529";
@@ -13,11 +13,7 @@ internal static class LoginSecondFactorEmailHtmlBuilder
     private const string Surface = "#f8f9fa";
     private const string Border = "#dee2e6";
 
-    /// <summary>
-    /// Table-based layout for broad client support. OTP is shown once in a large selectable block
-    /// (HTML mail cannot use clipboard APIs).
-    /// </summary>
-    public static string Build(string plainCode, int expiryMinutes)
+    public static string Build(EmailOtpTemplate template, string plainCode, int expiryMinutes)
     {
         var enc = HtmlEncoder.Default;
         var code = enc.Encode(plainCode);
@@ -27,10 +23,13 @@ internal static class LoginSecondFactorEmailHtmlBuilder
         var sb = new StringBuilder(4096);
         sb.Append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">")
             .Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-            .Append("<title>Trader sign-in code</title></head>")
+            .Append("<title>")
+            .Append(enc.Encode(template.Subject))
+            .Append("</title></head>")
             .Append("<body style=\"margin:0;padding:0;background:#e9ecef;\">")
             .Append("<div style=\"display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;\">")
-            .Append("Your Trader sign-in code is ")
+            .Append(enc.Encode(template.Preheader))
+            .Append(' ')
             .Append(code)
             .Append(". Expires in ")
             .Append(expiry)
@@ -44,15 +43,15 @@ internal static class LoginSecondFactorEmailHtmlBuilder
             .Append(Border)
             .Append(";border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(33,37,41,0.08);\">");
 
-        AppendHeader(sb);
-        AppendBody(sb, enc, code, spacedCode, expiryMinutes);
+        AppendHeader(sb, template, enc);
+        AppendBody(sb, template, enc, code, spacedCode, expiryMinutes);
         AppendFooter(sb);
 
         sb.Append("</table></td></tr></table></body></html>");
         return sb.ToString();
     }
 
-    private static void AppendHeader(StringBuilder sb)
+    private static void AppendHeader(StringBuilder sb, EmailOtpTemplate template, HtmlEncoder enc)
     {
         sb.Append("<tr><td style=\"background:")
             .Append(BrandBlue)
@@ -62,14 +61,21 @@ internal static class LoginSecondFactorEmailHtmlBuilder
             .Append("Trader</p>")
             .Append("<h1 style=\"margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;")
             .Append("font-size:24px;font-weight:700;line-height:1.25;color:#ffffff;\">")
-            .Append("Sign-in verification</h1>")
+            .Append(enc.Encode(template.HeaderTitle))
+            .Append("</h1>")
             .Append("<p style=\"margin:10px 0 0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;")
             .Append("font-size:14px;line-height:1.5;color:rgba(255,255,255,0.9);\">")
-            .Append("Enter the code below to finish signing in.</p>")
-            .Append("</td></tr>");
+            .Append(enc.Encode(template.HeaderSubtitle))
+            .Append("</p></td></tr>");
     }
 
-    private static void AppendBody(StringBuilder sb, HtmlEncoder enc, string code, string spacedCode, int expiryMinutes)
+    private static void AppendBody(
+        StringBuilder sb,
+        EmailOtpTemplate template,
+        HtmlEncoder enc,
+        string code,
+        string spacedCode,
+        int expiryMinutes)
     {
         var expiry = enc.Encode(expiryMinutes.ToString(CultureInfo.InvariantCulture));
         var expiryLabel = expiryMinutes == 1 ? "minute" : "minutes";
@@ -79,11 +85,12 @@ internal static class LoginSecondFactorEmailHtmlBuilder
             .Append(";\">")
             .Append("<p style=\"margin:0 0 20px;font-size:15px;line-height:1.6;color:")
             .Append(Muted)
-            .Append(";\">Use this one-time code on the sign-in screen. It works only once.</p>")
-
+            .Append(";\">")
+            .Append(enc.Encode(template.BodyIntro))
+            .Append("</p>")
             .Append("<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"")
             .Append(" style=\"border-collapse:separate;border-spacing:0;margin:0 0 24px;\">")
-            .Append("<tr><td align=\"center\" aria-label=\"Sign-in verification code\"")
+            .Append("<tr><td align=\"center\" aria-label=\"Verification code\"")
             .Append(" style=\"-webkit-user-select:text;user-select:text;-webkit-touch-callout:default;")
             .Append("background:")
             .Append(Surface)
@@ -107,7 +114,6 @@ internal static class LoginSecondFactorEmailHtmlBuilder
             .Append(code)
             .Append("</strong></p>")
             .Append("</td></tr></table>")
-
             .Append("<p style=\"margin:0 0 22px;text-align:center;\">")
             .Append("<span style=\"display:inline-block;padding:8px 16px;border-radius:999px;background:#fff3cd;")
             .Append("color:#664d03;font-size:13px;font-weight:600;line-height:1.4;\">")
@@ -116,25 +122,11 @@ internal static class LoginSecondFactorEmailHtmlBuilder
             .Append(' ')
             .Append(expiryLabel)
             .Append("</span></p>")
-
             .Append("<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"")
-            .Append(" style=\"border-collapse:collapse;margin:0 0 8px;background:#f1f3f5;border-radius:10px;\">")
-            .Append("<tr><td style=\"padding:14px 16px;border-left:4px solid ")
-            .Append(BrandBlue)
-            .Append(";\">")
-            .Append("<p style=\"margin:0;font-size:13px;line-height:1.55;color:")
-            .Append(Muted)
-            .Append(";\"><strong style=\"color:")
-            .Append(Ink)
-            .Append(";\">Tip:</strong> Tap and hold the code, then choose ")
-            .Append("<strong>Select All</strong> and <strong>Copy</strong> in your mail app.</p>")
-            .Append("</td></tr></table>")
-
-            .Append("<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"")
-            .Append(" style=\"border-collapse:collapse;background:#fff5f5;border-radius:10px;border:1px solid #f1aeb5;\">")
+            .Append(" style=\"border-collapse:collapse;margin:0 0 8px;background:#fff5f5;border-radius:10px;border:1px solid #f1aeb5;\">")
             .Append("<tr><td style=\"padding:14px 16px;\">")
             .Append("<p style=\"margin:0;font-size:13px;line-height:1.55;color:#842029;\">")
-            .Append("<strong>Didn&#39;t try to sign in?</strong> Change your password and contact support if this looks unexpected.")
+            .Append(template.SecurityWarning)
             .Append("</p></td></tr></table>")
             .Append("</td></tr>");
     }

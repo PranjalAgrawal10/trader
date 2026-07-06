@@ -6,11 +6,8 @@ public interface IEmailOtpService
 {
     Task SendAsync(EmailOtpSendRequest request, CancellationToken ct = default);
 
-    /// <summary>OTP for password + second-factor sign-in when the account uses email codes (distinct send throttle).</summary>
-    Task SendLoginSecondFactorAsync(string normalizedEmail, CancellationToken ct = default);
-
-    /// <summary>OTP for forgot-password flow (only call when the account exists).</summary>
-    Task SendPasswordResetAsync(string normalizedEmail, CancellationToken ct = default);
+    /// <summary>Sends a 6-digit OTP for the given purpose (shared HTML + plain pipeline).</summary>
+    Task SendOtpAsync(string normalizedEmail, EmailOtpPurpose purpose, CancellationToken ct = default);
 
     Task<EmailOtpVerifyResponse> VerifyAsync(
         EmailOtpVerifyRequest request,
