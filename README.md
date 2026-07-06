@@ -159,11 +159,11 @@ CORS in Compose still allows **`http://localhost:8080`** (Docker UI) and **`http
 
 See `backend/src/Trader.Api/.env.example`. Local overrides: **`.env.local`** / **`.env.development.local`** (gitignored). **Production** uses only **environment variables** and appsettings — **`.env` / `.env.production` are never loaded** by the host when `ASPNETCORE_ENVIRONMENT` is not `Development`. Blank values in merged `.env` lines are ignored.
 
-Required for a real MySQL run: **`Database:Provider`**, then all of **`Database:Host`**, **`Database:Name`**, **`Database:Username`** (or **`UserId`**), **`Database:Password`** (optional **`Port`**, **`SslMode`**). Equivalent env aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (and **`DB_*`** / **`DATABASE_*`** variants — see `MySqlConnectionStringResolver`). There is **no** `ConnectionStrings:MySQL` or **`DATABASE_URL`** path — only discrete fields. You still need **JWT** and **CORS**.
+Required for a real MySQL run: **`Database:Provider=MySQL`** and **`DATABASE_URL`** (`mysql://user:pass@host:port/db?ssl-mode=Required`) — preferred on App Platform and Docker. Alternatives: **`Database__ConnectionString`**, **`ConnectionStrings__Default`**, or discrete **`Database__Host`** / **`Name`** / **`Username`** / **`Password`** (see `MySqlConnectionStringResolver`). You still need **JWT** and **CORS**.
 
-**DigitalOcean Managed MySQL** uses a non-default port (often **25060**) and requires TLS. Set **`Database__SslMode=Required`**, **`Database__Port=25060`**, and the other **`Database__*`** fields (see `.env.example`).
+**DigitalOcean Managed MySQL** uses port **25060** and TLS — include **`?ssl-mode=Required`** in **`DATABASE_URL`** (see **Connection details** in the control panel).
 
-**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**, and **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** (optional **`Database__Port`**, **`Database__SslMode=Required`** for managed MySQL). The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (broker token and **TOTP secret** encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **`GET /api/v1/broker/status`** validates stored broker token decryption; rows that cannot be decrypted are removed and the response stays disconnected until the user reconnects that broker. **Do not commit** key directories.
+**DigitalOcean App Platform** (and similar reverse proxies): configure the API component **environment variables** at least: **`DATABASE_URL`** (encrypted), **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** (UTF-8 secret ≥ 32 bytes), **`Cors__Origins__0`** (your SPA URL), **`Database__Provider=MySQL`**, **`ASPNETCORE_ENVIRONMENT=Production`**. Discrete **`Database__Host`** / **`Database__Name`** / … fields still work if you prefer them over **`DATABASE_URL`**. The API enables **`X-Forwarded-*`** headers so HTTPS termination at the edge works with **`UseHttpsRedirection`**. **Data Protection** (broker token and **TOTP secret** encryption): set **`DataProtection__KeyRingPath`** to a **persisted** directory (e.g. App Platform mounted volume) so keys survive redeploys. If that is unset in Production, the app uses an in-memory key ring (no filesystem warnings; encrypted payloads still become invalid after a process restart). **`GET /api/v1/broker/status`** validates stored broker token decryption; rows that cannot be decrypted are removed and the response stays disconnected until the user reconnects that broker. **Do not commit** key directories.
 
 **404 on production (SPA + API on App Platform)** usually means routing or client-side routing:
 
@@ -230,7 +230,7 @@ High-level path: **Managed MySQL** + **one App** from this monorepo with a **Web
 ### 1. Database
 
 - Create a **Managed MySQL** cluster (same region as the app helps latency).
-- Note **host**, **port** (often **25060**), **database**, **user**, **password**; use TLS (**`Database__SslMode=Required`** — see [Configuration](#configuration)).
+- In **Connection details**, copy the **`mysql://…`** URL (or build one with host, port **25060**, database **`defaultdb`**, user **`doadmin`**, password, **`?ssl-mode=Required`**). Set it as **`DATABASE_URL`** on the API service (see step 4).
 
 ### 2. Source control
 
@@ -249,7 +249,7 @@ Add under the service (encrypt secrets in the control panel):
 |-----|--------|
 | **`ASPNETCORE_ENVIRONMENT`** | `Production` |
 | **`Database__Provider`** | `MySQL` |
-| **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** | **Required.** **Encrypt** password. Optional: **`Database__Port`**, **`Database__SslMode`**. Aliases: **`MYSQL_HOST`**, **`MYSQL_DATABASE`**, **`MYSQL_USER`**, **`MYSQL_PASSWORD`** (also **`DB_*`** / **`DATABASE_*`** — see resolver). **`Database__UserId`** works instead of **`Username`**. |
+| **`DATABASE_URL`** | **Required.** `mysql://user:pass@host:port/db?ssl-mode=Required` from Managed MySQL **Connection details** (**Encrypt** in the UI). |
 | **`Jwt__Issuer`**, **`Jwt__Audience`**, **`Jwt__Key`** | **`Jwt__Key`** ≥ 32 chars; **secret**. |
 | **`Jwt__ExpiresHours`** (optional) | Access token lifetime in hours (default **12** in **`appsettings.json`**). Shorter values (e.g. **1**) cause **`SecurityTokenExpiredException`** in logs after idle time; users must sign in again or you can raise this in production. |
 | **`Cors__Origins__0`** | Your live site origin, e.g. **`https://your-app.ondigitalocean.app`** (no trailing slash). |
@@ -296,7 +296,7 @@ On older MySQL, run a plain **`ADD COLUMN`** once, or use **`SHOW COLUMNS FROM U
 
 **Troubleshooting — `JWT is not configured` / readiness `connection refused` on 8080:** The API process crashes **before** Kestrel listens, so probes fail. Add **`Jwt__Issuer`**, **`Jwt__Audience`**, and **`Jwt__Key`** (≥ 32 characters) to the **Web Service** component with scope **RUN_TIME** (not only BUILD_TIME, and not only on the static site). Add **`Cors__Origins__0`** the same way or the next startup error will be about CORS. Names must use **`__`** (e.g. **`Jwt__Key`**), not colons.
 
-**Troubleshooting — MySQL connection / configuration missing:** On the **Web Service**, set **`Database__Host`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** (**RUN_TIME**, encrypt the password), plus optional **`Database__Port`** / **`Database__SslMode`**. See **`backend/src/Trader.Api/.env.example`** for the canonical names.
+**Troubleshooting — MySQL connection / configuration missing:** On the **Web Service**, set **`DATABASE_URL`** (**RUN_TIME**, **Encrypt**) — `mysql://user:pass@host:25060/defaultdb?ssl-mode=Required` from Managed MySQL **Connection details**. Also set **`Database__Provider=MySQL`**. See **`backend/src/Trader.Api/.env.production`**.
 
 **Troubleshooting — App Platform / Heroku build: `MSB4018` / `GenerateDepsFile` / `deps.json` in use:** The buildpack runs **`dotnet publish`** with a shared **`--artifacts-path`**, which can deadlock or race when MSBuild compiles shared projects on multiple nodes. This repo sets **`BuildInParallel=false`** in **`backend/Directory.Build.props`** so publish is single-threaded (slightly slower, stable on App Platform).
 

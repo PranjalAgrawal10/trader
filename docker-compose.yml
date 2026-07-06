@@ -34,11 +34,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       Database__Provider: MySQL
-      Database__Host: mysql
-      Database__Port: "3306"
-      Database__Name: trader
-      Database__Username: trader
-      Database__Password: trader
+      DATABASE_URL: mysql://trader:trader@mysql:3306/trader
       Jwt__Issuer: Trader
       Jwt__Audience: TraderClients
       Jwt__Key: CHANGE_ME_DOCKER_MIN_32_CHARS_LONG_SECRET!!

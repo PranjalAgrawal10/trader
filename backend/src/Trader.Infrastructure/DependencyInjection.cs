@@ -88,14 +88,15 @@ public static class DependencyInjection
 
             if (string.IsNullOrWhiteSpace(conn))
             {
-                var gaps = MySqlConnectionStringResolver.DescribeDiscreteGaps(configuration);
+                var gaps = MySqlConnectionStringResolver.DescribeConfigurationGaps(configuration);
                 throw new InvalidOperationException(
                     "MySQL configuration is incomplete. " +
-                    "Set **Database__Host**, **Database__Name**, **Database__Username** (or **UserId**), **Database__Password** " +
-                    "(optional **Database__Port**, **Database__SslMode**), **or** equivalent **MYSQL_*** / **DB_*** env aliases. " +
+                    "Set **DATABASE_URL** (`mysql://user:pass@host:port/db?ssl-mode=Required`) — recommended for App Platform / managed MySQL — " +
+                    "or **Database__ConnectionString**, " +
+                    "or discrete **Database__Host**, **Database__Name**, **Database__Username**, **Database__Password**. " +
                     "Canonical names: see **`backend/src/Trader.Api/.env.example`**. " +
                     gaps +
-                    "`Database:Provider` is **MySQL** but no connection could be built from discrete settings.");
+                    "`Database:Provider` is **MySQL** but no connection could be built.");
             }
 
             var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
