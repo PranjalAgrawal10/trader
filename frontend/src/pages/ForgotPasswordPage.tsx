@@ -137,6 +137,7 @@ export function ForgotPasswordPage() {
             <>
               <p className="small text-secondary mb-3">
                 Enter the <strong>6-digit code</strong> sent to <strong>{email}</strong>, then choose a new password.
+                Check spam. No code after a minute? Confirm the email matches your account or tap <strong>Resend code</strong>.
               </p>
               <Form onSubmit={resetPassword}>
                 {error ? <Alert variant="danger">{error}</Alert> : null}

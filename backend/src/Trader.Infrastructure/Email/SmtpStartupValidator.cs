@@ -5,40 +5,75 @@ using Trader.Application.Configuration;
 
 namespace Trader.Infrastructure.Email;
 
-/// <summary>Logs SMTP readiness at startup so misconfigured production deploys are obvious in runtime logs.</summary>
+/// <summary>Logs email provider readiness at startup.</summary>
 public sealed class SmtpStartupValidator : IHostedService
 {
     private readonly SmtpOptions _options;
+    private readonly IHostEnvironment _environment;
     private readonly ILogger<SmtpStartupValidator> _logger;
 
-    public SmtpStartupValidator(IOptions<SmtpOptions> options, ILogger<SmtpStartupValidator> logger)
+    public SmtpStartupValidator(
+        IOptions<SmtpOptions> options,
+        IHostEnvironment environment,
+        ILogger<SmtpStartupValidator> logger)
     {
         _options = options.Value;
+        _environment = environment;
         _logger = logger;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
+        if (_options.UsesSendGridApi)
+        {
+            var hasFrom = !string.IsNullOrWhiteSpace(_options.FromEmail ?? _options.User);
+            if (!hasFrom)
+            {
+                _logger.LogError(
+                    "SendGrid API key is set but {Section}__FromEmail is missing.",
+                    SmtpOptions.SectionName);
+                return Task.CompletedTask;
+            }
+
+            _logger.LogInformation(
+                "Outbound email via SendGrid API (from {FromEmail}).",
+                (_options.FromEmail ?? _options.User)!.Trim());
+            return Task.CompletedTask;
+        }
+
         if (!_options.IsEnabled)
         {
-            _logger.LogWarning(
-                "SMTP is disabled ({Section}__IsEnabled=false). Registration, password reset, and email OTP will fail until SMTP is configured.",
-                SmtpOptions.SectionName);
+            if (_environment.IsDevelopment())
+            {
+                _logger.LogWarning(
+                    "No outbound email provider ({Section}__IsEnabled=false, no SendGrid key). " +
+                    "Development will log email bodies to the console only.",
+                    SmtpOptions.SectionName);
+            }
+            else
+            {
+                _logger.LogError(
+                    "No outbound email provider. Set {Section}__SendGridApiKey (recommended on App Platform) " +
+                    "or enable SMTP ({Section}__IsEnabled=true with host/user/password/from).",
+                    SmtpOptions.SectionName,
+                    SmtpOptions.SectionName);
+            }
+
             return Task.CompletedTask;
         }
 
         var hasUser = !string.IsNullOrWhiteSpace(_options.User ?? _options.FromEmail);
         var hasPassword = !string.IsNullOrWhiteSpace(_options.Password);
-        var hasFrom = !string.IsNullOrWhiteSpace(_options.FromEmail ?? _options.User);
+        var hasFromEmail = !string.IsNullOrWhiteSpace(_options.FromEmail ?? _options.User);
 
-        if (!hasUser || !hasPassword || !hasFrom)
+        if (!hasUser || !hasPassword || !hasFromEmail)
         {
             _logger.LogError(
                 "SMTP is enabled but incomplete: User={HasUser}, Password={HasPassword}, FromEmail={HasFrom}. " +
                 "Set {Section}__User, {Section}__Password, and {Section}__FromEmail (Gmail: use an App password).",
                 hasUser,
                 hasPassword,
-                hasFrom,
+                hasFromEmail,
                 SmtpOptions.SectionName,
                 SmtpOptions.SectionName,
                 SmtpOptions.SectionName);
@@ -46,11 +81,13 @@ public sealed class SmtpStartupValidator : IHostedService
         }
 
         _logger.LogInformation(
-            "SMTP enabled for {Host}:{Port} (user {User}, TLS {Tls}).",
+            "Outbound email via SMTP {Host}:{Port} (user {User}, TLS {Tls}). " +
+            "On DigitalOcean App Platform, prefer {Section}__SendGridApiKey if SMTP is blocked or auth fails.",
             _options.Host.Trim(),
             _options.Port,
             (_options.User ?? _options.FromEmail)!.Trim(),
-            _options.EnableTls);
+            _options.EnableTls,
+            SmtpOptions.SectionName);
 
         return Task.CompletedTask;
     }

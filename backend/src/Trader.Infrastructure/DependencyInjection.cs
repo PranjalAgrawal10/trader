@@ -121,7 +121,13 @@ public static class DependencyInjection
         services.AddSingleton<LiveCandleTickSubscriber>();
         services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
-        services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
+        services.AddHttpClient<SendGridPlainTextEmailSender>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddSingleton<SmtpPlainTextEmailSender>();
+        services.AddSingleton<RoutingPlainTextEmailSender>();
+        services.AddSingleton<IPlainTextEmailSender>(sp => sp.GetRequiredService<RoutingPlainTextEmailSender>());
         services.AddHostedService<SmtpStartupValidator>();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
@@ -17,17 +18,20 @@ public sealed partial class EmailOtpService : IEmailOtpService
     private readonly IPlainTextEmailSender _emailSender;
     private readonly IPasswordHasher _passwordHasher;
     private readonly EmailOtpOptions _otpOptions;
+    private readonly ILogger<EmailOtpService> _logger;
 
     public EmailOtpService(
         IEmailOtpRepository repository,
         IPlainTextEmailSender emailSender,
         IPasswordHasher passwordHasher,
-        IOptions<EmailOtpOptions> otpOptions)
+        IOptions<EmailOtpOptions> otpOptions,
+        ILogger<EmailOtpService> logger)
     {
         _repository = repository;
         _emailSender = emailSender;
         _passwordHasher = passwordHasher;
         _otpOptions = otpOptions.Value;
+        _logger = logger;
     }
 
     public Task SendAsync(EmailOtpSendRequest request, CancellationToken ct = default)
@@ -130,6 +134,11 @@ public sealed partial class EmailOtpService : IEmailOtpService
             await _repository.DeleteByIdAsync(challenge.Id, ct);
             throw;
         }
+
+        _logger.LogInformation(
+            "Email OTP sent ({Purpose}) to {Recipient}",
+            purpose,
+            normalizedEmail);
     }
 
     public async Task<EmailOtpVerifyResponse> VerifyAsync(

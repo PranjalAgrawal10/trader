@@ -1,11 +1,17 @@
 namespace Trader.Application.Configuration;
 
-/// <summary>Outbound SMTP (e.g. Gmail with an app password). Disabled by default; enable via env <c>Smtp__IsEnabled=true</c>.</summary>
+/// <summary>
+/// Outbound email: Gmail SMTP (dev) or SendGrid HTTP API (recommended on DigitalOcean App Platform).
+/// Enable SMTP via <c>Smtp__IsEnabled=true</c>, or set <c>Smtp__SendGridApiKey</c> (HTTPS — no outbound SMTP ports).
+/// </summary>
 public sealed class SmtpOptions
 {
     public const string SectionName = "Smtp";
 
     public bool IsEnabled { get; set; }
+
+    /// <summary>SendGrid v3 API key. When set, email is sent over HTTPS (works when SMTP ports are blocked).</summary>
+    public string? SendGridApiKey { get; set; }
 
     public string Host { get; set; } = "smtp.gmail.com";
 
@@ -21,4 +27,8 @@ public sealed class SmtpOptions
     public string? FromEmail { get; set; }
 
     public string? FromDisplayName { get; set; }
+
+    public bool UsesSendGridApi => !string.IsNullOrWhiteSpace(SendGridApiKey);
+
+    public bool HasOutboundProvider => UsesSendGridApi || IsEnabled;
 }
