@@ -122,6 +122,7 @@ public static class DependencyInjection
         services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<IPlainTextEmailSender, SmtpPlainTextEmailSender>();
+        services.AddHostedService<SmtpStartupValidator>();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 

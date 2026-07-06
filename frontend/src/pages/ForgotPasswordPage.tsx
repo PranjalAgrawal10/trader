@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { type FormEvent, useState } from 'react'
 import { Alert, Button, Card, Container, Form } from 'react-bootstrap'
 import { Link } from 'react-router-dom'
@@ -6,14 +7,23 @@ import { api } from '../api/client'
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('')
   const [done, setDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
+    setError(null)
     setBusy(true)
     try {
       await api.post('/auth/forgot-password', { email: email.trim() })
       setDone(true)
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const detail = (err.response?.data as { detail?: string } | undefined)?.detail
+        setError(detail ?? 'Could not send reset email. Try again later.')
+      } else {
+        setError('Could not send reset email. Try again later.')
+      }
     } finally {
       setBusy(false)
     }
@@ -31,6 +41,7 @@ export function ForgotPasswordPage() {
             <Alert variant="info">Check your inbox for instructions (and spam).</Alert>
           ) : (
             <Form onSubmit={submit}>
+              {error ? <Alert variant="danger">{error}</Alert> : null}
               <Form.Group className="mb-3">
                 <Form.Label className="small text-secondary text-uppercase">Email</Form.Label>
                 <Form.Control

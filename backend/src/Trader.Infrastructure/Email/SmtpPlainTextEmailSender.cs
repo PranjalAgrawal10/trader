@@ -1,9 +1,8 @@
-using System.Net;
-using System.Net.Mail;
-using System.Net.Mime;
-using System.Text;
+using MailKit.Net.Smtp;
+using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MimeKit;
 using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Configuration;
 
@@ -33,8 +32,8 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         if (!_options.IsEnabled)
             ThrowSmtpDisabled();
 
-        using var message = PlainMessage(to, subject, body, attachments);
-        await SendCoreAsync(ct, message).ConfigureAwait(false);
+        var message = BuildPlainMessage(to, subject, body, attachments);
+        await SendCoreAsync(message, ct).ConfigureAwait(false);
     }
 
     public async Task SendEmailAsync(
@@ -49,21 +48,8 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
         if (!_options.IsEnabled)
             ThrowSmtpDisabled();
 
-        var from = ResolveFromAddress();
-        var trimmedTo = to.Trim();
-
-        using var message = new MailMessage
-        {
-            From = from,
-            Subject = subject,
-            IsBodyHtml = false,
-        };
-        message.To.Add(trimmedTo);
-
-        AddAlternateViews(message, plainTextBody, htmlBody, embeddedImages);
-        AttachFiles(message, attachments);
-
-        await SendCoreAsync(ct, message).ConfigureAwait(false);
+        var message = BuildMultipartMessage(to, subject, plainTextBody, htmlBody, embeddedImages, attachments);
+        await SendCoreAsync(message, ct).ConfigureAwait(false);
     }
 
     private static void ThrowSmtpDisabled() =>
@@ -71,103 +57,132 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
             "Email sending is disabled. Enable SMTP: appsettings/`" + SmtpOptions.SectionName + ":IsEnabled` "
             + "or environment **`" + SmtpOptions.SectionName + "__IsEnabled=true`**, plus host/user/password/from.");
 
-    private MailMessage PlainMessage(
+    private MimeMessage BuildPlainMessage(
         string to,
         string subject,
         string body,
         IReadOnlyList<EmailAttachment> attachments)
     {
-        var from = ResolveFromAddress();
-        var message = new MailMessage
+        var message = CreateBaseMessage(to, subject);
+        if (attachments.Count == 0)
         {
-            From = from,
-            Subject = subject,
-            Body = body,
-            BodyEncoding = Encoding.UTF8,
-            IsBodyHtml = false,
-        };
-        message.To.Add(to.Trim());
+            message.Body = new TextPart("plain")
+            {
+                Text = body,
+                ContentTransferEncoding = ContentEncoding.Base64,
+            };
+            return message;
+        }
 
-        AttachFiles(message, attachments);
+        var builder = new BodyBuilder { TextBody = body };
+        AddAttachments(builder, attachments);
+        message.Body = builder.ToMessageBody();
         return message;
     }
 
-    private MailAddress ResolveFromAddress()
+    private MimeMessage BuildMultipartMessage(
+        string to,
+        string subject,
+        string plainTextBody,
+        string htmlBody,
+        IReadOnlyList<EmbeddedEmailImage> embeddedImages,
+        IReadOnlyList<EmailAttachment> attachments)
+    {
+        var message = CreateBaseMessage(to, subject);
+        var builder = new BodyBuilder
+        {
+            TextBody = plainTextBody ?? string.Empty,
+            HtmlBody = htmlBody ?? string.Empty,
+        };
+
+        foreach (var img in embeddedImages)
+        {
+            var linked = builder.LinkedResources.Add("image", img.Content, ContentType.Parse(img.MimeType));
+            linked.ContentId = img.ContentId.Trim();
+            linked.ContentDisposition = new ContentDisposition(ContentDisposition.Inline);
+        }
+
+        AddAttachments(builder, attachments);
+        message.Body = builder.ToMessageBody();
+        return message;
+    }
+
+    private MimeMessage CreateBaseMessage(string to, string subject)
+    {
+        var (fromEmail, fromName) = ResolveFromAddress();
+        var message = new MimeMessage
+        {
+            Subject = subject,
+        };
+        message.From.Add(string.IsNullOrWhiteSpace(fromName)
+            ? MailboxAddress.Parse(fromEmail)
+            : new MailboxAddress(fromName, fromEmail));
+        message.To.Add(MailboxAddress.Parse(to.Trim()));
+        return message;
+    }
+
+    private (string FromEmail, string? FromDisplayName) ResolveFromAddress()
     {
         var fromEmail = (_options.FromEmail ?? _options.User)?.Trim()
             ?? throw new InvalidOperationException("SMTP `" + SmtpOptions.SectionName + ":FromEmail` (or User) must be set.");
 
-        _ = _options.Password ?? throw new InvalidOperationException(
+        _ = ResolvePassword() ?? throw new InvalidOperationException(
             "SMTP `" + SmtpOptions.SectionName + ":Password` must be set.");
 
-        return string.IsNullOrWhiteSpace(_options.FromDisplayName)
-            ? new MailAddress(fromEmail)
-            : new MailAddress(fromEmail, _options.FromDisplayName);
+        return (fromEmail, _options.FromDisplayName?.Trim());
     }
 
-    private static void AttachFiles(MailMessage message, IReadOnlyList<EmailAttachment> attachments)
+    private string? ResolvePassword()
+    {
+        var raw = _options.Password?.Trim();
+        if (string.IsNullOrEmpty(raw))
+            return null;
+
+        // Gmail app passwords are often pasted with spaces (e.g. "abcd efgh ijkl mnop").
+        return raw.Replace(" ", string.Empty, StringComparison.Ordinal);
+    }
+
+    private static void AddAttachments(BodyBuilder builder, IReadOnlyList<EmailAttachment> attachments)
     {
         foreach (var a in attachments)
-        {
-            var stream = new MemoryStream(a.Content, writable: false);
-            message.Attachments.Add(new Attachment(stream, a.FileName, a.ContentType));
-        }
+            builder.Attachments.Add(a.FileName, a.Content, ContentType.Parse(a.ContentType));
     }
 
-    private static void AddAlternateViews(
-        MailMessage message,
-        string plainTextBody,
-        string htmlBody,
-        IReadOnlyList<EmbeddedEmailImage> embeddedImages)
-    {
-        var plainView = AlternateView.CreateAlternateViewFromString(
-            plainTextBody ?? string.Empty,
-            Encoding.UTF8,
-            MediaTypeNames.Text.Plain);
-        plainView.TransferEncoding = TransferEncoding.Base64;
-
-        var htmlView = AlternateView.CreateAlternateViewFromString(
-            htmlBody ?? string.Empty,
-            Encoding.UTF8,
-            MediaTypeNames.Text.Html);
-        htmlView.TransferEncoding = TransferEncoding.Base64;
-
-        foreach (var img in embeddedImages)
-        {
-            var stream = new MemoryStream(img.Content, writable: false);
-            var linked = new LinkedResource(stream, new ContentType(img.MimeType))
-            {
-                ContentId = img.ContentId.Trim(),
-                TransferEncoding = TransferEncoding.Base64,
-            };
-            htmlView.LinkedResources.Add(linked);
-        }
-
-        message.AlternateViews.Add(plainView);
-        message.AlternateViews.Add(htmlView);
-    }
-
-    private async Task SendCoreAsync(CancellationToken ct, MailMessage message)
+    private async Task SendCoreAsync(MimeMessage message, CancellationToken ct)
     {
         var fromEmail = (_options.FromEmail ?? _options.User)!.Trim();
-        var password = _options.Password!;
+        var password = ResolvePassword()!;
         var user = (_options.User ?? fromEmail).Trim();
+        var host = _options.Host.Trim();
+        var port = _options.Port;
+        var secureSocketOptions = ResolveSecureSocketOptions(port, _options.EnableTls);
 
-        using var client = new SmtpClient(_options.Host.Trim(), _options.Port)
-        {
-            Credentials = new NetworkCredential(user, password),
-            EnableSsl = _options.EnableTls,
-        };
-
+        using var client = new SmtpClient();
         try
         {
             ct.ThrowIfCancellationRequested();
-            await client.SendMailAsync(message, ct).ConfigureAwait(false);
+            await client.ConnectAsync(host, port, secureSocketOptions, ct).ConfigureAwait(false);
+            await client.AuthenticateAsync(user, password, ct).ConfigureAwait(false);
+            await client.SendAsync(message, ct).ConfigureAwait(false);
+            await client.DisconnectAsync(true, ct).ConfigureAwait(false);
+            _logger.LogInformation("Email sent to {Recipient} via {Host}:{Port}", message.To.Mailboxes.FirstOrDefault()?.Address, host, port);
         }
-        catch (SmtpException ex)
+        catch (AuthenticationException ex)
         {
-            _logger.LogError(ex, "SMTP send failed");
+            _logger.LogError(ex, "SMTP authentication failed for user {SmtpUser} on {Host}:{Port}", user, host, port);
+            throw new InvalidOperationException(
+                "Unable to send email. SMTP authentication failed — use a Gmail App password (not your login password) in Smtp__Password.",
+                ex);
+        }
+        catch (SmtpCommandException ex)
+        {
+            _logger.LogError(ex, "SMTP command failed: {StatusCode} {Message}", ex.StatusCode, ex.Message);
             throw new InvalidOperationException("Unable to send email. Check SMTP configuration and credentials.", ex);
+        }
+        catch (SmtpProtocolException ex)
+        {
+            _logger.LogError(ex, "SMTP protocol error");
+            throw new InvalidOperationException("Unable to send email. Check SMTP host, port, and TLS settings.", ex);
         }
         catch (OperationCanceledException)
         {
@@ -179,4 +194,12 @@ public sealed class SmtpPlainTextEmailSender : IPlainTextEmailSender
             throw new InvalidOperationException("Unable to send email.", ex);
         }
     }
+
+    private static SecureSocketOptions ResolveSecureSocketOptions(int port, bool enableTls) =>
+        port switch
+        {
+            465 => SecureSocketOptions.SslOnConnect,
+            587 => SecureSocketOptions.StartTls,
+            _ => enableTls ? SecureSocketOptions.StartTlsWhenAvailable : SecureSocketOptions.None,
+        };
 }
