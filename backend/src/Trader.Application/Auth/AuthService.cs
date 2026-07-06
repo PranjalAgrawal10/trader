@@ -149,43 +149,51 @@ public sealed class AuthService : IAuthService
         if (user is null)
             return;
 
-        _ = RequireConfiguredFrontendOrigin();
-
-        var raw = OpaqueTokenHasher.CreateUrlToken();
-        user.PasswordResetTokenHash = OpaqueTokenHasher.HashToken(raw);
-        user.PasswordResetExpiresAtUtc =
-            DateTimeOffset.UtcNow.AddHours(EffectiveHours(_authOptions.PasswordResetExpiryHours));
-        await _users.SaveChangesAsync(ct);
-
-        var resetUrl = BuildFrontendLink(_publicWeb.ResetPasswordPath, "token", raw);
-        var subject = "Reset your Trader password";
-        var body =
-            $"Open this link to set a new password:\n\n{resetUrl}\n\n" +
-            $"This link expires in {EffectiveHours(_authOptions.PasswordResetExpiryHours)} hours. If you did not request a reset, ignore this email.";
-
-        await _emailSender.SendPlainTextAsync(normalizedEmail, subject, body, ct);
+        await _emailOtp.SendPasswordResetAsync(normalizedEmail, ct);
     }
 
     public async Task ResetPasswordAsync(ResetPasswordRequest request, CancellationToken ct = default)
     {
-        if (request.Token is null || string.IsNullOrWhiteSpace(request.Token))
-            throw new InvalidOperationException("token is required.");
-
         var newPassword = request.NewPassword?.Trim() ?? string.Empty;
         if (newPassword.Length < 6)
             throw new InvalidOperationException("Password must be at least 6 characters.");
 
+        var otp = request.Otp?.Trim();
+        var email = request.Email?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(otp) && !string.IsNullOrWhiteSpace(email))
+        {
+            var verify = await _emailOtp.VerifyAsync(
+                new EmailOtpVerifyRequest { Email = email, Otp = otp },
+                EmailOtpPurpose.PasswordReset,
+                ct);
+            if (!verify.Verified)
+                throw new InvalidOperationException("Invalid or expired verification code.");
+
+            var user = await _users.GetByEmailAsync(email, ct);
+            if (user is null)
+                throw new InvalidOperationException("Invalid or expired verification code.");
+
+            user.PasswordHash = _passwordHasher.Hash(newPassword);
+            user.PasswordResetTokenHash = null;
+            user.PasswordResetExpiresAtUtc = null;
+            await _users.SaveChangesAsync(ct);
+            return;
+        }
+
+        if (request.Token is null || string.IsNullOrWhiteSpace(request.Token))
+            throw new InvalidOperationException("email, otp, and new_password are required.");
+
         var hash = OpaqueTokenHasher.HashToken(request.Token.Trim());
-        var user = await _users.GetByPasswordResetTokenHashAsync(hash, ct);
-        if (user is null)
+        var userByToken = await _users.GetByPasswordResetTokenHashAsync(hash, ct);
+        if (userByToken is null)
             throw new InvalidOperationException("Invalid or expired password reset link.");
 
-        if (user.PasswordResetExpiresAtUtc is null || user.PasswordResetExpiresAtUtc < DateTimeOffset.UtcNow)
+        if (userByToken.PasswordResetExpiresAtUtc is null || userByToken.PasswordResetExpiresAtUtc < DateTimeOffset.UtcNow)
             throw new InvalidOperationException("Invalid or expired password reset link.");
 
-        user.PasswordHash = _passwordHasher.Hash(newPassword);
-        user.PasswordResetTokenHash = null;
-        user.PasswordResetExpiresAtUtc = null;
+        userByToken.PasswordHash = _passwordHasher.Hash(newPassword);
+        userByToken.PasswordResetTokenHash = null;
+        userByToken.PasswordResetExpiresAtUtc = null;
         await _users.SaveChangesAsync(ct);
     }
 
@@ -319,7 +327,10 @@ public sealed class AuthService : IAuthService
         if (user.SecondFactorMethod == SecondFactorMethod.EmailSignInCode)
         {
             var verify =
-                await _emailOtp.VerifyAsync(new EmailOtpVerifyRequest { Email = user.Email, Otp = code }, ct);
+                await _emailOtp.VerifyAsync(
+                    new EmailOtpVerifyRequest { Email = user.Email, Otp = code },
+                    EmailOtpPurpose.LoginSecondFactor,
+                    ct);
             if (!verify.Verified)
             {
                 _attemptLimiter.RegisterFailure(scope);

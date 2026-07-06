@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Domain.Entities;
+using Trader.Domain.Enums;
 
 namespace Trader.Infrastructure.Persistence.Repositories;
 
@@ -13,10 +14,13 @@ public sealed class EmailOtpRepository : IEmailOtpRepository
         _db = db;
     }
 
-    public async Task InvalidatePendingForEmailAsync(string normalizedEmail, CancellationToken ct = default)
+    public async Task InvalidatePendingForEmailAsync(
+        string normalizedEmail,
+        EmailOtpPurpose purpose,
+        CancellationToken ct = default)
     {
         await _db.EmailOtpChallenges.AsNoTracking()
-            .Where(x => x.NormalizedEmail == normalizedEmail && !x.IsConsumed)
+            .Where(x => x.NormalizedEmail == normalizedEmail && x.Purpose == purpose && !x.IsConsumed)
             .ExecuteDeleteAsync(ct);
     }
 
@@ -26,11 +30,18 @@ public sealed class EmailOtpRepository : IEmailOtpRepository
     public Task DeleteByIdAsync(Guid id, CancellationToken ct = default) =>
         _db.EmailOtpChallenges.Where(x => x.Id == id).ExecuteDeleteAsync(ct);
 
-    public async Task<EmailOtpChallenge?> GetLatestForEmailAsync(string normalizedEmail, CancellationToken ct = default)
+    public async Task<EmailOtpChallenge?> GetLatestForEmailAsync(
+        string normalizedEmail,
+        EmailOtpPurpose purpose,
+        CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;
         return await _db.EmailOtpChallenges.AsTracking()
-            .Where(x => x.NormalizedEmail == normalizedEmail && !x.IsConsumed && x.ExpiresAtUtc > now)
+            .Where(x =>
+                x.NormalizedEmail == normalizedEmail &&
+                x.Purpose == purpose &&
+                !x.IsConsumed &&
+                x.ExpiresAtUtc > now)
             .OrderByDescending(x => x.CreatedAtUtc)
             .FirstOrDefaultAsync(ct);
     }

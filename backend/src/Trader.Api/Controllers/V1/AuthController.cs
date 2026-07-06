@@ -36,7 +36,7 @@ public sealed class AuthController : V1NamedControllerBase
     public async Task<ActionResult<EmailOtpVerifyResponse>> VerifyEmailOtp(
         [FromBody] EmailOtpVerifyRequest request,
         CancellationToken ct) =>
-        Ok(await _emailOtp.VerifyAsync(request, ct));
+        Ok(await _emailOtp.VerifyAsync(request, ct: ct));
 
     [AllowAnonymous]
     [HttpPost("verify-email")]

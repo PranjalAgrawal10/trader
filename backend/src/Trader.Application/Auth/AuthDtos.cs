@@ -35,8 +35,15 @@ public sealed class ForgotPasswordRequest
 
 public sealed class ResetPasswordRequest
 {
+    /// <summary>Legacy link-based reset (optional when <see cref="Otp"/> is used).</summary>
     [JsonPropertyName("token")]
     public string? Token { get; set; }
+
+    [JsonPropertyName("email")]
+    public string? Email { get; set; }
+
+    [JsonPropertyName("otp")]
+    public string? Otp { get; set; }
 
     [JsonPropertyName("new_password")]
     public string? NewPassword { get; set; }

@@ -35,7 +35,7 @@ public sealed class TraderDbContext : DbContext
         {
             e.Property(x => x.NormalizedEmail).HasMaxLength(320);
             e.Property(x => x.OtpHash).HasMaxLength(200);
-            e.HasIndex(x => new { x.NormalizedEmail, x.IsConsumed });
+            e.HasIndex(x => new { x.NormalizedEmail, x.Purpose, x.IsConsumed });
         });
 
         modelBuilder.Entity<User>(e =>

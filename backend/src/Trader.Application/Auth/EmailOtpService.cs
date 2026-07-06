@@ -7,6 +7,7 @@ using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
 using Trader.Application.Configuration;
 using Trader.Domain.Entities;
+using Trader.Domain.Enums;
 
 namespace Trader.Application.Auth;
 
@@ -37,6 +38,7 @@ public sealed partial class EmailOtpService : IEmailOtpService
         var email = ValidateAndNormalizeEmail(request.Email);
         return SendSixDigitChallengeAsync(
             email,
+            EmailOtpPurpose.Generic,
             "Your verification code",
             (plainCode, expiryMinutes) =>
                 $"Your verification code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not request this, you can ignore this email.",
@@ -49,10 +51,24 @@ public sealed partial class EmailOtpService : IEmailOtpService
         var email = ValidateAndNormalizeEmail(normalizedEmail);
         return SendSixDigitChallengeAsync(
             email,
+            EmailOtpPurpose.LoginSecondFactor,
             "Your Trader sign-in code",
             (plainCode, expiryMinutes) =>
                 $"Your Trader sign-in code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not sign in, change your password and contact support.",
             BuildLoginSecondFactorHtmlBody,
+            ct);
+    }
+
+    public Task SendPasswordResetAsync(string normalizedEmail, CancellationToken ct = default)
+    {
+        var email = ValidateAndNormalizeEmail(normalizedEmail);
+        return SendSixDigitChallengeAsync(
+            email,
+            EmailOtpPurpose.PasswordReset,
+            "Your Trader password reset code",
+            (plainCode, expiryMinutes) =>
+                $"Your password reset code is: {plainCode}. It expires in {expiryMinutes} minutes. If you did not request a reset, ignore this email.",
+            buildHtmlBody: null,
             ct);
     }
 
@@ -61,6 +77,7 @@ public sealed partial class EmailOtpService : IEmailOtpService
 
     private async Task SendSixDigitChallengeAsync(
         string normalizedEmail,
+        EmailOtpPurpose purpose,
         string subject,
         Func<string, int, string> buildPlainBody,
         Func<string, int, string>? buildHtmlBody,
@@ -74,6 +91,7 @@ public sealed partial class EmailOtpService : IEmailOtpService
         {
             Id = Guid.NewGuid(),
             NormalizedEmail = normalizedEmail,
+            Purpose = purpose,
             OtpHash = hash,
             ExpiresAtUtc = now.AddMinutes(expiryMinutes),
             IsConsumed = false,
@@ -81,7 +99,7 @@ public sealed partial class EmailOtpService : IEmailOtpService
             CreatedAtUtc = now,
         };
 
-        await _repository.InvalidatePendingForEmailAsync(normalizedEmail, ct);
+        await _repository.InvalidatePendingForEmailAsync(normalizedEmail, purpose, ct);
         await _repository.AddAsync(challenge, ct);
         await _repository.SaveChangesAsync(ct);
 
@@ -114,7 +132,10 @@ public sealed partial class EmailOtpService : IEmailOtpService
         }
     }
 
-    public async Task<EmailOtpVerifyResponse> VerifyAsync(EmailOtpVerifyRequest request, CancellationToken ct = default)
+    public async Task<EmailOtpVerifyResponse> VerifyAsync(
+        EmailOtpVerifyRequest request,
+        EmailOtpPurpose purpose = EmailOtpPurpose.Generic,
+        CancellationToken ct = default)
     {
         if (request.Email is null || request.Otp is null)
             throw new InvalidOperationException("Email and OTP are required.");
@@ -126,7 +147,7 @@ public sealed partial class EmailOtpService : IEmailOtpService
         if (code.Length != 6)
             return new EmailOtpVerifyResponse(false);
 
-        var challenge = await _repository.GetLatestForEmailAsync(email, ct);
+        var challenge = await _repository.GetLatestForEmailAsync(email, purpose, ct);
         if (challenge is null)
             return new EmailOtpVerifyResponse(false);
 
