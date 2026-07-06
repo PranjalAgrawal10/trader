@@ -58,7 +58,7 @@ internal static class TraderWebApplicationPipelineExtensions
         if (string.IsNullOrWhiteSpace(mysqlCs))
         {
             throw new InvalidOperationException(
-                "MySQL is configured but the connection could not be built. Set **Database__Host**, **Database__Name**, **Database__Username**, **Database__Password** (and optional **Port** / **SslMode**), or see **`backend/src/Trader.Api/.env.example`**.");
+                "MySQL is configured but the connection could not be built. Set **DATABASE_URL** (preferred) or discrete **Database__Host** / **Name** / **Username** / **Password**, or see **`backend/src/Trader.Api/.env.example`**.");
         }
 
         if (app.Environment.IsDevelopment())

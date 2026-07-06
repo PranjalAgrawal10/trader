@@ -58,11 +58,11 @@ Start MySQL locally or via Docker. Example using Compose (MySQL only):
 docker compose up mysql -d
 ```
 
-Database host defaults to **localhost:3306** when you run the API on the host against a local MySQL; set **`Database__Host`**, **`Database__Port`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** in `backend/src/Trader.Api/.env.development` (same shape as **`.env.example`**). **Docker Compose** maps container MySQL to **`localhost:3307`** on the host (see `docker-compose.yml`) so it does not fight for **3306** with another MySQL install; use **`Database__Port=3307`** when using that Compose database from **`dotnet run`** on the host. Services inside Compose (`api` → `mysql`) still use port **3306** internally (`Database__Host=mysql`, **`Database__Port=3306`**).
+Set **`DATABASE_URL`** in `backend/src/Trader.Api/.env.development` (see **`.env.example`**), e.g. **`mysql://root:YOUR_PASSWORD@localhost:3306/trader`**. Put real passwords and broker keys in **`.env.development.local`** (gitignored). **Docker Compose** maps container MySQL to **`localhost:3307`** on the host (see `docker-compose.yml`) so it does not fight for **3306** with another MySQL install; from **`dotnet run`** on the host against that Compose database use port **3307** in **`DATABASE_URL`**. Services inside Compose (`api` → `mysql`) use **`DATABASE_URL=mysql://trader:trader@mysql:3306/trader`** internally.
 
 With **`Database:Provider=MySQL`** (and not **IntegrationTesting**), the API runs **`Migrate()`** on startup when **`Database:ApplyMigrationsOnStartup`** is **true** (default in `appsettings.json`). In **Development** it also **creates the database** if missing. **Production** and **Docker** typically use an existing catalog (e.g. managed MySQL) and only apply pending migrations. Set **`Database__ApplyMigrationsOnStartup=false`** to disable automatic startup migrations. You can still apply migrations manually (`dotnet ef`, below).
 
-When you **`dotnet build`** the API from `backend/` in **Debug**, **`dotnet ef database update`** runs after the API project build by default (**`RunEfMigrationsOnBuild`** is **true**), which requires the **`dotnet-ef`** global tool and **reachable MySQL** (same **`Database__*`** / `.env` as **`dotnet run`**). For **Release** builds (including **`dotnet publish`** on hosts like DigitalOcean App Platform that do not install **`dotnet-ef`**), **`RunEfMigrationsOnBuild`** defaults to **false** so publish succeeds; rely on **`Migrate()`** on API startup (or run **`dotnet ef database update`** from a machine with the tool) unless you pass **`-p:RunEfMigrationsOnBuild=true`**. Use **`-p:RunEfMigrationsOnBuild=false`** when the database is unavailable during compile. **`dotnet test`** references the API with **`RunEfMigrationsOnBuild=false`**. **Docker** **`dotnet publish`** can still pass **`/p:RunEfMigrationsOnBuild=false`** explicitly.
+When you **`dotnet build`** the API from `backend/` in **Debug**, **`dotnet ef database update`** runs after the API project build by default (**`RunEfMigrationsOnBuild`** is **true**), which requires the **`dotnet-ef`** global tool and **reachable MySQL** (same **`DATABASE_URL`** / `.env` as **`dotnet run`**). For **Release** builds (including **`dotnet publish`** on hosts like DigitalOcean App Platform that do not install **`dotnet-ef`**), **`RunEfMigrationsOnBuild`** defaults to **false** so publish succeeds; rely on **`Migrate()`** on API startup (or run **`dotnet ef database update`** from a machine with the tool) unless you pass **`-p:RunEfMigrationsOnBuild=true`**. Use **`-p:RunEfMigrationsOnBuild=false`** when the database is unavailable during compile. **`dotnet test`** references the API with **`RunEfMigrationsOnBuild=false`**. **Docker** **`dotnet publish`** can still pass **`/p:RunEfMigrationsOnBuild=false`** explicitly.
 
 ### 2. Apply EF Core migrations (optional)
 
@@ -153,9 +153,9 @@ CORS in Compose still allows **`http://localhost:8080`** (Docker UI) and **`http
 |-----------|--------|
 | `appsettings.json` | Structure and non-secret defaults (many values empty by design) |
 | `appsettings.Development.json` | Development logging |
-| `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Use **`Database__Host`**, **`Database__Port`**, **`Database__Name`**, **`Database__Username`**, **`Database__Password`** as in **`.env.example`**. **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
+| `.env` / `.env.development` / `.env.local` | **Development only.** Merged by `DotEnvBootstrap` when `ASPNETCORE_ENVIRONMENT=Development`. Set **`DATABASE_URL`** (and JWT/CORS) as in **`.env.example`**; secrets in **`.env.development.local`**. **Production ignores these files** — use platform env vars or `appsettings.Production.json` (non-secrets only). |
 | `.env.production` (committed) | **Template / documentation only** for humans; the API does **not** load it at runtime in Production. |
-| Environment variables | Override files. Discrete **`Database__*`** or **`MYSQL_*`** / **`DB_*`** aliases (see `MySqlConnectionStringResolver`) build the MySQL connection. |
+| Environment variables | Override files. **`DATABASE_URL`** is preferred; alternatives include **`Database__ConnectionString`**, discrete **`Database__*`**, or **`MYSQL_*`** / **`DB_*`** aliases (see `MySqlConnectionStringResolver`). |
 
 See `backend/src/Trader.Api/.env.example`. Local overrides: **`.env.local`** / **`.env.development.local`** (gitignored). **Production** uses only **environment variables** and appsettings — **`.env` / `.env.production` are never loaded** by the host when `ASPNETCORE_ENVIRONMENT` is not `Development`. Blank values in merged `.env` lines are ignored.
 
@@ -275,7 +275,7 @@ Optional: **`DataProtection__KeyRingPath`** if you attach **persistent storage**
   dotnet ef database update --project src/Trader.Infrastructure --startup-project src/Trader.Api
   ```
 
-  Use the same **`Database__*`** (or alias) variables as production so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
+  Use the same **`DATABASE_URL`** (or alias) as production so migrations hit the managed DB. **Image builds** use **`/p:RunEfMigrationsOnBuild=false`**; **production** still applies migrations **on API startup** unless you set **`Database__ApplyMigrationsOnStartup=false`**.
 
 **Troubleshooting — `Unknown column '...KiteInstrumentsChartZoomJson'` or **`...KiteInstrumentsChartIntervalByInstrumentTokenJson`** (login/register/forgot-password 500):** The model includes the matching migration, but the live **`Users`** table in the catalog the API uses (logs show **`TABLE_SCHEMA='defaultdb'`**) never got the column while **`__EFMigrationsHistory`** already lists that migration—so **`Migrate()`** reports *already up to date* and does nothing. Repair on that database (DigitalOcean MySQL console or any client), idempotent on MySQL 8+:
 
@@ -286,7 +286,7 @@ ALTER TABLE `Users`
   ADD COLUMN IF NOT EXISTS `KiteInstrumentsChartIntervalByInstrumentTokenJson` longtext NULL;
 ```
 
-On older MySQL, run a plain **`ADD COLUMN`** once, or use **`SHOW COLUMNS FROM Users LIKE 'KiteInstrumentsChartZoomJson';`** (and the interval column name) to confirm before adding. Ensure you are connected to the **same** schema as **`Database__Name`** (managed clusters often use **`defaultdb`**).
+On older MySQL, run a plain **`ADD COLUMN`** once, or use **`SHOW COLUMNS FROM Users LIKE 'KiteInstrumentsChartZoomJson';`** (and the interval column name) to confirm before adding. Ensure you are connected to the **same** schema as in **`DATABASE_URL`** (managed clusters often use **`defaultdb`**).
 
 ### 7. Smoke test
 
