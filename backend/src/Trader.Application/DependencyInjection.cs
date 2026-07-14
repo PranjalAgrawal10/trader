@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddScoped<IBotService, BotService>();
         services.AddScoped<ITradeService, TradeService>();
         services.AddScoped<IEmailOtpService, EmailOtpService>();
+        services.AddScoped<NiftyOpenAutoTradeService>();
         return services;
     }
 }

@@ -1,5 +1,7 @@
 using Trader.Domain.Enums;
 
+using Trader.Domain.Enums;
+
 namespace Trader.Domain.Entities;
 
 public class User
@@ -80,6 +82,18 @@ public class User
     /// <summary>Demo allocation preset id (SPA/server constant: default <c>equal_split</c>). Does not execute trades.</summary>
     public string DemoAutoTradeStrategy { get; set; } = "equal_split";
 
+    /// <summary>When true, server places a live NIFTY ATM MIS BUY (CE or PE) near 09:15 IST with 10% GTT exits.</summary>
+    public bool NiftyOpenAutoTradeEnabled { get; set; }
+
+    /// <summary>Option leg to buy: <see cref="NiftyOpenAutoTradeOptionSide.Ce"/> or <see cref="NiftyOpenAutoTradeOptionSide.Pe"/>.</summary>
+    public NiftyOpenAutoTradeOptionSide NiftyOpenAutoTradeOptionSide { get; set; }
+
+    /// <summary>Hard cap on exchange lots sized from Kite available cash (clamped server-side).</summary>
+    public int NiftyOpenAutoTradeMaxLots { get; set; } = 5;
+
+    /// <summary>IST session calendar date of the last open-auto attempt (idempotency; null = never).</summary>
+    public DateOnly? NiftyOpenAutoTradeLastSessionDateIst { get; set; }
+
     /// <summary>When true, server background job may run ML predictions for <see cref="KiteFavoriteInstruments"/> (requires global automation + Kite session).</summary>
     public bool FavoriteMlAutomationEnabled { get; set; }
 
@@ -142,4 +156,6 @@ public class User
     public ICollection<DemoPaperTradeLog> DemoPaperTradeLogs { get; set; } = new List<DemoPaperTradeLog>();
 
     public ICollection<UserLoginAudit> LoginAudits { get; set; } = new List<UserLoginAudit>();
+
+    public ICollection<NiftyOpenAutoTradeRun> NiftyOpenAutoTradeRuns { get; set; } = new List<NiftyOpenAutoTradeRun>();
 }

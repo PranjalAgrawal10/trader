@@ -14,6 +14,7 @@ using Trader.Application.Abstractions.Security;
 using Trader.Application.Abstractions.Reporting;
 using Trader.Infrastructure.Broker;
 using Trader.Infrastructure.Email;
+using Trader.Infrastructure.Hosting;
 using Trader.Infrastructure.Persistence;
 using Trader.Infrastructure.Persistence.Repositories;
 using Trader.Infrastructure.Reporting;
@@ -37,6 +38,7 @@ public static class DependencyInjection
         services.Configure<GrowwOptions>(configuration.GetSection(GrowwOptions.SectionName));
         services.Configure<LiveCandlesOptions>(configuration.GetSection(LiveCandlesOptions.SectionName));
         services.Configure<DemoAutoTradeOptions>(configuration.GetSection(DemoAutoTradeOptions.SectionName));
+        services.Configure<NiftyOpenAutoTradeOptions>(configuration.GetSection(NiftyOpenAutoTradeOptions.SectionName));
 
         services.AddSingleton<IKiteOAuthStateCodec, KiteOAuthStateCodec>();
         services.AddSingleton<ITwoFactorTotpHelper>(sp =>
@@ -111,6 +113,7 @@ public static class DependencyInjection
         services.AddScoped<IDemoPaperTradeLogRepository, DemoPaperTradeLogRepository>();
         services.AddScoped<IKiteFavoriteInstrumentRepository, KiteFavoriteInstrumentRepository>();
         services.AddScoped<IKiteTradingLockInstrumentRepository, KiteTradingLockInstrumentRepository>();
+        services.AddScoped<INiftyOpenAutoTradeRunRepository, NiftyOpenAutoTradeRunRepository>();
         services.AddScoped<IStrategyRepository, StrategyRepository>();
         services.AddScoped<IBotRepository, BotRepository>();
         services.AddScoped<ITradeRepository, TradeRepository>();
@@ -129,6 +132,7 @@ public static class DependencyInjection
         services.AddSingleton<RoutingPlainTextEmailSender>();
         services.AddSingleton<IPlainTextEmailSender>(sp => sp.GetRequiredService<RoutingPlainTextEmailSender>());
         services.AddHostedService<SmtpStartupValidator>();
+        services.AddHostedService<NiftyOpenAutoTradeBackgroundService>();
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddScoped<IJwtTokenService, JwtTokenService>();
 

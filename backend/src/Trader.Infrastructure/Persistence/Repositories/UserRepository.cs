@@ -31,6 +31,15 @@ public sealed class UserRepository : IUserRepository
     public Task<User?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         _db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
 
+    public async Task<IReadOnlyList<Guid>> ListIdsWithNiftyOpenAutoTradeEnabledAsync(CancellationToken ct = default)
+    {
+        return await _db.Users.AsNoTracking()
+            .Where(u => u.NiftyOpenAutoTradeEnabled)
+            .Select(u => u.Id)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         _db.SaveChangesAsync(ct);
 }

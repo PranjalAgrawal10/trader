@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Trader.Domain.Entities;
+using Trader.Domain.Enums;
 
 namespace Trader.Infrastructure.Persistence;
 
@@ -28,6 +29,7 @@ public sealed class TraderDbContext : DbContext
     public DbSet<DemoPaperBuyLeg> DemoPaperBuyLegs => Set<DemoPaperBuyLeg>();
     public DbSet<DemoPaperTradeLog> DemoPaperTradeLogs => Set<DemoPaperTradeLog>();
     public DbSet<UserLoginAudit> UserLoginAudits => Set<UserLoginAudit>();
+    public DbSet<NiftyOpenAutoTradeRun> NiftyOpenAutoTradeRuns => Set<NiftyOpenAutoTradeRun>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -63,6 +65,9 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.WalletBalance).HasPrecision(18, 2).HasDefaultValue(0);
             e.Property(x => x.DemoAutoTradeEnabled).HasDefaultValue(false);
             e.Property(x => x.DemoAutoTradeStrategy).HasMaxLength(32).HasDefaultValue("equal_split");
+            e.Property(x => x.NiftyOpenAutoTradeEnabled).HasDefaultValue(false);
+            e.Property(x => x.NiftyOpenAutoTradeOptionSide).HasConversion<byte>().HasDefaultValue(NiftyOpenAutoTradeOptionSide.Ce);
+            e.Property(x => x.NiftyOpenAutoTradeMaxLots).HasDefaultValue(5);
             e.Property(x => x.FavoriteMlAutomationEnabled).HasDefaultValue(false);
             e.Property(x => x.FavoriteMlAutomationInterval).HasMaxLength(16);
             e.Property(x => x.FavoriteMlAutomationLastNewPassUtc).HasColumnType("datetime(6)");
@@ -267,6 +272,27 @@ public sealed class TraderDbContext : DbContext
         {
             e.Property(x => x.ExternalId).HasMaxLength(128);
             e.HasOne(x => x.Bot).WithMany(b => b.Orders).HasForeignKey(x => x.BotId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NiftyOpenAutoTradeRun>(e =>
+        {
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.OptionSide).HasMaxLength(8);
+            e.Property(x => x.Exchange).HasMaxLength(16);
+            e.Property(x => x.Tradingsymbol).HasMaxLength(64);
+            e.Property(x => x.Expiry).HasMaxLength(32);
+            e.Property(x => x.Strike).HasPrecision(18, 4);
+            e.Property(x => x.OptionLtp).HasPrecision(18, 4);
+            e.Property(x => x.SpotLtp).HasPrecision(18, 4);
+            e.Property(x => x.AvailableBalanceInr).HasPrecision(18, 2);
+            e.Property(x => x.OrderId).HasMaxLength(64);
+            e.Property(x => x.GttTriggerId).HasMaxLength(64);
+            e.Property(x => x.Message).HasMaxLength(1000);
+            e.Property(x => x.CreatedAtUtc).HasColumnType("datetime(6)");
+            e.HasIndex(x => new { x.UserId, x.SessionDateIst });
+            e.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
+            e.HasOne(x => x.User).WithMany(u => u.NiftyOpenAutoTradeRuns).HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

@@ -342,4 +342,77 @@ public sealed partial class BrokerController
         }
     }
 
+    /// <summary>Live NIFTY ATM MIS BUY at ~09:15 IST with 10% GTT (not demo/paper).</summary>
+    [Authorize]
+    [HttpGet("kite/nifty-open-auto-trade")]
+    public async Task<ActionResult<NiftyOpenAutoTradeSettingsDto>> GetNiftyOpenAutoTrade(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _niftyOpenAutoTrade.GetSettingsAsync(User.GetUserId(), ct).ConfigureAwait(false);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpPut("kite/nifty-open-auto-trade")]
+    public async Task<IActionResult> PutNiftyOpenAutoTrade(
+        [FromBody] NiftyOpenAutoTradeSettingsPutDto? body,
+        CancellationToken ct)
+    {
+        if (body is null)
+        {
+            return Problem(
+                title: "Invalid body",
+                detail: "Send JSON { \"enabled\": bool, \"optionSide\": \"CE\"|\"PE\", \"maxLots\": 1–10 }.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            await _niftyOpenAutoTrade.SaveSettingsAsync(User.GetUserId(), body, ct).ConfigureAwait(false);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpGet("kite/nifty-open-auto-trade/preview")]
+    public async Task<ActionResult<NiftyOpenAutoTradePreviewDto>> PreviewNiftyOpenAutoTrade(CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _niftyOpenAutoTrade.PreviewAsync(User.GetUserId(), ct).ConfigureAwait(false);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    [Authorize]
+    [HttpGet("kite/nifty-open-auto-trade/runs")]
+    public async Task<ActionResult<IReadOnlyList<NiftyOpenAutoTradeRunDto>>> ListNiftyOpenAutoTradeRuns(
+        [FromQuery] int? take,
+        CancellationToken ct)
+    {
+        try
+        {
+            var dto = await _niftyOpenAutoTrade.ListRunsAsync(User.GetUserId(), take, ct).ConfigureAwait(false);
+            return Ok(dto);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
 }

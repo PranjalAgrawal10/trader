@@ -13,4 +13,7 @@ public interface IUserRepository
     Task<User?> GetByPasswordResetTokenHashAsync(string tokenHash, CancellationToken ct = default);
 
     Task SaveChangesAsync(CancellationToken ct = default);
+
+    /// <summary>Users who opted into live NIFTY 09:15 ATM MIS auto-trade.</summary>
+    Task<IReadOnlyList<Guid>> ListIdsWithNiftyOpenAutoTradeEnabledAsync(CancellationToken ct = default);
 }

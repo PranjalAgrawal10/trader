@@ -153,6 +153,46 @@ interface ScalperSettingsResponse {
   gttEnabled: boolean
 }
 
+interface NiftyOpenAutoTradeSettingsResponse {
+  enabled: boolean
+  optionSide: string
+  maxLots: number
+  lastSessionDateIst: string | null
+  lastRun: NiftyOpenAutoTradeRunResponse | null
+}
+
+interface NiftyOpenAutoTradeRunResponse {
+  id: string
+  sessionDateIst: string
+  status: string
+  optionSide: string
+  exchange: string | null
+  tradingsymbol: string | null
+  strike: number | null
+  lots: number
+  quantity: number
+  optionLtp: number | null
+  message: string | null
+  createdAtUtc: string
+}
+
+interface NiftyOpenAutoTradePreviewResponse {
+  canTrade: boolean
+  reason: string | null
+  spotLtp: number | null
+  availableBalanceInr: number | null
+  optionSide: string
+  exchange: string | null
+  tradingsymbol: string | null
+  strike: number | null
+  expiry: string | null
+  lots: number
+  quantity: number
+  optionLtp: number | null
+  estimatedPremiumInr: number
+  maxLots: number
+}
+
 type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
 
 const SCALPER_TICKET_ORDER_TYPES: ReadonlyArray<ScalperTicketOrderType> = ['MARKET', 'LIMIT', 'SL', 'SL-M']
@@ -383,6 +423,15 @@ export function ScalperPage() {
   const [isGttLossEnabled, setIsGttLossEnabled] = useState(true)
   const [isGttProfitEnabled, setIsGttProfitEnabled] = useState(true)
   const [broker, setBroker] = useState<BrokerStatusResponse | null>(null)
+  const [niftyOpenEnabled, setNiftyOpenEnabled] = useState(false)
+  const [niftyOpenSide, setNiftyOpenSide] = useState<'CE' | 'PE'>('CE')
+  const [niftyOpenMaxLots, setNiftyOpenMaxLots] = useState(5)
+  const [niftyOpenHydrated, setNiftyOpenHydrated] = useState(false)
+  const [niftyOpenSaving, setNiftyOpenSaving] = useState(false)
+  const [niftyOpenPreview, setNiftyOpenPreview] = useState<NiftyOpenAutoTradePreviewResponse | null>(null)
+  const [niftyOpenPreviewBusy, setNiftyOpenPreviewBusy] = useState(false)
+  const [niftyOpenLastRun, setNiftyOpenLastRun] = useState<NiftyOpenAutoTradeRunResponse | null>(null)
+  const [niftyOpenError, setNiftyOpenError] = useState<string | null>(null)
 
   const [selected, setSelected] = useState<KiteInstrumentRow | null>(null)
   const [interval, setInterval] = useState<ScalperInterval>('1m')
@@ -484,6 +533,72 @@ export function ScalperPage() {
     setTriggerLinePrice(null)
     setStopLinePrice(null)
   }, [selected?.instrumentToken, selected?.lotSize])
+
+  useEffect(() => {
+    let dead = false
+    ;(async () => {
+      try {
+        const { data } = await api.get<NiftyOpenAutoTradeSettingsResponse>('/broker/kite/nifty-open-auto-trade')
+        if (dead) return
+        setNiftyOpenEnabled(Boolean(data.enabled))
+        setNiftyOpenSide(data.optionSide === 'PE' ? 'PE' : 'CE')
+        setNiftyOpenMaxLots(
+          typeof data.maxLots === 'number' && data.maxLots >= 1 && data.maxLots <= 10 ? data.maxLots : 5,
+        )
+        setNiftyOpenLastRun(data.lastRun ?? null)
+      } catch {
+        /* keep defaults */
+      } finally {
+        if (!dead) setNiftyOpenHydrated(true)
+      }
+    })()
+    return () => {
+      dead = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!niftyOpenHydrated) return
+    const tid = window.setTimeout(() => {
+      setNiftyOpenSaving(true)
+      void api
+        .put('/broker/kite/nifty-open-auto-trade', {
+          enabled: niftyOpenEnabled,
+          optionSide: niftyOpenSide,
+          maxLots: niftyOpenMaxLots,
+        })
+        .then(() => setNiftyOpenError(null))
+        .catch((err: unknown) => {
+          const detail =
+            axios.isAxiosError(err) && typeof err.response?.data?.detail === 'string'
+              ? err.response.data.detail
+              : 'Could not save NIFTY open auto-trade settings.'
+          setNiftyOpenError(detail)
+        })
+        .finally(() => setNiftyOpenSaving(false))
+    }, 450)
+    return () => window.clearTimeout(tid)
+  }, [niftyOpenEnabled, niftyOpenHydrated, niftyOpenMaxLots, niftyOpenSide])
+
+  const runNiftyOpenPreview = useCallback(async () => {
+    setNiftyOpenPreviewBusy(true)
+    setNiftyOpenError(null)
+    try {
+      const { data } = await api.get<NiftyOpenAutoTradePreviewResponse>(
+        '/broker/kite/nifty-open-auto-trade/preview',
+      )
+      setNiftyOpenPreview(data)
+    } catch (err: unknown) {
+      const detail =
+        axios.isAxiosError(err) && typeof err.response?.data?.detail === 'string'
+          ? err.response.data.detail
+          : 'Preview failed.'
+      setNiftyOpenError(detail)
+      setNiftyOpenPreview(null)
+    } finally {
+      setNiftyOpenPreviewBusy(false)
+    }
+  }, [])
 
   useEffect(() => {
     let dead = false
@@ -1556,6 +1671,98 @@ export function ScalperPage() {
                   ) : null}
                 </Col>
                 <Col lg={5} xl={4}>
+                  {isZerodha ? (
+                    <div className="border rounded border-secondary-subtle p-2 bg-body text-body mb-2">
+                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                        <div className="small fw-semibold">NIFTY open auto-trade</div>
+                        <Badge bg={niftyOpenEnabled ? 'success' : 'secondary'}>
+                          {niftyOpenEnabled ? 'Armed' : 'Off'}
+                        </Badge>
+                      </div>
+                      <p className="small text-muted mb-2">
+                        At <strong>09:15 IST</strong> buys nearest-ATM NIFTY <strong>MIS</strong> (
+                        {niftyOpenSide === 'PE' ? 'PUT' : 'CALL'}) sized from Zerodha cash; then places{' '}
+                        <strong>10% / 10%</strong> GTT OCO. API must be running. Max {niftyOpenMaxLots} lots.
+                      </p>
+                      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                        <Form.Check
+                          type="switch"
+                          id="nifty-open-auto-enabled"
+                          label="Enable"
+                          checked={niftyOpenEnabled}
+                          onChange={(e) => setNiftyOpenEnabled(e.target.checked)}
+                        />
+                        <ButtonGroup size="sm">
+                          <Button
+                            type="button"
+                            variant={niftyOpenSide === 'CE' ? 'primary' : 'outline-secondary'}
+                            onClick={() => setNiftyOpenSide('CE')}
+                          >
+                            BUY CE
+                          </Button>
+                          <Button
+                            type="button"
+                            variant={niftyOpenSide === 'PE' ? 'primary' : 'outline-secondary'}
+                            onClick={() => setNiftyOpenSide('PE')}
+                          >
+                            BUY PE
+                          </Button>
+                        </ButtonGroup>
+                        <Form.Select
+                          size="sm"
+                          style={{ width: '6.5rem' }}
+                          value={String(niftyOpenMaxLots)}
+                          onChange={(e) => setNiftyOpenMaxLots(Number(e.target.value))}
+                          aria-label="Max lots"
+                        >
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                            <option key={n} value={n}>
+                              Max {n}
+                            </option>
+                          ))}
+                        </Form.Select>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline-secondary"
+                          disabled={niftyOpenPreviewBusy}
+                          onClick={() => void runNiftyOpenPreview()}
+                        >
+                          {niftyOpenPreviewBusy ? 'Preview…' : 'Preview'}
+                        </Button>
+                        {niftyOpenSaving ? <span className="small text-muted">Saving…</span> : null}
+                      </div>
+                      {niftyOpenError ? (
+                        <Alert variant="danger" className="py-1 px-2 small mb-2">
+                          {niftyOpenError}
+                        </Alert>
+                      ) : null}
+                      {niftyOpenPreview ? (
+                        <div className="small border-top pt-2 mb-1">
+                          {niftyOpenPreview.canTrade ? (
+                            <span>
+                              Would buy <span className="font-monospace">{niftyOpenPreview.tradingsymbol}</span> ·{' '}
+                              {niftyOpenPreview.lots} lot(s) ({niftyOpenPreview.quantity} qty) · est. ₹
+                              {niftyOpenPreview.estimatedPremiumInr.toFixed(0)} · cash ₹
+                              {(niftyOpenPreview.availableBalanceInr ?? 0).toFixed(0)}
+                            </span>
+                          ) : (
+                            <span className="text-warning">{niftyOpenPreview.reason ?? 'Cannot trade'}</span>
+                          )}
+                        </div>
+                      ) : null}
+                      {niftyOpenLastRun ? (
+                        <div className="small text-muted">
+                          Last: {niftyOpenLastRun.status}
+                          {niftyOpenLastRun.tradingsymbol ? ` · ${niftyOpenLastRun.tradingsymbol}` : ''}
+                          {niftyOpenLastRun.lots > 0 ? ` · ${niftyOpenLastRun.lots} lot(s)` : ''}
+                          {' · '}
+                          {formatLocalDateTime(niftyOpenLastRun.createdAtUtc)}
+                          {niftyOpenLastRun.message ? ` — ${niftyOpenLastRun.message}` : ''}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {isZerodha && atmPanelMode === 'hidden' ? (
                     <div className="mb-2">
                       <Button
