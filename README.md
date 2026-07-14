@@ -26,7 +26,7 @@ Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React
 | `backend/docker/` | API Dockerfile |
 | `docker-compose.yml` | MySQL, Redis (service only), API (repo root; build context `backend/`) |
 
-**Conventions:** root **`.editorconfig`** keeps C# / TS / YAML formatting aligned; **`AGENTS.md`** is a short map for humans and AI tools. **`backend/global.json`** pins the .NET 8 SDK band with `rollForward` so local and CI stay on the same major.minor. Backend layering and SOLID expectations are summarized in **`.cursor/rules/core-principles.mdc`** (see “SOLID in this repo” there).
+**Conventions:** root **`.editorconfig`** keeps C# / TS / YAML formatting aligned; **`AGENTS.md`** is a short map for humans and AI tools. **`backend/global.json`** pins the .NET **8** SDK band with **`rollForward`: `latestFeature`** (stay on **8.x** for App Platform — do not use **`latestMajor`**, or the buildpack may install runtime **10** while the app still requires framework **8.0**). Backend layering and SOLID expectations are summarized in **`.cursor/rules/core-principles.mdc`** (see “SOLID in this repo” there).
 
 ## Continuous integration
 
@@ -303,6 +303,7 @@ On older MySQL, run a plain **`ADD COLUMN`** once, or use **`SHOW COLUMNS FROM U
 
 **Troubleshooting — App Platform / Heroku build: `MSB4018` / `GenerateDepsFile` / `deps.json` in use:** The buildpack runs **`dotnet publish`** with a shared **`--artifacts-path`**, which can deadlock or race when MSBuild compiles shared projects on multiple nodes. This repo sets **`BuildInParallel=false`** in **`backend/Directory.Build.props`** so publish is single-threaded (slightly slower, stable on App Platform).
 
+**Troubleshooting — `You must install or update .NET` / Framework `8.0.0` not found (only `10.x` present):** The app targets **`net8.0`**. Keep **`backend/global.json`** on the **8.0** band with **`rollForward`: `latestFeature`** (not **`latestMajor`**). **`latestMajor`** lets the buildpack install SDK/runtime **10** while the published app still requires **Microsoft.NETCore.App 8.0**, so the process exits before Kestrel listens and readiness probes fail.
 
 **Troubleshooting — 404 on the app URL:** The main **HTTPS URL** usually serves the **SPA** at **`/`**. Real API routes are under **`/api/v1/...`**. **`/swagger`** is disabled in Production unless you set **`Swagger__Enabled=true`** (see `appsettings.Production.json`). Hitting **`GET /`** on the API (when the platform routes it) returns a small JSON index; **`GET /api/health`** should return **`{"status":"ok"}`** when ingress sends **`/api`** to the API with **`preserve_path_prefix`**.
 
