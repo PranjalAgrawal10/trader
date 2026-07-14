@@ -5,7 +5,7 @@ using Trader.Application.Configuration;
 
 namespace Trader.Infrastructure.Email;
 
-/// <summary>Logs email provider readiness at startup.</summary>
+/// <summary>Logs SMTP readiness at startup.</summary>
 public sealed class SmtpStartupValidator : IHostedService
 {
     private readonly SmtpOptions _options;
@@ -24,38 +24,18 @@ public sealed class SmtpStartupValidator : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_options.UsesSendGridApi)
-        {
-            var hasFrom = !string.IsNullOrWhiteSpace(_options.FromEmail ?? _options.User);
-            if (!hasFrom)
-            {
-                _logger.LogError(
-                    "SendGrid API key is set but {Section}__FromEmail is missing.",
-                    SmtpOptions.SectionName);
-                return Task.CompletedTask;
-            }
-
-            _logger.LogInformation(
-                "Outbound email via SendGrid API (from {FromEmail}).",
-                (_options.FromEmail ?? _options.User)!.Trim());
-            return Task.CompletedTask;
-        }
-
         if (!_options.IsEnabled)
         {
             if (_environment.IsDevelopment())
             {
                 _logger.LogWarning(
-                    "No outbound email provider ({Section}__IsEnabled=false, no SendGrid key). " +
-                    "Development will log email bodies to the console only.",
+                    "SMTP is off ({Section}__IsEnabled=false). Development will log email bodies to the console only.",
                     SmtpOptions.SectionName);
             }
             else
             {
                 _logger.LogError(
-                    "No outbound email provider. Set {Section}__SendGridApiKey (recommended on App Platform) " +
-                    "or enable SMTP ({Section}__IsEnabled=true with host/user/password/from).",
-                    SmtpOptions.SectionName,
+                    "SMTP is off. Set {Section}__IsEnabled=true with host/user/password/from (Gmail: use an App password).",
                     SmtpOptions.SectionName);
             }
 
@@ -86,16 +66,6 @@ public sealed class SmtpStartupValidator : IHostedService
             _options.Port,
             (_options.User ?? _options.FromEmail)!.Trim(),
             _options.EnableTls);
-
-        if (!_environment.IsDevelopment() &&
-            _options.Host.Contains("gmail.com", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogError(
-                "Gmail SMTP on App Platform often fails to deliver (auth or blocking). " +
-                "Set {Section}__SendGridApiKey and {Section}__FromEmail instead of Gmail SMTP.",
-                SmtpOptions.SectionName,
-                SmtpOptions.SectionName);
-        }
 
         return Task.CompletedTask;
     }

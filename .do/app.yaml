@@ -43,9 +43,8 @@ services:
     # Required RUN_TIME env vars (add in the DO UI or below; encrypt secrets):
     # DATABASE_URL=mysql://user:pass@host:25060/defaultdb?ssl-mode=Required  (from Managed MySQL → Connection details)
     # Jwt__Issuer, Jwt__Audience, Jwt__Key (≥32 chars), Cors__Origins__0, PublicWeb__FrontendBaseUrl
-    # Email (recommended on App Platform — HTTPS, not blocked like Gmail SMTP):
-    # Smtp__SendGridApiKey=SG.... (Encrypt), Smtp__FromEmail=verified sender in SendGrid
-    # Alternative: Smtp__IsEnabled=true + Gmail App password (may fail on App Platform)
+    # Email (RUN_TIME): Smtp__IsEnabled=true, Smtp__Host, Smtp__User, Smtp__Password (Gmail App password), Smtp__FromEmail
+    # Alternative: leave SMTP off in Development only — OTP bodies log to the API console.
     envs:
       - key: ASPNETCORE_ENVIRONMENT
         scope: RUN_TIME

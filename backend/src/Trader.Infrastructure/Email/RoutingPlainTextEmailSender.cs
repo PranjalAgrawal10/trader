@@ -6,26 +6,23 @@ using Trader.Application.Configuration;
 
 namespace Trader.Infrastructure.Email;
 
-/// <summary>Routes outbound email to SendGrid HTTPS, SMTP, or Development console logging.</summary>
+/// <summary>Routes outbound email to SMTP, or Development console logging when SMTP is off.</summary>
 public sealed class RoutingPlainTextEmailSender : IPlainTextEmailSender
 {
     private readonly SmtpOptions _options;
     private readonly IHostEnvironment _environment;
     private readonly SmtpPlainTextEmailSender _smtp;
-    private readonly SendGridPlainTextEmailSender _sendGrid;
     private readonly ILogger<RoutingPlainTextEmailSender> _logger;
 
     public RoutingPlainTextEmailSender(
         IOptions<SmtpOptions> options,
         IHostEnvironment environment,
         SmtpPlainTextEmailSender smtp,
-        SendGridPlainTextEmailSender sendGrid,
         ILogger<RoutingPlainTextEmailSender> logger)
     {
         _options = options.Value;
         _environment = environment;
         _smtp = smtp;
-        _sendGrid = sendGrid;
         _logger = logger;
     }
 
@@ -42,9 +39,7 @@ public sealed class RoutingPlainTextEmailSender : IPlainTextEmailSender
         if (TryLogDevelopmentOnly(to, subject, body))
             return Task.CompletedTask;
 
-        return _options.UsesSendGridApi
-            ? _sendGrid.SendPlainTextAsync(to, subject, body, attachments, ct)
-            : _smtp.SendPlainTextAsync(to, subject, body, attachments, ct);
+        return _smtp.SendPlainTextAsync(to, subject, body, attachments, ct);
     }
 
     public Task SendEmailAsync(
@@ -59,9 +54,7 @@ public sealed class RoutingPlainTextEmailSender : IPlainTextEmailSender
         if (TryLogDevelopmentOnly(to, subject, plainTextBody))
             return Task.CompletedTask;
 
-        return _options.UsesSendGridApi
-            ? _sendGrid.SendEmailAsync(to, subject, plainTextBody, htmlBody, embeddedImages, attachments, ct)
-            : _smtp.SendEmailAsync(to, subject, plainTextBody, htmlBody, embeddedImages, attachments, ct);
+        return _smtp.SendEmailAsync(to, subject, plainTextBody, htmlBody, embeddedImages, attachments, ct);
     }
 
     private bool TryLogDevelopmentOnly(string to, string subject, string body)
@@ -70,7 +63,7 @@ public sealed class RoutingPlainTextEmailSender : IPlainTextEmailSender
             return false;
 
         _logger.LogWarning(
-            "Development email (no Smtp/SendGrid configured) — not sent over the network.\nTo: {Recipient}\nSubject: {Subject}\n{Body}",
+            "Development email (SMTP not enabled) — not sent over the network.\nTo: {Recipient}\nSubject: {Subject}\n{Body}",
             to.Trim(),
             subject,
             body);
