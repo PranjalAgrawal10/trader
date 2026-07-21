@@ -86,6 +86,44 @@ public static class NiftyOpenAutoTradeAtm
             .FirstOrDefault();
     }
 
+    /// <summary>
+    /// Uses <paramref name="preferredExpiry"/> when that calendar date exists in <paramref name="options"/>;
+    /// otherwise nearest future expiry.
+    /// </summary>
+    public static DateTimeOffset? ResolveExpiryUtc(
+        IReadOnlyList<KiteInstrumentListItemDto> options,
+        DateOnly? preferredExpiry,
+        DateTimeOffset utcNow)
+    {
+        if (preferredExpiry is DateOnly preferred)
+        {
+            var match = options
+                .Select(o => TryParseExpiry(o.Expiry, out var dto) ? dto : (DateTimeOffset?)null)
+                .Where(x => x is not null && DateOnly.FromDateTime(x.Value.UtcDateTime) == preferred)
+                .Select(x => x!.Value)
+                .OrderBy(x => x)
+                .Cast<DateTimeOffset?>()
+                .FirstOrDefault();
+            if (match is not null)
+                return match;
+        }
+
+        return PickNearestFutureExpiryUtc(options, utcNow);
+    }
+
+    /// <summary>Distinct NIFTY option expiry dates as <c>yyyy-MM-dd</c>, ascending.</summary>
+    public static IReadOnlyList<string> ListDistinctExpiryDates(IReadOnlyList<KiteInstrumentListItemDto> options)
+    {
+        return options
+            .Select(o => TryParseExpiry(o.Expiry, out var dto) ? DateOnly.FromDateTime(dto.UtcDateTime) : (DateOnly?)null)
+            .Where(x => x is not null)
+            .Select(x => x!.Value)
+            .Distinct()
+            .OrderBy(x => x)
+            .Select(x => x.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+            .ToList();
+    }
+
     public static IReadOnlyList<OptionCandidate> BuildStrikeCandidates(
         IReadOnlyList<KiteInstrumentListItemDto> options,
         DateTimeOffset expiryUtc,

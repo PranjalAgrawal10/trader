@@ -1,7 +1,5 @@
 using Trader.Domain.Enums;
 
-using Trader.Domain.Enums;
-
 namespace Trader.Domain.Entities;
 
 public class User
@@ -82,14 +80,31 @@ public class User
     /// <summary>Demo allocation preset id (SPA/server constant: default <c>equal_split</c>). Does not execute trades.</summary>
     public string DemoAutoTradeStrategy { get; set; } = "equal_split";
 
-    /// <summary>When true, server places a live NIFTY ATM MIS BUY (CE or PE) near 09:15 IST with 10% GTT exits.</summary>
+    /// <summary>When true, server places a live NIFTY Opening ATM MIS BUY (CE or PE) near 09:15 IST with ± GTT exits.</summary>
     public bool NiftyOpenAutoTradeEnabled { get; set; }
 
     /// <summary>Option leg to buy: <see cref="NiftyOpenAutoTradeOptionSide.Ce"/> or <see cref="NiftyOpenAutoTradeOptionSide.Pe"/>.</summary>
     public NiftyOpenAutoTradeOptionSide NiftyOpenAutoTradeOptionSide { get; set; }
 
-    /// <summary>Hard cap on exchange lots sized from Kite available cash (clamped server-side).</summary>
-    public int NiftyOpenAutoTradeMaxLots { get; set; } = 5;
+    /// <summary>Hard cap on exchange lots sized from Kite available cash (clamped server-side). Buys as many lots as funds allow up to this.</summary>
+    public int NiftyOpenAutoTradeMaxLots { get; set; } = 10;
+
+    /// <summary>
+    /// Preferred NIFTY option expiry calendar date (UTC date of Kite expiry). Null = nearest future expiry at fire time.
+    /// </summary>
+    public DateOnly? NiftyOpenAutoTradeExpiry { get; set; }
+
+    /// <summary>−ve GTT: stop-loss distance in option premium points below entry.</summary>
+    public decimal NiftyOpenAutoTradeStopLossPoints { get; set; } = 5m;
+
+    /// <summary>+ve GTT: target distance in option premium points above entry.</summary>
+    public decimal NiftyOpenAutoTradeTargetPoints { get; set; } = 5m;
+
+    /// <summary>When true, place the −ve (stop-loss) GTT leg.</summary>
+    public bool NiftyOpenAutoTradeStopLossEnabled { get; set; } = true;
+
+    /// <summary>When true, place the +ve (target) GTT leg.</summary>
+    public bool NiftyOpenAutoTradeTargetEnabled { get; set; } = true;
 
     /// <summary>IST session calendar date of the last open-auto attempt (idempotency; null = never).</summary>
     public DateOnly? NiftyOpenAutoTradeLastSessionDateIst { get; set; }

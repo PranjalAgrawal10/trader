@@ -2,11 +2,19 @@ using Trader.Domain.Enums;
 
 namespace Trader.Application.Broker;
 
+/// <summary>NIFTY Opening ATM prefs (09:15 IST live MIS + ± GTT).</summary>
 public sealed record NiftyOpenAutoTradeSettingsDto(
     bool Enabled,
     string OptionSide,
     int MaxLots,
+    /// <summary>Preferred expiry (<c>yyyy-MM-dd</c>); null means nearest future at fire/preview time.</summary>
+    string? Expiry,
+    decimal StopLossPoints,
+    decimal TargetPoints,
+    bool StopLossEnabled,
+    bool TargetEnabled,
     DateOnly? LastSessionDateIst,
+    IReadOnlyList<string> AvailableExpiries,
     NiftyOpenAutoTradeRunDto? LastRun);
 
 public sealed class NiftyOpenAutoTradeSettingsPutDto
@@ -16,8 +24,23 @@ public sealed class NiftyOpenAutoTradeSettingsPutDto
     /// <summary><c>CE</c> or <c>PE</c> (aliases: call/put).</summary>
     public string? OptionSide { get; set; }
 
-    /// <summary>Hard cap on lots (clamped 1–10; default 5).</summary>
-    public int MaxLots { get; set; } = 5;
+    /// <summary>Lot cap (clamped 1–AbsoluteMaxLots). Entry buys max affordable lots up to this.</summary>
+    public int MaxLots { get; set; } = 10;
+
+    /// <summary>
+    /// Preferred NIFTY option expiry as <c>yyyy-MM-dd</c>. Empty/null clears to nearest-future auto.
+    /// </summary>
+    public string? Expiry { get; set; }
+
+    /// <summary>−ve GTT stop-loss points below entry premium.</summary>
+    public decimal StopLossPoints { get; set; } = 5m;
+
+    /// <summary>+ve GTT target points above entry premium.</summary>
+    public decimal TargetPoints { get; set; } = 5m;
+
+    public bool StopLossEnabled { get; set; } = true;
+
+    public bool TargetEnabled { get; set; } = true;
 }
 
 public sealed record NiftyOpenAutoTradeRunDto(
@@ -53,7 +76,9 @@ public sealed record NiftyOpenAutoTradePreviewDto(
     int Quantity,
     decimal? OptionLtp,
     decimal EstimatedPremiumInr,
-    int MaxLots);
+    int MaxLots,
+    decimal? StopLossPrice,
+    decimal? TargetPrice);
 
 public static class NiftyOpenAutoTradeOptionSideParser
 {

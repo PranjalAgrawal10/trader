@@ -368,7 +368,7 @@ public sealed partial class BrokerController
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON { \"enabled\": bool, \"optionSide\": \"CE\"|\"PE\", \"maxLots\": 1–10 }.",
+                detail: "Send JSON { \"enabled\": bool, \"optionSide\": \"CE\"|\"PE\", \"maxLots\": 1–10, \"expiry\": \"yyyy-MM-dd\"|null, \"stopLossPoints\": number, \"targetPoints\": number, \"stopLossEnabled\": bool, \"targetEnabled\": bool }.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 

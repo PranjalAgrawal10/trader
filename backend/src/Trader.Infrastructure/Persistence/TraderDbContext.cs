@@ -67,7 +67,12 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.DemoAutoTradeStrategy).HasMaxLength(32).HasDefaultValue("equal_split");
             e.Property(x => x.NiftyOpenAutoTradeEnabled).HasDefaultValue(false);
             e.Property(x => x.NiftyOpenAutoTradeOptionSide).HasConversion<byte>().HasDefaultValue(NiftyOpenAutoTradeOptionSide.Ce);
-            e.Property(x => x.NiftyOpenAutoTradeMaxLots).HasDefaultValue(5);
+            e.Property(x => x.NiftyOpenAutoTradeMaxLots).HasDefaultValue(10);
+            e.Property(x => x.NiftyOpenAutoTradeExpiry).HasColumnType("date");
+            e.Property(x => x.NiftyOpenAutoTradeStopLossPoints).HasPrecision(18, 4).HasDefaultValue(5m);
+            e.Property(x => x.NiftyOpenAutoTradeTargetPoints).HasPrecision(18, 4).HasDefaultValue(5m);
+            e.Property(x => x.NiftyOpenAutoTradeStopLossEnabled).HasDefaultValue(true);
+            e.Property(x => x.NiftyOpenAutoTradeTargetEnabled).HasDefaultValue(true);
             e.Property(x => x.FavoriteMlAutomationEnabled).HasDefaultValue(false);
             e.Property(x => x.FavoriteMlAutomationInterval).HasMaxLength(16);
             e.Property(x => x.FavoriteMlAutomationLastNewPassUtc).HasColumnType("datetime(6)");

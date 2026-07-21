@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Trader.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using Trader.Infrastructure.Persistence;
 namespace Trader.Infrastructure.Migrations
 {
     [DbContext(typeof(TraderDbContext))]
-    partial class TraderDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260722014500_AddNiftyOpenAutoTradeExpiry")]
+    partial class AddNiftyOpenAutoTradeExpiry
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -932,34 +935,12 @@ namespace Trader.Infrastructure.Migrations
                     b.Property<int>("NiftyOpenAutoTradeMaxLots")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
-                        .HasDefaultValue(10);
+                        .HasDefaultValue(5);
 
                     b.Property<byte>("NiftyOpenAutoTradeOptionSide")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("tinyint unsigned")
                         .HasDefaultValue((byte)0);
-
-                    b.Property<bool>("NiftyOpenAutoTradeStopLossEnabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("tinyint(1)")
-                        .HasDefaultValue(true);
-
-                    b.Property<decimal>("NiftyOpenAutoTradeStopLossPoints")
-                        .ValueGeneratedOnAdd()
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)")
-                        .HasDefaultValue(5m);
-
-                    b.Property<bool>("NiftyOpenAutoTradeTargetEnabled")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("tinyint(1)")
-                        .HasDefaultValue(true);
-
-                    b.Property<decimal>("NiftyOpenAutoTradeTargetPoints")
-                        .ValueGeneratedOnAdd()
-                        .HasPrecision(18, 4)
-                        .HasColumnType("decimal(18,4)")
-                        .HasDefaultValue(5m);
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()

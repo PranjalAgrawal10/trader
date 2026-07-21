@@ -128,6 +128,28 @@ public sealed class NiftyOpenAutoTradeAtmTests
         Assert.False(NiftyOpenAutoTradeSchedule.IsInsideTrailWindow(opts, atEnd));
     }
 
+    [Fact]
+    public void ResolveExpiry_PrefersUserSelectedDate()
+    {
+        var expiryA = new DateTimeOffset(2026, 7, 16, 0, 0, 0, TimeSpan.Zero);
+        var expiryB = new DateTimeOffset(2026, 7, 23, 0, 0, 0, TimeSpan.Zero);
+        var rows = new List<KiteInstrumentListItemDto>
+        {
+            Row("1", "NIFTY25JUL24600CE", 24600m, expiryA.ToString("O"), "CE"),
+            Row("2", "NIFTY25JUL24600CE", 24600m, expiryB.ToString("O"), "CE"),
+        };
+
+        var resolved = NiftyOpenAutoTradeAtm.ResolveExpiryUtc(
+            rows,
+            preferredExpiry: DateOnly.FromDateTime(expiryB.UtcDateTime),
+            utcNow: new DateTimeOffset(2026, 7, 15, 0, 0, 0, TimeSpan.Zero));
+
+        Assert.Equal(expiryB.UtcDateTime.Date, resolved!.Value.UtcDateTime.Date);
+        Assert.Equal(
+            new[] { "2026-07-16", "2026-07-23" },
+            NiftyOpenAutoTradeAtm.ListDistinctExpiryDates(rows));
+    }
+
     private static KiteInstrumentListItemDto Row(
         string token,
         string symbol,

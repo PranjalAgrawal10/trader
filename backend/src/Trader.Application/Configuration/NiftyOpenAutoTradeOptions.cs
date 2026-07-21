@@ -1,6 +1,6 @@
 namespace Trader.Application.Configuration;
 
-/// <summary>Host settings for live NIFTY ATM MIS auto-entry at market open (09:15 IST) with trailing GTT stop-loss.</summary>
+/// <summary>Host settings for NIFTY Opening ATM (live MIS BUY at 09:15 IST with ± GTT exits).</summary>
 public sealed class NiftyOpenAutoTradeOptions
 {
     public const string SectionName = "NiftyOpenAutoTrade";
@@ -21,23 +21,23 @@ public sealed class NiftyOpenAutoTradeOptions
 
     public bool PauseOnWeekends { get; set; } = true;
 
-    /// <summary>
-    /// Trailing stop gap in option premium points (₹). Initial SL = entry − this; SL rises with peak LTP − this.
-    /// </summary>
-    public decimal TrailingStopLossPoints { get; set; } = 5m;
+    /// <summary>Default −ve GTT stop-loss points when the user has not saved a preference.</summary>
+    public decimal DefaultStopLossPoints { get; set; } = 5m;
 
-    /// <summary>Local hour (IST) after which open-auto trail management stops for the session (MIS square-off remains on broker).</summary>
+    /// <summary>Default +ve GTT target points when the user has not saved a preference.</summary>
+    public decimal DefaultTargetPoints { get; set; } = 5m;
+
+    /// <summary>Legacy trail poll end (still used to clear leftover TrailActive rows).</summary>
     public int TrailEndLocalHour { get; set; } = 15;
 
-    /// <summary>Local minute paired with <see cref="TrailEndLocalHour"/>.</summary>
     public int TrailEndLocalMinute { get; set; } = 25;
 
-    public int DefaultMaxLots { get; set; } = 5;
+    public int DefaultMaxLots { get; set; } = 10;
 
     public int AbsoluteMaxLots { get; set; } = 10;
 
-    /// <summary>Fraction of Kite available cash to allocate toward option premium (0–1).</summary>
-    public decimal BalanceUtilizationFraction { get; set; } = 0.95m;
+    /// <summary>Fraction of Kite available cash to allocate toward option premium (0–1). Default 1 = max lots from funds.</summary>
+    public decimal BalanceUtilizationFraction { get; set; } = 1m;
 
     /// <summary>How many listed strikes above/below ATM to try when 1 ATM lot is unaffordable.</summary>
     public int MaxStrikeStepsAwayFromAtm { get; set; } = 3;
@@ -50,5 +50,5 @@ public sealed class NiftyOpenAutoTradeOptions
 
     public string PreferredSpotExchange { get; set; } = "NSE";
 
-    public string OrderTag { get; set; } = "nifty-open-auto";
+    public string OrderTag { get; set; } = "nifty-opening-atm";
 }

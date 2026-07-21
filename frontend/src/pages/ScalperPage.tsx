@@ -157,7 +157,13 @@ interface NiftyOpenAutoTradeSettingsResponse {
   enabled: boolean
   optionSide: string
   maxLots: number
+  expiry: string | null
+  stopLossPoints: number
+  targetPoints: number
+  stopLossEnabled: boolean
+  targetEnabled: boolean
   lastSessionDateIst: string | null
+  availableExpiries: string[]
   lastRun: NiftyOpenAutoTradeRunResponse | null
 }
 
@@ -191,7 +197,11 @@ interface NiftyOpenAutoTradePreviewResponse {
   optionLtp: number | null
   estimatedPremiumInr: number
   maxLots: number
+  stopLossPrice: number | null
+  targetPrice: number | null
 }
+
+const NIFTY_OPENING_ATM_TITLE = 'NIFTY Opening ATM'
 
 type ScalperTicketOrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M'
 
@@ -359,6 +369,11 @@ function listDistinctExpiries(options: KiteInstrumentRow[]): string[] {
   return [...byMs].sort((a, b) => a - b).map((ms) => new Date(ms).toISOString())
 }
 
+function formatNiftyOpenExpiryLabel(yyyyMmDd: string): string {
+  const ms = Date.parse(`${yyyyMmDd}T00:00:00.000Z`)
+  return Number.isFinite(ms) ? new Date(ms).toLocaleDateString() : yyyyMmDd
+}
+
 function pickAtmLegs(
   options: KiteInstrumentRow[],
   spotLtp: number,
@@ -425,7 +440,13 @@ export function ScalperPage() {
   const [broker, setBroker] = useState<BrokerStatusResponse | null>(null)
   const [niftyOpenEnabled, setNiftyOpenEnabled] = useState(false)
   const [niftyOpenSide, setNiftyOpenSide] = useState<'CE' | 'PE'>('CE')
-  const [niftyOpenMaxLots, setNiftyOpenMaxLots] = useState(5)
+  const [niftyOpenMaxLots, setNiftyOpenMaxLots] = useState(10)
+  const [niftyOpenExpiry, setNiftyOpenExpiry] = useState('')
+  const [niftyOpenAvailableExpiries, setNiftyOpenAvailableExpiries] = useState<string[]>([])
+  const [niftyOpenStopLossPoints, setNiftyOpenStopLossPoints] = useState('5')
+  const [niftyOpenTargetPoints, setNiftyOpenTargetPoints] = useState('5')
+  const [niftyOpenStopLossEnabled, setNiftyOpenStopLossEnabled] = useState(true)
+  const [niftyOpenTargetEnabled, setNiftyOpenTargetEnabled] = useState(true)
   const [niftyOpenHydrated, setNiftyOpenHydrated] = useState(false)
   const [niftyOpenSaving, setNiftyOpenSaving] = useState(false)
   const [niftyOpenPreview, setNiftyOpenPreview] = useState<NiftyOpenAutoTradePreviewResponse | null>(null)
@@ -543,8 +564,27 @@ export function ScalperPage() {
         setNiftyOpenEnabled(Boolean(data.enabled))
         setNiftyOpenSide(data.optionSide === 'PE' ? 'PE' : 'CE')
         setNiftyOpenMaxLots(
-          typeof data.maxLots === 'number' && data.maxLots >= 1 && data.maxLots <= 10 ? data.maxLots : 5,
+          typeof data.maxLots === 'number' && data.maxLots >= 1 && data.maxLots <= 10 ? data.maxLots : 10,
         )
+        const available = Array.isArray(data.availableExpiries)
+          ? data.availableExpiries.filter((x): x is string => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x))
+          : []
+        setNiftyOpenAvailableExpiries(available)
+        const savedExpiry =
+          typeof data.expiry === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.expiry) ? data.expiry : ''
+        setNiftyOpenExpiry(savedExpiry)
+        setNiftyOpenStopLossPoints(
+          typeof data.stopLossPoints === 'number' && Number.isFinite(data.stopLossPoints) && data.stopLossPoints > 0
+            ? String(data.stopLossPoints)
+            : '5',
+        )
+        setNiftyOpenTargetPoints(
+          typeof data.targetPoints === 'number' && Number.isFinite(data.targetPoints) && data.targetPoints > 0
+            ? String(data.targetPoints)
+            : '5',
+        )
+        setNiftyOpenStopLossEnabled(data.stopLossEnabled !== false)
+        setNiftyOpenTargetEnabled(data.targetEnabled !== false)
         setNiftyOpenLastRun(data.lastRun ?? null)
       } catch {
         /* keep defaults */
@@ -559,6 +599,10 @@ export function ScalperPage() {
 
   useEffect(() => {
     if (!niftyOpenHydrated) return
+    if (!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled) {
+      setNiftyOpenError('Enable at least one of −ve GTT or +ve GTT.')
+      return
+    }
     const tid = window.setTimeout(() => {
       setNiftyOpenSaving(true)
       void api
@@ -566,19 +610,34 @@ export function ScalperPage() {
           enabled: niftyOpenEnabled,
           optionSide: niftyOpenSide,
           maxLots: niftyOpenMaxLots,
+          expiry: niftyOpenExpiry || null,
+          stopLossPoints: Number(niftyOpenStopLossPoints) || 5,
+          targetPoints: Number(niftyOpenTargetPoints) || 5,
+          stopLossEnabled: niftyOpenStopLossEnabled,
+          targetEnabled: niftyOpenTargetEnabled,
         })
         .then(() => setNiftyOpenError(null))
         .catch((err: unknown) => {
           const detail =
             axios.isAxiosError(err) && typeof err.response?.data?.detail === 'string'
               ? err.response.data.detail
-              : 'Could not save NIFTY open auto-trade settings.'
+              : `Could not save ${NIFTY_OPENING_ATM_TITLE} settings.`
           setNiftyOpenError(detail)
         })
         .finally(() => setNiftyOpenSaving(false))
     }, 450)
     return () => window.clearTimeout(tid)
-  }, [niftyOpenEnabled, niftyOpenHydrated, niftyOpenMaxLots, niftyOpenSide])
+  }, [
+    niftyOpenEnabled,
+    niftyOpenExpiry,
+    niftyOpenHydrated,
+    niftyOpenMaxLots,
+    niftyOpenSide,
+    niftyOpenStopLossEnabled,
+    niftyOpenStopLossPoints,
+    niftyOpenTargetEnabled,
+    niftyOpenTargetPoints,
+  ])
 
   const runNiftyOpenPreview = useCallback(async () => {
     setNiftyOpenPreviewBusy(true)
@@ -1671,98 +1730,6 @@ export function ScalperPage() {
                   ) : null}
                 </Col>
                 <Col lg={5} xl={4}>
-                  {isZerodha ? (
-                    <div className="border rounded border-secondary-subtle p-2 bg-body text-body mb-2">
-                      <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
-                        <div className="small fw-semibold">NIFTY open auto-trade</div>
-                        <Badge bg={niftyOpenEnabled ? 'success' : 'secondary'}>
-                          {niftyOpenEnabled ? 'Armed' : 'Off'}
-                        </Badge>
-                      </div>
-                      <p className="small text-muted mb-2">
-                        At <strong>09:15 IST</strong> buys nearest-ATM NIFTY <strong>MIS</strong> (
-                        {niftyOpenSide === 'PE' ? 'PUT' : 'CALL'}) sized from Zerodha cash; then trails a{' '}
-                        <strong>5-point</strong> GTT stop-loss. API must be running. Max {niftyOpenMaxLots} lots.
-                      </p>
-                      <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
-                        <Form.Check
-                          type="switch"
-                          id="nifty-open-auto-enabled"
-                          label="Enable"
-                          checked={niftyOpenEnabled}
-                          onChange={(e) => setNiftyOpenEnabled(e.target.checked)}
-                        />
-                        <ButtonGroup size="sm">
-                          <Button
-                            type="button"
-                            variant={niftyOpenSide === 'CE' ? 'primary' : 'outline-secondary'}
-                            onClick={() => setNiftyOpenSide('CE')}
-                          >
-                            BUY CE
-                          </Button>
-                          <Button
-                            type="button"
-                            variant={niftyOpenSide === 'PE' ? 'primary' : 'outline-secondary'}
-                            onClick={() => setNiftyOpenSide('PE')}
-                          >
-                            BUY PE
-                          </Button>
-                        </ButtonGroup>
-                        <Form.Select
-                          size="sm"
-                          style={{ width: '6.5rem' }}
-                          value={String(niftyOpenMaxLots)}
-                          onChange={(e) => setNiftyOpenMaxLots(Number(e.target.value))}
-                          aria-label="Max lots"
-                        >
-                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                            <option key={n} value={n}>
-                              Max {n}
-                            </option>
-                          ))}
-                        </Form.Select>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline-secondary"
-                          disabled={niftyOpenPreviewBusy}
-                          onClick={() => void runNiftyOpenPreview()}
-                        >
-                          {niftyOpenPreviewBusy ? 'Preview…' : 'Preview'}
-                        </Button>
-                        {niftyOpenSaving ? <span className="small text-muted">Saving…</span> : null}
-                      </div>
-                      {niftyOpenError ? (
-                        <Alert variant="danger" className="py-1 px-2 small mb-2">
-                          {niftyOpenError}
-                        </Alert>
-                      ) : null}
-                      {niftyOpenPreview ? (
-                        <div className="small border-top pt-2 mb-1">
-                          {niftyOpenPreview.canTrade ? (
-                            <span>
-                              Would buy <span className="font-monospace">{niftyOpenPreview.tradingsymbol}</span> ·{' '}
-                              {niftyOpenPreview.lots} lot(s) ({niftyOpenPreview.quantity} qty) · est. ₹
-                              {niftyOpenPreview.estimatedPremiumInr.toFixed(0)} · cash ₹
-                              {(niftyOpenPreview.availableBalanceInr ?? 0).toFixed(0)}
-                            </span>
-                          ) : (
-                            <span className="text-warning">{niftyOpenPreview.reason ?? 'Cannot trade'}</span>
-                          )}
-                        </div>
-                      ) : null}
-                      {niftyOpenLastRun ? (
-                        <div className="small text-muted">
-                          Last: {niftyOpenLastRun.status}
-                          {niftyOpenLastRun.tradingsymbol ? ` · ${niftyOpenLastRun.tradingsymbol}` : ''}
-                          {niftyOpenLastRun.lots > 0 ? ` · ${niftyOpenLastRun.lots} lot(s)` : ''}
-                          {' · '}
-                          {formatLocalDateTime(niftyOpenLastRun.createdAtUtc)}
-                          {niftyOpenLastRun.message ? ` — ${niftyOpenLastRun.message}` : ''}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
                   {isZerodha && atmPanelMode === 'hidden' ? (
                     <div className="mb-2">
                       <Button
@@ -2156,6 +2123,180 @@ export function ScalperPage() {
           </Card>
         </Col>
       </Row>
+
+      {isZerodha ? (
+        <Row className="g-3 mt-1">
+          <Col lg={12}>
+            <Card className="border-secondary">
+              <Card.Header className="py-2 d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div className="fw-semibold">{NIFTY_OPENING_ATM_TITLE}</div>
+                <Badge bg={niftyOpenEnabled ? 'success' : 'secondary'}>
+                  {niftyOpenEnabled ? 'Armed' : 'Off'}
+                </Badge>
+              </Card.Header>
+              <Card.Body className="py-2">
+                <p className="small text-muted mb-2">
+                  At <strong>09:15 IST</strong> buys nearest-<strong>ATM</strong> NIFTY <strong>MIS</strong> (
+                  {niftyOpenSide === 'PE' ? 'PUT' : 'CALL'}) for the selected expiry —{' '}
+                  <strong>max lots</strong> your cash can fund (up to the lot cap). You set the{' '}
+                  <strong>−ve GTT</strong> and <strong>+ve GTT</strong> premium points below; they are saved with your
+                  prefs and used at fire time. API must be running.
+                </p>
+                <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                  <Form.Check
+                    type="switch"
+                    id="nifty-opening-atm-enabled"
+                    label="Enable"
+                    checked={niftyOpenEnabled}
+                    onChange={(e) => setNiftyOpenEnabled(e.target.checked)}
+                  />
+                  <ButtonGroup size="sm">
+                    <Button
+                      type="button"
+                      variant={niftyOpenSide === 'CE' ? 'primary' : 'outline-secondary'}
+                      onClick={() => setNiftyOpenSide('CE')}
+                    >
+                      BUY CE
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={niftyOpenSide === 'PE' ? 'primary' : 'outline-secondary'}
+                      onClick={() => setNiftyOpenSide('PE')}
+                    >
+                      BUY PE
+                    </Button>
+                  </ButtonGroup>
+                  <Form.Select
+                    size="sm"
+                    style={{ width: '11rem' }}
+                    value={niftyOpenExpiry}
+                    onChange={(e) => setNiftyOpenExpiry(e.target.value)}
+                    aria-label={`${NIFTY_OPENING_ATM_TITLE} expiry`}
+                  >
+                    <option value="">Nearest expiry (auto)</option>
+                    {(niftyOpenExpiry && !niftyOpenAvailableExpiries.includes(niftyOpenExpiry)
+                      ? [niftyOpenExpiry, ...niftyOpenAvailableExpiries]
+                      : niftyOpenAvailableExpiries
+                    ).map((d) => (
+                      <option key={`nifty-open-exp-${d}`} value={d}>
+                        {formatNiftyOpenExpiryLabel(d)}
+                      </option>
+                    ))}
+                  </Form.Select>
+                  <Form.Select
+                    size="sm"
+                    style={{ width: '7.5rem' }}
+                    value={String(niftyOpenMaxLots)}
+                    onChange={(e) => setNiftyOpenMaxLots(Number(e.target.value))}
+                    aria-label="Lot cap"
+                    title="Buys as many ATM lots as available cash allows, up to this cap"
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                      <option key={n} value={n}>
+                        Lot cap {n}
+                      </option>
+                    ))}
+                  </Form.Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline-secondary"
+                    disabled={niftyOpenPreviewBusy}
+                    onClick={() => void runNiftyOpenPreview()}
+                  >
+                    {niftyOpenPreviewBusy ? 'Preview…' : 'Preview'}
+                  </Button>
+                  {niftyOpenSaving ? <span className="small text-muted">Saving…</span> : null}
+                </div>
+                <div className="border-top pt-2 mb-2">
+                  <div className="small fw-semibold mb-2">Your GTT exits (premium points from entry)</div>
+                  <div className="d-flex flex-wrap align-items-end gap-3">
+                    <div>
+                      <Form.Check
+                        type="switch"
+                        id="nifty-opening-atm-sl"
+                        label="−ve GTT (stop-loss)"
+                        checked={niftyOpenStopLossEnabled}
+                        onChange={(e) => setNiftyOpenStopLossEnabled(e.target.checked)}
+                      />
+                      <Form.Control
+                        size="sm"
+                        type="number"
+                        min={0.05}
+                        step={0.05}
+                        style={{ width: '6.5rem' }}
+                        value={niftyOpenStopLossPoints}
+                        disabled={!niftyOpenStopLossEnabled}
+                        onChange={(e) => setNiftyOpenStopLossPoints(e.target.value)}
+                        aria-label="Your negative GTT stop-loss points"
+                      />
+                    </div>
+                    <div>
+                      <Form.Check
+                        type="switch"
+                        id="nifty-opening-atm-tp"
+                        label="+ve GTT (target)"
+                        checked={niftyOpenTargetEnabled}
+                        onChange={(e) => setNiftyOpenTargetEnabled(e.target.checked)}
+                      />
+                      <Form.Control
+                        size="sm"
+                        type="number"
+                        min={0.05}
+                        step={0.05}
+                        style={{ width: '6.5rem' }}
+                        value={niftyOpenTargetPoints}
+                        disabled={!niftyOpenTargetEnabled}
+                        onChange={(e) => setNiftyOpenTargetPoints(e.target.value)}
+                        aria-label="Your positive GTT target points"
+                      />
+                    </div>
+                  </div>
+                  {!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled ? (
+                    <div className="small text-danger mt-1">Enable at least one of −ve or +ve GTT.</div>
+                  ) : null}
+                </div>
+                {niftyOpenError ? (
+                  <Alert variant="danger" className="py-1 px-2 small mb-2">
+                    {niftyOpenError}
+                  </Alert>
+                ) : null}
+                {niftyOpenPreview ? (
+                  <div className="small border-top pt-2 mb-1">
+                    {niftyOpenPreview.canTrade ? (
+                      <span>
+                        Would buy <span className="font-monospace">{niftyOpenPreview.tradingsymbol}</span>
+                        {niftyOpenPreview.expiry ? ` · exp ${niftyOpenPreview.expiry}` : ''} ·{' '}
+                        {niftyOpenPreview.lots} lot(s) ({niftyOpenPreview.quantity} qty) · est. ₹
+                        {niftyOpenPreview.estimatedPremiumInr.toFixed(0)} · cash ₹
+                        {(niftyOpenPreview.availableBalanceInr ?? 0).toFixed(0)}
+                        {niftyOpenPreview.stopLossPrice != null && niftyOpenPreview.stopLossPrice > 0
+                          ? ` · −ve ${niftyOpenPreview.stopLossPrice.toFixed(2)}`
+                          : ''}
+                        {niftyOpenPreview.targetPrice != null && niftyOpenPreview.targetPrice > 0
+                          ? ` · +ve ${niftyOpenPreview.targetPrice.toFixed(2)}`
+                          : ''}
+                      </span>
+                    ) : (
+                      <span className="text-warning">{niftyOpenPreview.reason ?? 'Cannot trade'}</span>
+                    )}
+                  </div>
+                ) : null}
+                {niftyOpenLastRun ? (
+                  <div className="small text-muted">
+                    Last: {niftyOpenLastRun.status}
+                    {niftyOpenLastRun.tradingsymbol ? ` · ${niftyOpenLastRun.tradingsymbol}` : ''}
+                    {niftyOpenLastRun.lots > 0 ? ` · ${niftyOpenLastRun.lots} lot(s)` : ''}
+                    {' · '}
+                    {formatLocalDateTime(niftyOpenLastRun.createdAtUtc)}
+                    {niftyOpenLastRun.message ? ` — ${niftyOpenLastRun.message}` : ''}
+                  </div>
+                ) : null}
+              </Card.Body>
+            </Card>
+          </Col>
+        </Row>
+      ) : null}
     </Layout>
   )
 }

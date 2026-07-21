@@ -6,6 +6,9 @@ public static class NiftyOpenAutoTradeTrail
     public static decimal ClampTrailPoints(decimal trailPoints) =>
         trailPoints > 0 ? trailPoints : 5m;
 
+    public static decimal ClampGttPoints(decimal points) =>
+        points <= 0 ? 5m : Math.Min(points, 500m);
+
     public static decimal InitialStopPrice(decimal entryPrice, decimal trailPoints, decimal tickSize)
     {
         var pts = ClampTrailPoints(trailPoints);
@@ -13,6 +16,12 @@ public static class NiftyOpenAutoTradeTrail
         if (raw <= 0)
             raw = tickSize > 0 ? tickSize : 0.05m;
         return KiteTickPriceRounding.RoundToTickSize(raw, tickSize);
+    }
+
+    public static decimal InitialTargetPrice(decimal entryPrice, decimal targetPoints, decimal tickSize)
+    {
+        var pts = ClampGttPoints(targetPoints);
+        return KiteTickPriceRounding.RoundToTickSize(entryPrice + pts, tickSize);
     }
 
     /// <summary>
