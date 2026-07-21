@@ -1,6 +1,6 @@
 namespace Trader.Application.Configuration;
 
-/// <summary>Host settings for live NIFTY ATM MIS auto-entry at market open (09:15 IST) with GTT exits.</summary>
+/// <summary>Host settings for live NIFTY ATM MIS auto-entry at market open (09:15 IST) with trailing GTT stop-loss.</summary>
 public sealed class NiftyOpenAutoTradeOptions
 {
     public const string SectionName = "NiftyOpenAutoTrade";
@@ -21,9 +21,16 @@ public sealed class NiftyOpenAutoTradeOptions
 
     public bool PauseOnWeekends { get; set; } = true;
 
-    public decimal GttStopLossPercent { get; set; } = 10m;
+    /// <summary>
+    /// Trailing stop gap in option premium points (₹). Initial SL = entry − this; SL rises with peak LTP − this.
+    /// </summary>
+    public decimal TrailingStopLossPoints { get; set; } = 5m;
 
-    public decimal GttTargetPercent { get; set; } = 10m;
+    /// <summary>Local hour (IST) after which open-auto trail management stops for the session (MIS square-off remains on broker).</summary>
+    public int TrailEndLocalHour { get; set; } = 15;
+
+    /// <summary>Local minute paired with <see cref="TrailEndLocalHour"/>.</summary>
+    public int TrailEndLocalMinute { get; set; } = 25;
 
     public int DefaultMaxLots { get; set; } = 5;
 

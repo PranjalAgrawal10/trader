@@ -287,10 +287,14 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.AvailableBalanceInr).HasPrecision(18, 2);
             e.Property(x => x.OrderId).HasMaxLength(64);
             e.Property(x => x.GttTriggerId).HasMaxLength(64);
+            e.Property(x => x.TrailPeakPrice).HasPrecision(18, 4);
+            e.Property(x => x.TrailStopPrice).HasPrecision(18, 4);
+            e.Property(x => x.TrailPoints).HasPrecision(18, 4);
             e.Property(x => x.Message).HasMaxLength(1000);
             e.Property(x => x.CreatedAtUtc).HasColumnType("datetime(6)");
             e.HasIndex(x => new { x.UserId, x.SessionDateIst });
             e.HasIndex(x => new { x.UserId, x.CreatedAtUtc });
+            e.HasIndex(x => x.TrailActive);
             e.HasOne(x => x.User).WithMany(u => u.NiftyOpenAutoTradeRuns).HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });

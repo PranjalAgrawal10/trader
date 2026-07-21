@@ -326,6 +326,34 @@ public sealed partial class KiteInstrumentsClient
         return SendGttActionAsync(HttpMethod.Post, "gtt/triggers", content, apiKey, accessToken, ct);
     }
 
+    public Task<KiteGttActionResult> ModifyGttSingleAsync(
+        string triggerId,
+        KiteGttSingleRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(triggerId))
+            return Task.FromResult(new KiteGttActionResult(false, "triggerId is required.", null));
+
+        var content = BuildGttSingleContent(request);
+        var path = $"gtt/triggers/{Uri.EscapeDataString(triggerId.Trim())}";
+        return SendGttActionAsync(HttpMethod.Put, path, content, apiKey, accessToken, ct);
+    }
+
+    public Task<KiteGttActionResult> DeleteGttAsync(
+        string triggerId,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(triggerId))
+            return Task.FromResult(new KiteGttActionResult(false, "triggerId is required.", null));
+
+        var path = $"gtt/triggers/{Uri.EscapeDataString(triggerId.Trim())}";
+        return SendGttActionAsync(HttpMethod.Delete, path, content: null, apiKey, accessToken, ct);
+    }
+
     private async Task<KiteOrderActionResult> SendOrderActionAsync(
         HttpMethod method,
         string path,

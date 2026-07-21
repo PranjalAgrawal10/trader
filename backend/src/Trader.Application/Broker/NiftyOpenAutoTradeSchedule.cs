@@ -43,4 +43,29 @@ public static class NiftyOpenAutoTradeSchedule
 
         return t >= start && t < end;
     }
+
+    /// <summary>
+    /// True from the fire clock through <see cref="NiftyOpenAutoTradeOptions.TrailEndLocalHour"/>:<see cref="NiftyOpenAutoTradeOptions.TrailEndLocalMinute"/>
+    /// on weekdays (when weekend pause is on) — used to manage trailing GTT stops after entry.
+    /// </summary>
+    public static bool IsInsideTrailWindow(NiftyOpenAutoTradeOptions opts, DateTimeOffset utcNow)
+    {
+        var tz = ResolveTimeZone(opts.TimeZoneId);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utcNow.UtcDateTime, tz);
+        var sessionDate = DateOnly.FromDateTime(local);
+
+        if (opts.PauseOnWeekends && IsWeekend(sessionDate))
+            return false;
+
+        var start = new TimeOnly(
+            Math.Clamp(opts.FireLocalHour, 0, 23),
+            Math.Clamp(opts.FireLocalMinute, 0, 59));
+        var end = new TimeOnly(
+            Math.Clamp(opts.TrailEndLocalHour, 0, 23),
+            Math.Clamp(opts.TrailEndLocalMinute, 0, 59));
+        var t = TimeOnly.FromDateTime(local);
+        if (end <= start)
+            return t >= start;
+        return t >= start && t < end;
+    }
 }

@@ -77,6 +77,57 @@ public sealed class NiftyOpenAutoTradeAtmTests
         Assert.False(NiftyOpenAutoTradeSchedule.IsInsideFireWindow(opts, afterWindow));
     }
 
+    [Fact]
+    public void Trail_InitialStop_IsEntryMinusPoints()
+    {
+        Assert.Equal(95m, NiftyOpenAutoTradeTrail.InitialStopPrice(100m, 5m, 0.05m));
+        Assert.Equal(0.05m, NiftyOpenAutoTradeTrail.InitialStopPrice(3m, 5m, 0.05m));
+    }
+
+    [Fact]
+    public void Trail_RaisesStop_WhenPeakAdvances()
+    {
+        var (peak1, stop1) = NiftyOpenAutoTradeTrail.ComputeTrailUpdate(
+            peakPrice: 100m,
+            currentStop: 95m,
+            ltp: 100m,
+            trailPoints: 5m,
+            tickSize: 0.05m);
+        Assert.Equal(100m, peak1);
+        Assert.Null(stop1);
+
+        var (peak2, stop2) = NiftyOpenAutoTradeTrail.ComputeTrailUpdate(
+            peakPrice: 100m,
+            currentStop: 95m,
+            ltp: 108m,
+            trailPoints: 5m,
+            tickSize: 0.05m);
+        Assert.Equal(108m, peak2);
+        Assert.Equal(103m, stop2);
+    }
+
+    [Fact]
+    public void TrailWindow_SpansOpenThroughTrailEnd()
+    {
+        var opts = new NiftyOpenAutoTradeOptions
+        {
+            FireLocalHour = 9,
+            FireLocalMinute = 15,
+            TrailEndLocalHour = 15,
+            TrailEndLocalMinute = 25,
+            PauseOnWeekends = true,
+            TimeZoneId = "India Standard Time",
+        };
+
+        // Wednesday 2026-07-15 10:00 IST = 04:30 UTC
+        var midMorning = new DateTimeOffset(2026, 7, 15, 4, 30, 0, TimeSpan.Zero);
+        Assert.True(NiftyOpenAutoTradeSchedule.IsInsideTrailWindow(opts, midMorning));
+
+        // 15:25 IST = 09:55 UTC — exclusive end
+        var atEnd = new DateTimeOffset(2026, 7, 15, 9, 55, 0, TimeSpan.Zero);
+        Assert.False(NiftyOpenAutoTradeSchedule.IsInsideTrailWindow(opts, atEnd));
+    }
+
     private static KiteInstrumentListItemDto Row(
         string token,
         string symbol,

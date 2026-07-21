@@ -8,7 +8,7 @@ using Trader.Domain.Enums;
 namespace Trader.Application.Broker;
 
 /// <summary>
-/// Live NIFTY ATM MIS BUY at ~09:15 IST with balance-aware lots and 10% GTT OCO exits.
+/// Live NIFTY ATM MIS BUY at ~09:15 IST with balance-aware lots and a point-based trailing GTT stop-loss.
 /// Distinct from demo/paper auto-trade.
 /// </summary>
 public sealed class NiftyOpenAutoTradeService
@@ -55,6 +55,46 @@ public sealed class NiftyOpenAutoTradeService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "NIFTY open auto-trade failed for user {UserId}", userId);
+            }
+        }
+    }
+
+    /// <summary>Raises active trailing GTT stops while positions remain open during the trail window.</summary>
+    public async Task RunTrailCycleAsync(CancellationToken ct = default)
+    {
+        var opts = _options.CurrentValue;
+        if (!opts.Enabled)
+            return;
+
+        var utcNow = DateTimeOffset.UtcNow;
+        var tz = NiftyOpenAutoTradeSchedule.ResolveTimeZone(opts.TimeZoneId);
+        var sessionDate = NiftyOpenAutoTradeSchedule.GetSessionDateIst(utcNow, tz);
+        var active = await _runs.ListActiveTrailingAsync(ct).ConfigureAwait(false);
+        if (active.Count == 0)
+            return;
+
+        var insideTrail = NiftyOpenAutoTradeSchedule.IsInsideTrailWindow(opts, utcNow);
+        foreach (var run in active)
+        {
+            try
+            {
+                if (!insideTrail || run.SessionDateIst != sessionDate)
+                {
+                    run.TrailActive = false;
+                    run.Message = Truncate(
+                        AppendNote(
+                            run.Message,
+                            run.SessionDateIst != sessionDate ? "Trail cleared (prior session)." : "Trail window ended."),
+                        1000);
+                    await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+                    continue;
+                }
+
+                await TrailOneRunAsync(run, opts, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "NIFTY open trail failed for run {RunId} user {UserId}", run.Id, run.UserId);
             }
         }
     }
@@ -128,6 +168,7 @@ public sealed class NiftyOpenAutoTradeService
             user.NiftyOpenAutoTradeMaxLots > 0 ? user.NiftyOpenAutoTradeMaxLots : opts.DefaultMaxLots,
             1,
             Math.Max(1, opts.AbsoluteMaxLots));
+        var trailPoints = NiftyOpenAutoTradeTrail.ClampTrailPoints(opts.TrailingStopLossPoints);
 
         try
         {
@@ -267,8 +308,11 @@ public sealed class NiftyOpenAutoTradeService
 
             string? orderId = null;
             string? gttId = null;
+            decimal? trailStop = null;
+            var trailActive = false;
             string message;
             var runStatus = "failed";
+            var product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant();
 
             try
             {
@@ -281,7 +325,7 @@ public sealed class NiftyOpenAutoTradeService
                         Tradingsymbol = chosen.Tradingsymbol,
                         TransactionType = "BUY",
                         Quantity = qty,
-                        Product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant(),
+                        Product = product,
                         OrderType = "MARKET",
                         Validity = "DAY",
                         Tag = opts.OrderTag,
@@ -291,6 +335,7 @@ public sealed class NiftyOpenAutoTradeService
 
                 try
                 {
+                    var seedStop = NiftyOpenAutoTradeTrail.InitialStopPrice(chosenLtp, trailPoints, 0.05m);
                     var gtt = await _broker.CreateKiteGttOcoAsync(
                         userId,
                         new KiteGttCreateRequestDto
@@ -299,24 +344,26 @@ public sealed class NiftyOpenAutoTradeService
                             Tradingsymbol = chosen.Tradingsymbol,
                             EntryTransactionType = "BUY",
                             Quantity = qty,
-                            Product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant(),
+                            Product = product,
                             ReferencePrice = chosenLtp,
                             LastPrice = chosenLtp,
-                            StopLossPercent = opts.GttStopLossPercent > 0 ? opts.GttStopLossPercent : 10m,
-                            TriggerPercent = opts.GttTargetPercent > 0 ? opts.GttTargetPercent : 10m,
+                            StopLossPrice = seedStop,
                             StopLossEnabled = true,
-                            ProfitEnabled = true,
+                            ProfitEnabled = false,
                             Tag = opts.OrderTag,
                         },
                         ct).ConfigureAwait(false);
                     gttId = gtt.TriggerId;
-                    message = $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol}; GTT OCO placed.";
+                    trailStop = gtt.StopLossPrice > 0 ? gtt.StopLossPrice : seedStop;
+                    trailActive = true;
+                    message =
+                        $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol}; trailing SL GTT at {trailStop:0.##} (−{trailPoints:0.##} pts).";
                     runStatus = "success";
                 }
                 catch (Exception gttEx)
                 {
-                    _logger.LogWarning(gttEx, "NIFTY open order placed but GTT failed for {UserId}", userId);
-                    message = $"Order placed ({orderId}) but GTT failed: {gttEx.Message}";
+                    _logger.LogWarning(gttEx, "NIFTY open order placed but trailing GTT failed for {UserId}", userId);
+                    message = $"Order placed ({orderId}) but trailing GTT failed: {gttEx.Message}";
                     runStatus = "success";
                 }
             }
@@ -341,6 +388,10 @@ public sealed class NiftyOpenAutoTradeService
                 available,
                 orderId,
                 gttId,
+                trailActive,
+                trailActive ? chosenLtp : null,
+                trailStop,
+                trailActive ? trailPoints : null,
                 message,
                 ct).ConfigureAwait(false);
 
@@ -360,6 +411,10 @@ public sealed class NiftyOpenAutoTradeService
                     0,
                     null,
                     null,
+                    null,
+                    null,
+                    null,
+                    false,
                     null,
                     null,
                     null,
@@ -388,6 +443,94 @@ public sealed class NiftyOpenAutoTradeService
 
             throw;
         }
+    }
+
+    private async Task TrailOneRunAsync(
+        NiftyOpenAutoTradeRun run,
+        NiftyOpenAutoTradeOptions opts,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(run.Exchange)
+            || string.IsNullOrWhiteSpace(run.Tradingsymbol)
+            || string.IsNullOrWhiteSpace(run.GttTriggerId)
+            || run.Quantity < 1
+            || run.TrailStopPrice is null or <= 0
+            || run.TrailPeakPrice is null or <= 0)
+        {
+            run.TrailActive = false;
+            await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        var positions = await _broker.GetKiteNetPositionsAsync(run.UserId, ct).ConfigureAwait(false);
+        var openQty = positions
+            .Where(p =>
+                string.Equals(p.Exchange, run.Exchange, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(p.Tradingsymbol, run.Tradingsymbol, StringComparison.OrdinalIgnoreCase)
+                && (string.IsNullOrWhiteSpace(opts.Product)
+                    || string.Equals(p.Product, opts.Product, StringComparison.OrdinalIgnoreCase)))
+            .Sum(p => p.Quantity);
+
+        if (openQty <= 0)
+        {
+            run.TrailActive = false;
+            run.Message = Truncate(
+                AppendNote(run.Message, "Trail stopped: position flat."),
+                1000);
+            await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        var quote = await _broker
+            .GetKiteInstrumentLiveQuoteAsync(run.UserId, run.Exchange, run.Tradingsymbol, ct)
+            .ConfigureAwait(false);
+        if (quote.LastPrice <= 0)
+            return;
+
+        var trailPoints = NiftyOpenAutoTradeTrail.ClampTrailPoints(
+            run.TrailPoints ?? opts.TrailingStopLossPoints);
+        // Tick resolved inside Modify; seed with 0.05 for local compare then re-round on broker.
+        var tickHint = 0.05m;
+        var (newPeak, newStop) = NiftyOpenAutoTradeTrail.ComputeTrailUpdate(
+            run.TrailPeakPrice.Value,
+            run.TrailStopPrice.Value,
+            quote.LastPrice,
+            trailPoints,
+            tickHint);
+
+        run.TrailPeakPrice = newPeak;
+        if (newStop is null)
+        {
+            await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        var product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant();
+        var modified = await _broker.ModifyKiteGttSingleStopAsync(
+            run.UserId,
+            run.GttTriggerId,
+            new KiteGttCreateRequestDto
+            {
+                Exchange = run.Exchange,
+                Tradingsymbol = run.Tradingsymbol,
+                EntryTransactionType = "BUY",
+                Quantity = run.Quantity,
+                Product = product,
+                LastPrice = quote.LastPrice,
+                StopLossPrice = newStop.Value,
+                StopLossEnabled = true,
+                ProfitEnabled = false,
+                Tag = opts.OrderTag,
+            },
+            ct).ConfigureAwait(false);
+
+        run.TrailStopPrice = modified.StopLossPrice > 0 ? modified.StopLossPrice : newStop.Value;
+        if (!string.IsNullOrWhiteSpace(modified.TriggerId))
+            run.GttTriggerId = modified.TriggerId;
+        run.Message = Truncate(
+            AppendNote(run.Message, $"Trail SL → {run.TrailStopPrice:0.##} (peak {newPeak:0.##})."),
+            1000);
+        await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<NiftyOpenAutoTradePreviewDto> FinishAsync(
@@ -433,6 +576,10 @@ public sealed class NiftyOpenAutoTradeService
                 availableBalance,
                 null,
                 null,
+                false,
+                null,
+                null,
+                null,
                 Reason,
                 ct).ConfigureAwait(false);
         }
@@ -453,6 +600,10 @@ public sealed class NiftyOpenAutoTradeService
         decimal? available,
         string? orderId,
         string? gttId,
+        bool trailActive,
+        decimal? trailPeak,
+        decimal? trailStop,
+        decimal? trailPoints,
         string? message,
         CancellationToken ct)
     {
@@ -474,6 +625,10 @@ public sealed class NiftyOpenAutoTradeService
             AvailableBalanceInr = available,
             OrderId = orderId,
             GttTriggerId = gttId,
+            TrailActive = trailActive,
+            TrailPeakPrice = trailPeak,
+            TrailStopPrice = trailStop,
+            TrailPoints = trailPoints,
             Message = Truncate(message, 1000),
             CreatedAtUtc = DateTimeOffset.UtcNow,
         };
@@ -528,6 +683,13 @@ public sealed class NiftyOpenAutoTradeService
             r.GttTriggerId,
             r.Message,
             r.CreatedAtUtc);
+
+    private static string AppendNote(string? existing, string note)
+    {
+        if (string.IsNullOrWhiteSpace(existing))
+            return note;
+        return $"{existing} | {note}";
+    }
 
     private static string? Truncate(string? s, int max)
     {

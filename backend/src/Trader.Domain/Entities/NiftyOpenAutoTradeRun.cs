@@ -27,6 +27,19 @@ public class NiftyOpenAutoTradeRun
     public decimal? AvailableBalanceInr { get; set; }
     public string? OrderId { get; set; }
     public string? GttTriggerId { get; set; }
+
+    /// <summary>When true, the host polls LTP and raises the GTT stop (peak − trail points).</summary>
+    public bool TrailActive { get; set; }
+
+    /// <summary>Highest option LTP seen while trailing (premium points).</summary>
+    public decimal? TrailPeakPrice { get; set; }
+
+    /// <summary>Current GTT stop-loss trigger price.</summary>
+    public decimal? TrailStopPrice { get; set; }
+
+    /// <summary>Configured trail gap in premium points at entry time.</summary>
+    public decimal? TrailPoints { get; set; }
+
     public string? Message { get; set; }
     public DateTimeOffset CreatedAtUtc { get; set; }
 }

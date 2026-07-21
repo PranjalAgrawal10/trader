@@ -35,6 +35,15 @@ public sealed class NiftyOpenAutoTradeRunRepository : INiftyOpenAutoTradeRunRepo
             .ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<NiftyOpenAutoTradeRun>> ListActiveTrailingAsync(CancellationToken ct = default)
+    {
+        return await _db.NiftyOpenAutoTradeRuns
+            .Where(r => r.TrailActive)
+            .OrderBy(r => r.CreatedAtUtc)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         _db.SaveChangesAsync(ct);
 }

@@ -1681,8 +1681,8 @@ export function ScalperPage() {
                       </div>
                       <p className="small text-muted mb-2">
                         At <strong>09:15 IST</strong> buys nearest-ATM NIFTY <strong>MIS</strong> (
-                        {niftyOpenSide === 'PE' ? 'PUT' : 'CALL'}) sized from Zerodha cash; then places{' '}
-                        <strong>10% / 10%</strong> GTT OCO. API must be running. Max {niftyOpenMaxLots} lots.
+                        {niftyOpenSide === 'PE' ? 'PUT' : 'CALL'}) sized from Zerodha cash; then trails a{' '}
+                        <strong>5-point</strong> GTT stop-loss. API must be running. Max {niftyOpenMaxLots} lots.
                       </p>
                       <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
                         <Form.Check

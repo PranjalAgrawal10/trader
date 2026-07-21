@@ -120,6 +120,21 @@ public interface IKiteInstrumentsClient
         string apiKey,
         string accessToken,
         CancellationToken ct = default);
+
+    /// <summary>Kite <c>PUT /gtt/triggers/{id}</c> — replace a single-leg GTT trigger/order prices.</summary>
+    Task<KiteGttActionResult> ModifyGttSingleAsync(
+        string triggerId,
+        KiteGttSingleRequest request,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
+
+    /// <summary>Kite <c>DELETE /gtt/triggers/{id}</c>.</summary>
+    Task<KiteGttActionResult> DeleteGttAsync(
+        string triggerId,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct = default);
 }
 
 public sealed record KiteQuoteOhlcFetchResult(

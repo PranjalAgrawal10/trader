@@ -7,7 +7,7 @@ using Trader.Application.Configuration;
 
 namespace Trader.Infrastructure.Hosting;
 
-/// <summary>Polls near 09:15 IST and runs <see cref="NiftyOpenAutoTradeService"/> for opted-in users.</summary>
+/// <summary>Polls near 09:15 IST for entries and manages trailing GTT stops for <see cref="NiftyOpenAutoTradeService"/>.</summary>
 public sealed class NiftyOpenAutoTradeBackgroundService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
@@ -39,6 +39,7 @@ public sealed class NiftyOpenAutoTradeBackgroundService : BackgroundService
                     using var scope = _scopeFactory.CreateScope();
                     var runner = scope.ServiceProvider.GetRequiredService<NiftyOpenAutoTradeService>();
                     await runner.RunCycleAsync(stoppingToken).ConfigureAwait(false);
+                    await runner.RunTrailCycleAsync(stoppingToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

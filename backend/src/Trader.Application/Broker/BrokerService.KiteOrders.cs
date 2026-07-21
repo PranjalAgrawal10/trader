@@ -403,6 +403,71 @@ public sealed partial class BrokerService
             target);
     }
 
+    public async Task<KiteGttActionResultDto> ModifyKiteGttSingleStopAsync(
+        Guid userId,
+        string triggerId,
+        KiteGttCreateRequestDto body,
+        CancellationToken ct = default)
+    {
+        if (body is null)
+            throw new InvalidOperationException("Request body is required.");
+        if (string.IsNullOrWhiteSpace(triggerId))
+            throw new InvalidOperationException("triggerId is required.");
+        if (body.Quantity < 1)
+            throw new InvalidOperationException("quantity must be greater than zero.");
+
+        var stopOverride = NormalizeNullablePrice(body.StopLossPrice);
+        if (stopOverride is null or <= 0)
+            throw new InvalidOperationException("stopLossPrice is required to modify a trailing GTT.");
+
+        var exchange = NormalizeRequired(body.Exchange, "exchange").ToUpperInvariant();
+        var tradingsymbol = NormalizeRequired(body.Tradingsymbol, "tradingsymbol");
+        var entrySide = NormalizeRequired(body.EntryTransactionType, "entryTransactionType").ToUpperInvariant();
+        if (entrySide is not ("BUY" or "SELL"))
+            throw new InvalidOperationException("entryTransactionType must be BUY or SELL.");
+
+        var product = NormalizeRequired(body.Product, "product").ToUpperInvariant();
+        var exitSide = entrySide == "BUY" ? "SELL" : "BUY";
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        var tickSize = await ResolveKiteTickSizeAsync(exchange, tradingsymbol, apiKey, accessToken, ct).ConfigureAwait(false);
+
+        var lastPrice = NormalizeNullablePrice(body.LastPrice);
+        if (lastPrice is null or <= 0)
+        {
+            var quote = await GetKiteInstrumentLiveQuoteAsync(userId, exchange, tradingsymbol, ct).ConfigureAwait(false);
+            lastPrice = quote.LastPrice;
+        }
+
+        lastPrice = KiteTickPriceRounding.RoundToTickSize(lastPrice.Value, tickSize);
+        var stopLoss = KiteTickPriceRounding.RoundToTickSize(stopOverride.Value, tickSize);
+        if (stopLoss <= 0)
+            throw new InvalidOperationException("Stop-loss price must be greater than zero.");
+
+        var singleRequest = new KiteGttSingleRequest(
+            exchange,
+            tradingsymbol,
+            lastPrice.Value,
+            stopLoss,
+            exitSide,
+            body.Quantity,
+            product,
+            NormalizeOptional(body.Tag));
+
+        var action = await _kiteInstruments
+            .ModifyGttSingleAsync(triggerId.Trim(), singleRequest, apiKey, accessToken, ct)
+            .ConfigureAwait(false);
+        if (!action.Success)
+            throw new InvalidOperationException(action.ErrorMessage ?? "Could not modify GTT on Kite.");
+
+        return new KiteGttActionResultDto(
+            action.TriggerId ?? triggerId.Trim(),
+            "gtt-sl-trail",
+            $"GTT stop-loss trailed to {stopLoss:0.##}.",
+            stopLoss,
+            0m);
+    }
+
     public async Task<KiteOrderActionResultDto> PlaceOrderAsync(
         Guid userId,
         KiteOrderPlaceRequestDto body,
