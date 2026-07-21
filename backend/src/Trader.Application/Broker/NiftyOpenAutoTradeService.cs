@@ -104,7 +104,7 @@ public sealed class NiftyOpenAutoTradeService
     {
         var user = await RequireUserAsync(userId, ct).ConfigureAwait(false);
         var last = await _runs.GetLatestByUserAsync(userId, ct).ConfigureAwait(false);
-        var available = await TryListAvailableExpiriesAsync(userId, ct).ConfigureAwait(false);
+        var available = await TryListAvailableExpiriesAsync(user, ct).ConfigureAwait(false);
         return MapSettings(user, last, available);
     }
 
@@ -115,19 +115,46 @@ public sealed class NiftyOpenAutoTradeService
 
         var opts = _options.CurrentValue;
         var user = await RequireUserAsync(userId, ct).ConfigureAwait(false);
+        var previousUnderlying = OpeningAtmUnderlyings.Resolve(user.NiftyOpenAutoTradeUnderlying).Key;
+        var nextUnderlying = OpeningAtmUnderlyings.Resolve(body.Underlying);
         user.NiftyOpenAutoTradeEnabled = body.Enabled;
+        user.NiftyOpenAutoTradeUnderlying = nextUnderlying.Key;
         user.NiftyOpenAutoTradeOptionSide = NiftyOpenAutoTradeOptionSideParser.ToEnum(body.OptionSide);
         var maxLots = body.MaxLots > 0 ? body.MaxLots : opts.DefaultMaxLots;
         user.NiftyOpenAutoTradeMaxLots = Math.Clamp(maxLots, 1, Math.Max(1, opts.AbsoluteMaxLots));
-        user.NiftyOpenAutoTradeExpiry = ParsePreferredExpiry(body.Expiry);
+        // Changing underlying invalidates a leftover expiry from another index unless the client sends a new one.
+        if (!string.Equals(previousUnderlying, nextUnderlying.Key, StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(body.Expiry))
+        {
+            user.NiftyOpenAutoTradeExpiry = null;
+        }
+        else
+        {
+            user.NiftyOpenAutoTradeExpiry = ParsePreferredExpiry(body.Expiry);
+        }
         user.NiftyOpenAutoTradeStopLossPoints = NiftyOpenAutoTradeTrail.ClampGttPoints(
             body.StopLossPoints > 0 ? body.StopLossPoints : opts.DefaultStopLossPoints);
         user.NiftyOpenAutoTradeTargetPoints = NiftyOpenAutoTradeTrail.ClampGttPoints(
             body.TargetPoints > 0 ? body.TargetPoints : opts.DefaultTargetPoints);
         user.NiftyOpenAutoTradeStopLossEnabled = body.StopLossEnabled;
         user.NiftyOpenAutoTradeTargetEnabled = body.TargetEnabled;
-        if (!user.NiftyOpenAutoTradeStopLossEnabled && !user.NiftyOpenAutoTradeTargetEnabled)
-            throw new InvalidOperationException("Enable at least one of −ve GTT (stop-loss) or +ve GTT (target).");
+        user.NiftyOpenAutoTradeTrailEnabled = body.TrailEnabled;
+        user.NiftyOpenAutoTradeTrailPoints = NiftyOpenAutoTradeTrail.ClampTrailPoints(
+            body.TrailPoints > 0 ? body.TrailPoints : opts.DefaultStopLossPoints);
+        if (user.NiftyOpenAutoTradeTrailEnabled)
+        {
+            // Trail owns the stop-loss leg; keep −ve enabled so previews/settings stay coherent.
+            user.NiftyOpenAutoTradeStopLossEnabled = true;
+        }
+
+        if (!user.NiftyOpenAutoTradeStopLossEnabled
+            && !user.NiftyOpenAutoTradeTargetEnabled
+            && !user.NiftyOpenAutoTradeTrailEnabled)
+        {
+            throw new InvalidOperationException(
+                "Enable at least one of −ve GTT (stop-loss), trail SL, or +ve GTT (target).");
+        }
+
         await _users.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -174,6 +201,7 @@ public sealed class NiftyOpenAutoTradeService
     {
         var opts = _options.CurrentValue;
         var user = await RequireUserAsync(userId, ct).ConfigureAwait(false);
+        var underlying = OpeningAtmUnderlyings.Resolve(user.NiftyOpenAutoTradeUnderlying);
         var side = NiftyOpenAutoTradeOptionSideParser.FromEnum(user.NiftyOpenAutoTradeOptionSide);
         var maxLots = Math.Clamp(
             user.NiftyOpenAutoTradeMaxLots > 0 ? user.NiftyOpenAutoTradeMaxLots : opts.DefaultMaxLots,
@@ -187,8 +215,15 @@ public sealed class NiftyOpenAutoTradeService
             user.NiftyOpenAutoTradeTargetPoints > 0
                 ? user.NiftyOpenAutoTradeTargetPoints
                 : opts.DefaultTargetPoints);
-        var stopLossEnabled = user.NiftyOpenAutoTradeStopLossEnabled;
+        var trailEnabled = user.NiftyOpenAutoTradeTrailEnabled;
+        var userTrailPoints = NiftyOpenAutoTradeTrail.ClampTrailPoints(
+            user.NiftyOpenAutoTradeTrailPoints > 0
+                ? user.NiftyOpenAutoTradeTrailPoints
+                : opts.DefaultStopLossPoints);
+        var stopLossEnabled = user.NiftyOpenAutoTradeStopLossEnabled || trailEnabled;
         var targetEnabled = user.NiftyOpenAutoTradeTargetEnabled;
+        // When trailing, SL distance is trail points (not fixed −ve).
+        var stopDistancePoints = trailEnabled ? userTrailPoints : trailPoints;
         if (!stopLossEnabled && !targetEnabled)
         {
             return await FinishAsync(
@@ -196,7 +231,8 @@ public sealed class NiftyOpenAutoTradeService
                 dryRun,
                 claimedSessionDate,
                 false,
-                "Configure at least one of −ve GTT or +ve GTT on NIFTY Opening ATM.",
+                "Configure at least one of −ve GTT, trail SL, or +ve GTT on Opening ATM.",
+                underlying.Key,
                 side,
                 maxLots,
                 null,
@@ -214,7 +250,8 @@ public sealed class NiftyOpenAutoTradeService
                     dryRun,
                     claimedSessionDate,
                     CanTrade: false,
-                    Reason: "Connect Zerodha to enable NIFTY open auto-trade.",
+                    Reason: "Connect Zerodha to enable Opening ATM.",
+                    underlying.Key,
                     side,
                     maxLots,
                     null,
@@ -222,14 +259,14 @@ public sealed class NiftyOpenAutoTradeService
             }
 
             var spotSearch = await _broker
-                .SearchKiteInstrumentsAsync(userId, opts.SpotSearchQuery, KiteInstrumentSearchSegment.Spot, ct)
+                .SearchKiteInstrumentsAsync(userId, underlying.SpotSearchQuery, KiteInstrumentSearchSegment.Spot, ct)
                 .ConfigureAwait(false);
-            var spotRow = NiftyOpenAutoTradeAtm.ChooseNiftySpotRow(spotSearch.Items, opts.PreferredSpotExchange);
+            var spotRow = NiftyOpenAutoTradeAtm.ChooseSpotRow(spotSearch.Items, underlying);
             if (spotRow is null)
             {
                 return await FinishAsync(
-                    userId, dryRun, claimedSessionDate, false, "Could not resolve NIFTY 50 spot instrument.",
-                    side, maxLots, null, ct).ConfigureAwait(false);
+                    userId, dryRun, claimedSessionDate, false, $"Could not resolve {underlying.Label} spot instrument.",
+                    underlying.Key, side, maxLots, null, ct).ConfigureAwait(false);
             }
 
             var spotQuote = await _broker
@@ -238,27 +275,27 @@ public sealed class NiftyOpenAutoTradeService
             if (spotQuote.LastPrice <= 0)
             {
                 return await FinishAsync(
-                    userId, dryRun, claimedSessionDate, false, "NIFTY spot LTP unavailable.",
-                    side, maxLots, null, ct).ConfigureAwait(false);
+                    userId, dryRun, claimedSessionDate, false, $"{underlying.Label} spot LTP unavailable.",
+                    underlying.Key, side, maxLots, null, ct).ConfigureAwait(false);
             }
 
             var optionSearch = await _broker
-                .SearchKiteInstrumentsAsync(userId, opts.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct)
+                .SearchKiteInstrumentsAsync(userId, underlying.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct)
                 .ConfigureAwait(false);
-            var niftyOptions = NiftyOpenAutoTradeAtm.FilterNiftyOptions(optionSearch.Items);
+            var optionRows = NiftyOpenAutoTradeAtm.FilterOptionsForUnderlying(optionSearch.Items, underlying);
             var expiry = NiftyOpenAutoTradeAtm.ResolveExpiryUtc(
-                niftyOptions,
+                optionRows,
                 user.NiftyOpenAutoTradeExpiry,
                 DateTimeOffset.UtcNow);
             if (expiry is null)
             {
                 return await FinishAsync(
-                    userId, dryRun, claimedSessionDate, false, "No NIFTY option expiry found.",
-                    side, maxLots, spotQuote.LastPrice, ct).ConfigureAwait(false);
+                    userId, dryRun, claimedSessionDate, false, $"No {underlying.Label} option expiry found.",
+                    underlying.Key, side, maxLots, spotQuote.LastPrice, ct).ConfigureAwait(false);
             }
 
             var candidates = NiftyOpenAutoTradeAtm.BuildStrikeCandidates(
-                niftyOptions,
+                optionRows,
                 expiry.Value,
                 spotQuote.LastPrice,
                 side,
@@ -267,7 +304,7 @@ public sealed class NiftyOpenAutoTradeService
             {
                 return await FinishAsync(
                     userId, dryRun, claimedSessionDate, false, $"No {side} contracts near ATM.",
-                    side, maxLots, spotQuote.LastPrice, ct).ConfigureAwait(false);
+                    underlying.Key, side, maxLots, spotQuote.LastPrice, ct).ConfigureAwait(false);
             }
 
             var margins = await _broker.GetKiteUserMarginsAsync(userId, ct).ConfigureAwait(false);
@@ -276,7 +313,7 @@ public sealed class NiftyOpenAutoTradeService
             {
                 return await FinishAsync(
                     userId, dryRun, claimedSessionDate, false, "Zerodha available cash is zero or unavailable.",
-                    side, maxLots, spotQuote.LastPrice, ct, availableBalance: available).ConfigureAwait(false);
+                    underlying.Key, side, maxLots, spotQuote.LastPrice, ct, availableBalance: available).ConfigureAwait(false);
             }
 
             NiftyOpenAutoTradeAtm.OptionCandidate? chosen = null;
@@ -314,6 +351,7 @@ public sealed class NiftyOpenAutoTradeService
                     claimedSessionDate,
                     false,
                     "Insufficient Zerodha balance for 1 near-ATM lot.",
+                    underlying.Key,
                     side,
                     maxLots,
                     spotQuote.LastPrice,
@@ -324,7 +362,7 @@ public sealed class NiftyOpenAutoTradeService
             var qty = checked(chosenLots * chosen.LotSize);
             var premium = chosenLtp * qty;
             var seedStop = stopLossEnabled
-                ? NiftyOpenAutoTradeTrail.InitialStopPrice(chosenLtp, trailPoints, 0.05m)
+                ? NiftyOpenAutoTradeTrail.InitialStopPrice(chosenLtp, stopDistancePoints, 0.05m)
                 : (decimal?)null;
             var seedTarget = targetEnabled
                 ? NiftyOpenAutoTradeTrail.InitialTargetPrice(chosenLtp, targetPoints, 0.05m)
@@ -334,6 +372,7 @@ public sealed class NiftyOpenAutoTradeService
                 Reason: null,
                 SpotLtp: spotQuote.LastPrice,
                 AvailableBalanceInr: available,
+                Underlying: underlying.Key,
                 OptionSide: side,
                 Exchange: chosen.Exchange,
                 Tradingsymbol: chosen.Tradingsymbol,
@@ -345,7 +384,9 @@ public sealed class NiftyOpenAutoTradeService
                 EstimatedPremiumInr: premium,
                 MaxLots: maxLots,
                 StopLossPrice: seedStop,
-                TargetPrice: seedTarget);
+                TargetPrice: seedTarget,
+                TrailEnabled: trailEnabled,
+                TrailPoints: trailEnabled ? userTrailPoints : null);
 
             if (dryRun)
                 return preview;
@@ -355,6 +396,7 @@ public sealed class NiftyOpenAutoTradeService
             string message;
             var runStatus = "failed";
             var product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant();
+            var armTrail = false;
 
             try
             {
@@ -377,46 +419,101 @@ public sealed class NiftyOpenAutoTradeService
 
                 try
                 {
-                    var gtt = await _broker.CreateKiteGttOcoAsync(
-                        userId,
-                        new KiteGttCreateRequestDto
-                        {
-                            Exchange = chosen.Exchange,
-                            Tradingsymbol = chosen.Tradingsymbol,
-                            EntryTransactionType = "BUY",
-                            Quantity = qty,
-                            Product = product,
-                            ReferencePrice = chosenLtp,
-                            LastPrice = chosenLtp,
-                            StopLossPrice = seedStop,
-                            TriggerPrice = seedTarget,
-                            StopLossEnabled = stopLossEnabled,
-                            ProfitEnabled = targetEnabled,
-                            Tag = opts.OrderTag,
-                        },
-                        ct).ConfigureAwait(false);
-                    gttId = gtt.TriggerId;
-                    var slPart = stopLossEnabled
-                        ? $"−ve GTT {gtt.StopLossPrice:0.##} (−{trailPoints:0.##} pts)"
-                        : "−ve GTT off";
-                    var tpPart = targetEnabled
-                        ? $"+ve GTT {gtt.TargetPrice:0.##} (+{targetPoints:0.##} pts)"
-                        : "+ve GTT off";
-                    message =
-                        $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol} (max affordable ≤{maxLots}); {slPart}; {tpPart}.";
-                    runStatus = "success";
+                    // Trailing modify uses a single-leg SL GTT. When trail + target, place SL and TP separately.
+                    if (trailEnabled && stopLossEnabled && targetEnabled)
+                    {
+                        var slGtt = await _broker.CreateKiteGttOcoAsync(
+                            userId,
+                            new KiteGttCreateRequestDto
+                            {
+                                Exchange = chosen.Exchange,
+                                Tradingsymbol = chosen.Tradingsymbol,
+                                EntryTransactionType = "BUY",
+                                Quantity = qty,
+                                Product = product,
+                                ReferencePrice = chosenLtp,
+                                LastPrice = chosenLtp,
+                                StopLossPrice = seedStop,
+                                StopLossEnabled = true,
+                                ProfitEnabled = false,
+                                Tag = opts.OrderTag,
+                            },
+                            ct).ConfigureAwait(false);
+                        gttId = slGtt.TriggerId;
+
+                        var tpGtt = await _broker.CreateKiteGttOcoAsync(
+                            userId,
+                            new KiteGttCreateRequestDto
+                            {
+                                Exchange = chosen.Exchange,
+                                Tradingsymbol = chosen.Tradingsymbol,
+                                EntryTransactionType = "BUY",
+                                Quantity = qty,
+                                Product = product,
+                                ReferencePrice = chosenLtp,
+                                LastPrice = chosenLtp,
+                                TriggerPrice = seedTarget,
+                                StopLossEnabled = false,
+                                ProfitEnabled = true,
+                                Tag = opts.OrderTag,
+                            },
+                            ct).ConfigureAwait(false);
+
+                        message =
+                            $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol} (max affordable ≤{maxLots}); " +
+                            $"trail SL {slGtt.StopLossPrice:0.##} (−{userTrailPoints:0.##} pts); " +
+                            $"+ve GTT {tpGtt.TargetPrice:0.##} (+{targetPoints:0.##} pts).";
+                        armTrail = !string.IsNullOrWhiteSpace(gttId) && seedStop is > 0;
+                        runStatus = "success";
+                    }
+                    else
+                    {
+                        var gtt = await _broker.CreateKiteGttOcoAsync(
+                            userId,
+                            new KiteGttCreateRequestDto
+                            {
+                                Exchange = chosen.Exchange,
+                                Tradingsymbol = chosen.Tradingsymbol,
+                                EntryTransactionType = "BUY",
+                                Quantity = qty,
+                                Product = product,
+                                ReferencePrice = chosenLtp,
+                                LastPrice = chosenLtp,
+                                StopLossPrice = seedStop,
+                                TriggerPrice = seedTarget,
+                                StopLossEnabled = stopLossEnabled,
+                                ProfitEnabled = targetEnabled,
+                                Tag = opts.OrderTag,
+                            },
+                            ct).ConfigureAwait(false);
+                        gttId = gtt.TriggerId;
+                        var slPart = stopLossEnabled
+                            ? trailEnabled
+                                ? $"trail SL {gtt.StopLossPrice:0.##} (−{userTrailPoints:0.##} pts)"
+                                : $"−ve GTT {gtt.StopLossPrice:0.##} (−{stopDistancePoints:0.##} pts)"
+                            : "−ve GTT off";
+                        var tpPart = targetEnabled
+                            ? $"+ve GTT {gtt.TargetPrice:0.##} (+{targetPoints:0.##} pts)"
+                            : "+ve GTT off";
+                        message =
+                            $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol} (max affordable ≤{maxLots}); {slPart}; {tpPart}.";
+                        armTrail = trailEnabled && stopLossEnabled && !string.IsNullOrWhiteSpace(gttId) && seedStop is > 0;
+                        runStatus = "success";
+                    }
                 }
                 catch (Exception gttEx)
                 {
-                    _logger.LogWarning(gttEx, "NIFTY Opening ATM order placed but GTT failed for {UserId}", userId);
+                    _logger.LogWarning(gttEx, "Opening ATM order placed but GTT failed for {UserId}", userId);
                     message = $"Order placed ({orderId}) but GTT failed: {gttEx.Message}";
                     runStatus = "success";
+                    armTrail = false;
                 }
             }
             catch (Exception placeEx)
             {
                 message = placeEx.Message;
                 runStatus = "failed";
+                armTrail = false;
             }
 
             await PersistRunAsync(
@@ -434,10 +531,10 @@ public sealed class NiftyOpenAutoTradeService
                 available,
                 orderId,
                 gttId,
-                trailActive: false,
-                trailPeak: null,
-                trailStop: null,
-                trailPoints: null,
+                trailActive: armTrail,
+                trailPeak: armTrail ? chosenLtp : null,
+                trailStop: armTrail ? seedStop : null,
+                trailPoints: armTrail ? userTrailPoints : null,
                 message,
                 ct).ConfigureAwait(false);
 
@@ -475,6 +572,7 @@ public sealed class NiftyOpenAutoTradeService
                     ex.Message,
                     null,
                     null,
+                    underlying.Key,
                     side,
                     null,
                     null,
@@ -486,6 +584,8 @@ public sealed class NiftyOpenAutoTradeService
                     0,
                     maxLots,
                     null,
+                    null,
+                    false,
                     null);
             }
 
@@ -587,6 +687,7 @@ public sealed class NiftyOpenAutoTradeService
         DateOnly? claimedSessionDate,
         bool CanTrade,
         string Reason,
+        string underlyingKey,
         string side,
         int maxLots,
         decimal? spotLtp,
@@ -598,6 +699,7 @@ public sealed class NiftyOpenAutoTradeService
             Reason,
             spotLtp,
             availableBalance,
+            underlyingKey,
             side,
             null,
             null,
@@ -609,6 +711,8 @@ public sealed class NiftyOpenAutoTradeService
             0,
             maxLots,
             null,
+            null,
+            false,
             null);
 
         if (!dryRun && claimedSessionDate is not null)
@@ -706,12 +810,12 @@ public sealed class NiftyOpenAutoTradeService
         return user;
     }
 
-    private async Task<IReadOnlyList<string>> TryListAvailableExpiriesAsync(Guid userId, CancellationToken ct)
+    private async Task<IReadOnlyList<string>> TryListAvailableExpiriesAsync(User user, CancellationToken ct)
     {
         try
         {
-            var opts = _options.CurrentValue;
-            var brokerStatus = await _broker.GetStatusAsync(userId, ct).ConfigureAwait(false);
+            var underlying = OpeningAtmUnderlyings.Resolve(user.NiftyOpenAutoTradeUnderlying);
+            var brokerStatus = await _broker.GetStatusAsync(user.Id, ct).ConfigureAwait(false);
             if (!brokerStatus.Connected
                 || !string.Equals(brokerStatus.Provider, "zerodha", StringComparison.OrdinalIgnoreCase))
             {
@@ -719,14 +823,14 @@ public sealed class NiftyOpenAutoTradeService
             }
 
             var optionSearch = await _broker
-                .SearchKiteInstrumentsAsync(userId, opts.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct)
+                .SearchKiteInstrumentsAsync(user.Id, underlying.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct)
                 .ConfigureAwait(false);
             return NiftyOpenAutoTradeAtm.ListDistinctExpiryDates(
-                NiftyOpenAutoTradeAtm.FilterNiftyOptions(optionSearch.Items));
+                NiftyOpenAutoTradeAtm.FilterOptionsForUnderlying(optionSearch.Items, underlying));
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not list NIFTY open-auto expiries for {UserId}", userId);
+            _logger.LogDebug(ex, "Could not list Opening ATM expiries for {UserId}", user.Id);
             return Array.Empty<string>();
         }
     }
@@ -750,9 +854,15 @@ public sealed class NiftyOpenAutoTradeService
     private static NiftyOpenAutoTradeSettingsDto MapSettings(
         User user,
         NiftyOpenAutoTradeRun? last,
-        IReadOnlyList<string> availableExpiries) =>
-        new(
+        IReadOnlyList<string> availableExpiries)
+    {
+        var underlying = OpeningAtmUnderlyings.Resolve(user.NiftyOpenAutoTradeUnderlying);
+        var availableUnderlyings = OpeningAtmUnderlyings.All
+            .Select(x => new OpeningAtmUnderlyingDto(x.Key, x.Label))
+            .ToList();
+        return new(
             user.NiftyOpenAutoTradeEnabled,
+            underlying.Key,
             NiftyOpenAutoTradeOptionSideParser.FromEnum(user.NiftyOpenAutoTradeOptionSide),
             user.NiftyOpenAutoTradeMaxLots > 0 ? user.NiftyOpenAutoTradeMaxLots : 10,
             user.NiftyOpenAutoTradeExpiry?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -760,9 +870,13 @@ public sealed class NiftyOpenAutoTradeService
             user.NiftyOpenAutoTradeTargetPoints > 0 ? user.NiftyOpenAutoTradeTargetPoints : 5m,
             user.NiftyOpenAutoTradeStopLossEnabled,
             user.NiftyOpenAutoTradeTargetEnabled,
+            user.NiftyOpenAutoTradeTrailEnabled,
+            user.NiftyOpenAutoTradeTrailPoints > 0 ? user.NiftyOpenAutoTradeTrailPoints : 5m,
             user.NiftyOpenAutoTradeLastSessionDateIst,
             availableExpiries,
+            availableUnderlyings,
             last is null ? null : MapRun(last));
+    }
 
     private static NiftyOpenAutoTradeRunDto MapRun(NiftyOpenAutoTradeRun r) =>
         new(

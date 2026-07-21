@@ -4,7 +4,7 @@ namespace Trader.Application.Broker;
 public static class NiftyOpenAutoTradeTrail
 {
     public static decimal ClampTrailPoints(decimal trailPoints) =>
-        trailPoints > 0 ? trailPoints : 5m;
+        ClampGttPoints(trailPoints);
 
     public static decimal ClampGttPoints(decimal points) =>
         points <= 0 ? 5m : Math.Min(points, 500m);

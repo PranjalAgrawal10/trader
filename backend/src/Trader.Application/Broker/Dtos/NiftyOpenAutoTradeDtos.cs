@@ -2,9 +2,12 @@ using Trader.Domain.Enums;
 
 namespace Trader.Application.Broker;
 
-/// <summary>NIFTY Opening ATM prefs (09:15 IST live MIS + ± GTT).</summary>
+public sealed record OpeningAtmUnderlyingDto(string Key, string Label);
+
+/// <summary>Opening ATM prefs (09:15 IST live MIS + ± GTT / optional trail) for a selectable index underlying.</summary>
 public sealed record NiftyOpenAutoTradeSettingsDto(
     bool Enabled,
+    string Underlying,
     string OptionSide,
     int MaxLots,
     /// <summary>Preferred expiry (<c>yyyy-MM-dd</c>); null means nearest future at fire/preview time.</summary>
@@ -13,13 +16,19 @@ public sealed record NiftyOpenAutoTradeSettingsDto(
     decimal TargetPoints,
     bool StopLossEnabled,
     bool TargetEnabled,
+    bool TrailEnabled,
+    decimal TrailPoints,
     DateOnly? LastSessionDateIst,
     IReadOnlyList<string> AvailableExpiries,
+    IReadOnlyList<OpeningAtmUnderlyingDto> AvailableUnderlyings,
     NiftyOpenAutoTradeRunDto? LastRun);
 
 public sealed class NiftyOpenAutoTradeSettingsPutDto
 {
     public bool Enabled { get; set; }
+
+    /// <summary>Underlying key: nifty, banknifty, finnifty, midcpnifty, sensex, bankex.</summary>
+    public string? Underlying { get; set; }
 
     /// <summary><c>CE</c> or <c>PE</c> (aliases: call/put).</summary>
     public string? OptionSide { get; set; }
@@ -28,11 +37,11 @@ public sealed class NiftyOpenAutoTradeSettingsPutDto
     public int MaxLots { get; set; } = 10;
 
     /// <summary>
-    /// Preferred NIFTY option expiry as <c>yyyy-MM-dd</c>. Empty/null clears to nearest-future auto.
+    /// Preferred option expiry as <c>yyyy-MM-dd</c>. Empty/null clears to nearest-future auto.
     /// </summary>
     public string? Expiry { get; set; }
 
-    /// <summary>−ve GTT stop-loss points below entry premium.</summary>
+    /// <summary>−ve GTT stop-loss points below entry premium (ignored for SL distance when trail is on).</summary>
     public decimal StopLossPoints { get; set; } = 5m;
 
     /// <summary>+ve GTT target points above entry premium.</summary>
@@ -41,6 +50,12 @@ public sealed class NiftyOpenAutoTradeSettingsPutDto
     public bool StopLossEnabled { get; set; } = true;
 
     public bool TargetEnabled { get; set; } = true;
+
+    /// <summary>When true, SL uses <see cref="TrailPoints"/> and the host trails the GTT stop.</summary>
+    public bool TrailEnabled { get; set; }
+
+    /// <summary>Trail distance in premium points below the running peak (and initial entry).</summary>
+    public decimal TrailPoints { get; set; } = 5m;
 }
 
 public sealed record NiftyOpenAutoTradeRunDto(
@@ -67,6 +82,7 @@ public sealed record NiftyOpenAutoTradePreviewDto(
     string? Reason,
     decimal? SpotLtp,
     decimal? AvailableBalanceInr,
+    string Underlying,
     string OptionSide,
     string? Exchange,
     string? Tradingsymbol,
@@ -78,7 +94,9 @@ public sealed record NiftyOpenAutoTradePreviewDto(
     decimal EstimatedPremiumInr,
     int MaxLots,
     decimal? StopLossPrice,
-    decimal? TargetPrice);
+    decimal? TargetPrice,
+    bool TrailEnabled,
+    decimal? TrailPoints);
 
 public static class NiftyOpenAutoTradeOptionSideParser
 {

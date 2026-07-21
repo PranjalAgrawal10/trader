@@ -926,6 +926,13 @@ namespace Trader.Infrastructure.Migrations
                     b.Property<DateOnly?>("NiftyOpenAutoTradeExpiry")
                         .HasColumnType("date");
 
+                    b.Property<string>("NiftyOpenAutoTradeUnderlying")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)")
+                        .HasDefaultValue("nifty");
+
                     b.Property<DateOnly?>("NiftyOpenAutoTradeLastSessionDateIst")
                         .HasColumnType("date");
 
@@ -956,6 +963,17 @@ namespace Trader.Infrastructure.Migrations
                         .HasDefaultValue(true);
 
                     b.Property<decimal>("NiftyOpenAutoTradeTargetPoints")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)")
+                        .HasDefaultValue(5m);
+
+                    b.Property<bool>("NiftyOpenAutoTradeTrailEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(false);
+
+                    b.Property<decimal>("NiftyOpenAutoTradeTrailPoints")
                         .ValueGeneratedOnAdd()
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)")

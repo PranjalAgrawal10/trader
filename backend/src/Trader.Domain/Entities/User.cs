@@ -80,8 +80,11 @@ public class User
     /// <summary>Demo allocation preset id (SPA/server constant: default <c>equal_split</c>). Does not execute trades.</summary>
     public string DemoAutoTradeStrategy { get; set; } = "equal_split";
 
-    /// <summary>When true, server places a live NIFTY Opening ATM MIS BUY (CE or PE) near 09:15 IST with ± GTT exits.</summary>
+    /// <summary>When true, server places Opening ATM live MIS BUY (CE or PE) near 09:15 IST with ± GTT exits.</summary>
     public bool NiftyOpenAutoTradeEnabled { get; set; }
+
+    /// <summary>Underlying key: <c>nifty</c>, <c>banknifty</c>, <c>finnifty</c>, <c>midcpnifty</c>, <c>sensex</c>, <c>bankex</c>.</summary>
+    public string NiftyOpenAutoTradeUnderlying { get; set; } = "nifty";
 
     /// <summary>Option leg to buy: <see cref="NiftyOpenAutoTradeOptionSide.Ce"/> or <see cref="NiftyOpenAutoTradeOptionSide.Pe"/>.</summary>
     public NiftyOpenAutoTradeOptionSide NiftyOpenAutoTradeOptionSide { get; set; }
@@ -90,7 +93,7 @@ public class User
     public int NiftyOpenAutoTradeMaxLots { get; set; } = 10;
 
     /// <summary>
-    /// Preferred NIFTY option expiry calendar date (UTC date of Kite expiry). Null = nearest future expiry at fire time.
+    /// Preferred option expiry calendar date (UTC date of Kite expiry). Null = nearest future expiry at fire time.
     /// </summary>
     public DateOnly? NiftyOpenAutoTradeExpiry { get; set; }
 
@@ -105,6 +108,14 @@ public class User
 
     /// <summary>When true, place the +ve (target) GTT leg.</summary>
     public bool NiftyOpenAutoTradeTargetEnabled { get; set; } = true;
+
+    /// <summary>
+    /// When true, −ve stop uses <see cref="NiftyOpenAutoTradeTrailPoints"/> and the host ratchets the GTT SL as premium peaks rise.
+    /// </summary>
+    public bool NiftyOpenAutoTradeTrailEnabled { get; set; }
+
+    /// <summary>Trailing stop distance in option premium points below the running peak (and initial entry).</summary>
+    public decimal NiftyOpenAutoTradeTrailPoints { get; set; } = 5m;
 
     /// <summary>IST session calendar date of the last open-auto attempt (idempotency; null = never).</summary>
     public DateOnly? NiftyOpenAutoTradeLastSessionDateIst { get; set; }

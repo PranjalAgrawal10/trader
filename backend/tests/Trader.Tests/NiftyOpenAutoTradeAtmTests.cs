@@ -55,6 +55,36 @@ public sealed class NiftyOpenAutoTradeAtmTests
     }
 
     [Fact]
+    public void FilterOptionsForUnderlying_BankNifty_KeepsBankOnly()
+    {
+        var expiry = new DateTimeOffset(2026, 7, 16, 0, 0, 0, TimeSpan.Zero).ToString("O");
+        var rows = new List<KiteInstrumentListItemDto>
+        {
+            Row("1", "NIFTY25JUL24600CE", 24600m, expiry, "CE"),
+            Row("2", "BANKNIFTY25JUL52000CE", 52000m, expiry, "CE", name: "BANKNIFTY"),
+        };
+
+        var filtered = NiftyOpenAutoTradeAtm.FilterOptionsForUnderlying(
+            rows,
+            OpeningAtmUnderlyings.Resolve("banknifty"));
+        Assert.Single(filtered);
+        Assert.Equal("BANKNIFTY25JUL52000CE", filtered[0].Tradingsymbol);
+    }
+
+    [Fact]
+    public void ChooseSpotRow_PrefersExactSpotSymbol()
+    {
+        var rows = new List<KiteInstrumentListItemDto>
+        {
+            new("1", "NIFTY BANK", "NSE", "NIFTY BANK", "EQ", "NSE", null, null, 1),
+            new("2", "BANKNIFTY", "NSE", "BANKNIFTY", "EQ", "NSE", null, null, 1),
+        };
+        var pick = NiftyOpenAutoTradeAtm.ChooseSpotRow(rows, OpeningAtmUnderlyings.Resolve("banknifty"));
+        Assert.NotNull(pick);
+        Assert.Equal("NIFTY BANK", pick!.Tradingsymbol);
+    }
+
+    [Fact]
     public void FireWindow_IsInclusiveAtOpen()
     {
         var opts = new NiftyOpenAutoTradeOptions

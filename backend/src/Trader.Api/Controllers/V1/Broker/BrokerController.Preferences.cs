@@ -342,7 +342,7 @@ public sealed partial class BrokerController
         }
     }
 
-    /// <summary>Live NIFTY ATM MIS BUY at ~09:15 IST with 10% GTT (not demo/paper).</summary>
+    /// <summary>Opening ATM: live index ATM MIS BUY at ~09:15 IST with ± GTT (not demo/paper).</summary>
     [Authorize]
     [HttpGet("kite/nifty-open-auto-trade")]
     public async Task<ActionResult<NiftyOpenAutoTradeSettingsDto>> GetNiftyOpenAutoTrade(CancellationToken ct)
@@ -368,7 +368,7 @@ public sealed partial class BrokerController
         {
             return Problem(
                 title: "Invalid body",
-                detail: "Send JSON { \"enabled\": bool, \"optionSide\": \"CE\"|\"PE\", \"maxLots\": 1–10, \"expiry\": \"yyyy-MM-dd\"|null, \"stopLossPoints\": number, \"targetPoints\": number, \"stopLossEnabled\": bool, \"targetEnabled\": bool }.",
+                detail: "Send JSON { \"enabled\": bool, \"underlying\": \"nifty\"|\"banknifty\"|…, \"optionSide\": \"CE\"|\"PE\", \"maxLots\": 1–10, \"expiry\": \"yyyy-MM-dd\"|null, \"stopLossPoints\": number, \"targetPoints\": number, \"stopLossEnabled\": bool, \"targetEnabled\": bool, \"trailEnabled\": bool, \"trailPoints\": number }.",
                 statusCode: StatusCodes.Status400BadRequest);
         }
 

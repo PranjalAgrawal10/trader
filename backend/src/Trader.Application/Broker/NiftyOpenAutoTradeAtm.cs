@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Trader.Application.Broker;
 
-/// <summary>Pure helpers for NIFTY spot/option ATM selection and lot sizing.</summary>
+/// <summary>Pure helpers for Opening ATM spot/option selection and lot sizing.</summary>
 public static class NiftyOpenAutoTradeAtm
 {
     public sealed record OptionCandidate(
@@ -14,19 +14,26 @@ public static class NiftyOpenAutoTradeAtm
         int LotSize,
         string InstrumentType);
 
-    public static KiteInstrumentListItemDto? ChooseNiftySpotRow(
+    public static KiteInstrumentListItemDto? ChooseSpotRow(
         IReadOnlyList<KiteInstrumentListItemDto> rows,
-        string preferredSpotExchange)
+        OpeningAtmUnderlyings.Spec underlying)
     {
         static string Norm(string? s) => (s ?? string.Empty).Replace(" ", "", StringComparison.Ordinal).ToUpperInvariant();
 
-        const string target = "NIFTY50";
+        var target = underlying.SpotSymbolNorm.ToUpperInvariant();
         var exact = rows.FirstOrDefault(r => Norm(r.Tradingsymbol) == target)
             ?? rows.FirstOrDefault(r => Norm(r.Name) == target);
         if (exact is not null)
             return exact;
 
-        var preferred = preferredSpotExchange.Trim().ToUpperInvariant();
+        // Spot indices sometimes use the option include token (e.g. BANKNIFTY).
+        var include = underlying.OptionIncludeNorm.ToUpperInvariant();
+        var byInclude = rows.FirstOrDefault(r => Norm(r.Tradingsymbol) == include)
+            ?? rows.FirstOrDefault(r => Norm(r.Name) == include);
+        if (byInclude is not null)
+            return byInclude;
+
+        var preferred = underlying.PreferredSpotExchange.Trim().ToUpperInvariant();
         if (preferred.Length > 0)
         {
             var byEx = rows.FirstOrDefault(r =>
@@ -38,9 +45,21 @@ public static class NiftyOpenAutoTradeAtm
         return rows.FirstOrDefault();
     }
 
-    public static IReadOnlyList<KiteInstrumentListItemDto> FilterNiftyOptions(
-        IReadOnlyList<KiteInstrumentListItemDto> rows)
+    /// <summary>Legacy NIFTY-only spot pick.</summary>
+    public static KiteInstrumentListItemDto? ChooseNiftySpotRow(
+        IReadOnlyList<KiteInstrumentListItemDto> rows,
+        string preferredSpotExchange) =>
+        ChooseSpotRow(rows, OpeningAtmUnderlyings.Resolve("nifty") with { PreferredSpotExchange = preferredSpotExchange });
+
+    public static IReadOnlyList<KiteInstrumentListItemDto> FilterOptionsForUnderlying(
+        IReadOnlyList<KiteInstrumentListItemDto> rows,
+        OpeningAtmUnderlyings.Spec underlying)
     {
+        var include = underlying.OptionIncludeNorm.ToUpperInvariant();
+        var excludes = underlying.OptionExcludeNorms
+            .Select(x => x.ToUpperInvariant())
+            .ToArray();
+
         return rows
             .Where(r =>
             {
@@ -54,15 +73,21 @@ public static class NiftyOpenAutoTradeAtm
                 if (!isCePe)
                     return false;
                 var hay = (ts + " " + (r.Name ?? string.Empty)).Replace(" ", "", StringComparison.Ordinal).ToUpperInvariant();
-                // Exclude BANKNIFTY / FINNIFTY / MIDCPNIFTY while keeping NIFTY.
-                if (hay.Contains("BANKNIFTY", StringComparison.Ordinal)
-                    || hay.Contains("FINNIFTY", StringComparison.Ordinal)
-                    || hay.Contains("MIDCPNIFTY", StringComparison.Ordinal))
-                    return false;
-                return hay.Contains("NIFTY", StringComparison.Ordinal);
+                foreach (var ex in excludes)
+                {
+                    if (hay.Contains(ex, StringComparison.Ordinal))
+                        return false;
+                }
+
+                return hay.Contains(include, StringComparison.Ordinal);
             })
             .ToList();
     }
+
+    /// <summary>Legacy NIFTY-only option filter.</summary>
+    public static IReadOnlyList<KiteInstrumentListItemDto> FilterNiftyOptions(
+        IReadOnlyList<KiteInstrumentListItemDto> rows) =>
+        FilterOptionsForUnderlying(rows, OpeningAtmUnderlyings.Resolve("nifty"));
 
     public static DateTimeOffset? PickNearestFutureExpiryUtc(
         IReadOnlyList<KiteInstrumentListItemDto> options,

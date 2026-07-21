@@ -1,6 +1,6 @@
 namespace Trader.Application.Configuration;
 
-/// <summary>Host settings for NIFTY Opening ATM (live MIS BUY at 09:15 IST with ± GTT exits).</summary>
+/// <summary>Host settings for Opening ATM (live MIS BUY at 09:15 IST with ± GTT exits; underlying is per-user).</summary>
 public sealed class NiftyOpenAutoTradeOptions
 {
     public const string SectionName = "NiftyOpenAutoTrade";
@@ -44,11 +44,14 @@ public sealed class NiftyOpenAutoTradeOptions
 
     public string Product { get; set; } = "MIS";
 
+    /// <summary>Legacy default spot query when underlying catalog is unavailable (prefer per-user underlying).</summary>
     public string SpotSearchQuery { get; set; } = "NIFTY 50";
 
+    /// <summary>Legacy default F&amp;O query when underlying catalog is unavailable (prefer per-user underlying).</summary>
     public string OptionSearchQuery { get; set; } = "NIFTY";
 
+    /// <summary>Legacy preferred spot exchange override for NIFTY only.</summary>
     public string PreferredSpotExchange { get; set; } = "NSE";
 
-    public string OrderTag { get; set; } = "nifty-opening-atm";
+    public string OrderTag { get; set; } = "opening-atm";
 }
