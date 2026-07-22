@@ -115,6 +115,15 @@ public sealed class NiftyOpenAutoTradeAtmTests
     }
 
     [Fact]
+    public void Gtt_PricesFromPercent_MatchEntryPremium()
+    {
+        Assert.Equal(95m, NiftyOpenAutoTradeTrail.InitialStopPriceFromPercent(100m, 5m, 0.05m));
+        Assert.Equal(110m, NiftyOpenAutoTradeTrail.InitialTargetPriceFromPercent(100m, 10m, 0.05m));
+        Assert.Equal(5m, NiftyOpenAutoTradeTrail.ClampGttPercent(0m));
+        Assert.Equal(50m, NiftyOpenAutoTradeTrail.ClampGttPercent(99m));
+    }
+
+    [Fact]
     public void Trail_RaisesStop_WhenPeakAdvances()
     {
         var (peak1, stop1) = NiftyOpenAutoTradeTrail.ComputeTrailUpdate(

@@ -12,8 +12,8 @@ public sealed record NiftyOpenAutoTradeSettingsDto(
     int MaxLots,
     /// <summary>Preferred expiry (<c>yyyy-MM-dd</c>); null means nearest future at fire/preview time.</summary>
     string? Expiry,
-    decimal StopLossPoints,
-    decimal TargetPoints,
+    decimal StopLossPercent,
+    decimal TargetPercent,
     bool StopLossEnabled,
     bool TargetEnabled,
     bool TrailEnabled,
@@ -41,20 +41,20 @@ public sealed class NiftyOpenAutoTradeSettingsPutDto
     /// </summary>
     public string? Expiry { get; set; }
 
-    /// <summary>−ve GTT stop-loss points below entry premium (ignored for SL distance when trail is on).</summary>
-    public decimal StopLossPoints { get; set; } = 5m;
+    /// <summary>−ve GTT stop-loss percent of entry premium (e.g. 5 = 5%).</summary>
+    public decimal StopLossPercent { get; set; } = 5m;
 
-    /// <summary>+ve GTT target points above entry premium.</summary>
-    public decimal TargetPoints { get; set; } = 5m;
+    /// <summary>+ve GTT target percent of entry premium (e.g. 5 = 5%).</summary>
+    public decimal TargetPercent { get; set; } = 5m;
 
     public bool StopLossEnabled { get; set; } = true;
 
     public bool TargetEnabled { get; set; } = true;
 
-    /// <summary>When true, SL uses <see cref="TrailPoints"/> and the host trails the GTT stop.</summary>
+    /// <summary>Ignored — Kite Connect has no native GTT TSL; Opening ATM uses fixed OCO −ve/+ve.</summary>
     public bool TrailEnabled { get; set; }
 
-    /// <summary>Trail distance in premium points below the running peak (and initial entry).</summary>
+    /// <summary>Ignored — retained for API compatibility.</summary>
     public decimal TrailPoints { get; set; } = 5m;
 }
 

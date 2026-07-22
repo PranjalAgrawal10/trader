@@ -159,8 +159,8 @@ interface NiftyOpenAutoTradeSettingsResponse {
   optionSide: string
   maxLots: number
   expiry: string | null
-  stopLossPoints: number
-  targetPoints: number
+  stopLossPercent: number
+  targetPercent: number
   stopLossEnabled: boolean
   targetEnabled: boolean
   trailEnabled: boolean
@@ -451,12 +451,10 @@ export function ScalperPage() {
   const [niftyOpenMaxLots, setNiftyOpenMaxLots] = useState(10)
   const [niftyOpenExpiry, setNiftyOpenExpiry] = useState('')
   const [niftyOpenAvailableExpiries, setNiftyOpenAvailableExpiries] = useState<string[]>([])
-  const [niftyOpenStopLossPoints, setNiftyOpenStopLossPoints] = useState('5')
-  const [niftyOpenTargetPoints, setNiftyOpenTargetPoints] = useState('5')
+  const [niftyOpenStopLossPercent, setNiftyOpenStopLossPercent] = useState('5')
+  const [niftyOpenTargetPercent, setNiftyOpenTargetPercent] = useState('5')
   const [niftyOpenStopLossEnabled, setNiftyOpenStopLossEnabled] = useState(true)
   const [niftyOpenTargetEnabled, setNiftyOpenTargetEnabled] = useState(true)
-  const [niftyOpenTrailEnabled, setNiftyOpenTrailEnabled] = useState(false)
-  const [niftyOpenTrailPoints, setNiftyOpenTrailPoints] = useState('5')
   const [niftyOpenHydrated, setNiftyOpenHydrated] = useState(false)
   const [niftyOpenSaving, setNiftyOpenSaving] = useState(false)
   const [niftyOpenPreview, setNiftyOpenPreview] = useState<NiftyOpenAutoTradePreviewResponse | null>(null)
@@ -588,24 +586,18 @@ export function ScalperPage() {
         const savedExpiry =
           typeof data.expiry === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.expiry) ? data.expiry : ''
         setNiftyOpenExpiry(savedExpiry)
-        setNiftyOpenStopLossPoints(
-          typeof data.stopLossPoints === 'number' && Number.isFinite(data.stopLossPoints) && data.stopLossPoints > 0
-            ? String(data.stopLossPoints)
+        setNiftyOpenStopLossPercent(
+          typeof data.stopLossPercent === 'number' && Number.isFinite(data.stopLossPercent) && data.stopLossPercent > 0
+            ? String(data.stopLossPercent)
             : '5',
         )
-        setNiftyOpenTargetPoints(
-          typeof data.targetPoints === 'number' && Number.isFinite(data.targetPoints) && data.targetPoints > 0
-            ? String(data.targetPoints)
+        setNiftyOpenTargetPercent(
+          typeof data.targetPercent === 'number' && Number.isFinite(data.targetPercent) && data.targetPercent > 0
+            ? String(data.targetPercent)
             : '5',
         )
         setNiftyOpenStopLossEnabled(data.stopLossEnabled !== false)
         setNiftyOpenTargetEnabled(data.targetEnabled !== false)
-        setNiftyOpenTrailEnabled(Boolean(data.trailEnabled))
-        setNiftyOpenTrailPoints(
-          typeof data.trailPoints === 'number' && Number.isFinite(data.trailPoints) && data.trailPoints > 0
-            ? String(data.trailPoints)
-            : '5',
-        )
         setNiftyOpenLastRun(data.lastRun ?? null)
       } catch {
         /* keep defaults */
@@ -620,8 +612,8 @@ export function ScalperPage() {
 
   useEffect(() => {
     if (!niftyOpenHydrated) return
-    if (!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled && !niftyOpenTrailEnabled) {
-      setNiftyOpenError('Enable at least one of −ve GTT, trail SL, or +ve GTT.')
+    if (!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled) {
+      setNiftyOpenError('Enable at least one of −ve GTT or +ve GTT.')
       return
     }
     const tid = window.setTimeout(() => {
@@ -633,12 +625,12 @@ export function ScalperPage() {
           optionSide: niftyOpenSide,
           maxLots: niftyOpenMaxLots,
           expiry: niftyOpenExpiry || null,
-          stopLossPoints: Number(niftyOpenStopLossPoints) || 5,
-          targetPoints: Number(niftyOpenTargetPoints) || 5,
-          stopLossEnabled: niftyOpenStopLossEnabled || niftyOpenTrailEnabled,
+          stopLossPercent: Number(niftyOpenStopLossPercent) || 5,
+          targetPercent: Number(niftyOpenTargetPercent) || 5,
+          stopLossEnabled: niftyOpenStopLossEnabled,
           targetEnabled: niftyOpenTargetEnabled,
-          trailEnabled: niftyOpenTrailEnabled,
-          trailPoints: Number(niftyOpenTrailPoints) || 5,
+          trailEnabled: false,
+          trailPoints: 5,
         })
         .then(async () => {
           setNiftyOpenError(null)
@@ -673,11 +665,9 @@ export function ScalperPage() {
     niftyOpenMaxLots,
     niftyOpenSide,
     niftyOpenStopLossEnabled,
-    niftyOpenStopLossPoints,
+    niftyOpenStopLossPercent,
     niftyOpenTargetEnabled,
-    niftyOpenTargetPoints,
-    niftyOpenTrailEnabled,
-    niftyOpenTrailPoints,
+    niftyOpenTargetPercent,
     niftyOpenUnderlying,
   ])
 
@@ -2183,8 +2173,8 @@ export function ScalperPage() {
                     {SCALPER_ATM_TARGETS.find((t) => t.key === niftyOpenUnderlying)?.label ?? 'index'}
                   </strong>{' '}
                   <strong>MIS</strong> ({niftyOpenSide === 'PE' ? 'PUT' : 'CALL'}) for the selected expiry —{' '}
-                  <strong>max lots</strong> your cash can fund (up to the lot cap). Set fixed <strong>−ve/+ve GTT</strong>{' '}
-                  and/or a <strong>trail SL</strong> (premium points). API must be running.
+                  <strong>max lots</strong> your cash can fund (up to the lot cap). Exits use one{' '}
+                  <strong>Kite OCO GTT</strong> (−ve / +ve as % of premium in one trigger). API must be running.
                 </p>
                 <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
                   <Form.Check
@@ -2270,83 +2260,56 @@ export function ScalperPage() {
                   {niftyOpenSaving ? <span className="small text-muted">Saving…</span> : null}
                 </div>
                 <div className="border-top pt-2 mb-2">
-                  <div className="small fw-semibold mb-2">Your GTT exits (premium points from entry)</div>
+                  <div className="small fw-semibold mb-2">Kite OCO GTT (% of entry premium)</div>
                   <div className="d-flex flex-wrap align-items-end gap-3">
                     <div>
                       <Form.Check
                         type="switch"
                         id="opening-atm-sl"
-                        label="−ve GTT (fixed stop)"
-                        checked={niftyOpenStopLossEnabled && !niftyOpenTrailEnabled}
-                        disabled={niftyOpenTrailEnabled}
+                        label="−ve GTT (stop-loss %)"
+                        checked={niftyOpenStopLossEnabled}
                         onChange={(e) => setNiftyOpenStopLossEnabled(e.target.checked)}
                       />
                       <Form.Control
                         size="sm"
                         type="number"
-                        min={0.05}
-                        step={0.05}
+                        min={0.5}
+                        max={50}
+                        step={0.5}
                         style={{ width: '6.5rem' }}
-                        value={niftyOpenStopLossPoints}
-                        disabled={niftyOpenTrailEnabled || !niftyOpenStopLossEnabled}
-                        onChange={(e) => setNiftyOpenStopLossPoints(e.target.value)}
-                        aria-label="Fixed negative GTT stop-loss points"
-                      />
-                    </div>
-                    <div>
-                      <Form.Check
-                        type="switch"
-                        id="opening-atm-trail"
-                        label="Trail SL"
-                        checked={niftyOpenTrailEnabled}
-                        onChange={(e) => {
-                          const on = e.target.checked
-                          setNiftyOpenTrailEnabled(on)
-                          if (on) setNiftyOpenStopLossEnabled(true)
-                        }}
-                      />
-                      <Form.Control
-                        size="sm"
-                        type="number"
-                        min={0.05}
-                        step={0.05}
-                        style={{ width: '6.5rem' }}
-                        value={niftyOpenTrailPoints}
-                        disabled={!niftyOpenTrailEnabled}
-                        onChange={(e) => setNiftyOpenTrailPoints(e.target.value)}
-                        aria-label="Trailing stop-loss points below peak"
-                        title="Stop starts at entry − points, then rises with new premium highs"
+                        value={niftyOpenStopLossPercent}
+                        disabled={!niftyOpenStopLossEnabled}
+                        onChange={(e) => setNiftyOpenStopLossPercent(e.target.value)}
+                        aria-label="Negative GTT stop-loss percent"
                       />
                     </div>
                     <div>
                       <Form.Check
                         type="switch"
                         id="opening-atm-tp"
-                        label="+ve GTT (target)"
+                        label="+ve GTT (target %)"
                         checked={niftyOpenTargetEnabled}
                         onChange={(e) => setNiftyOpenTargetEnabled(e.target.checked)}
                       />
                       <Form.Control
                         size="sm"
                         type="number"
-                        min={0.05}
-                        step={0.05}
+                        min={0.5}
+                        max={50}
+                        step={0.5}
                         style={{ width: '6.5rem' }}
-                        value={niftyOpenTargetPoints}
+                        value={niftyOpenTargetPercent}
                         disabled={!niftyOpenTargetEnabled}
-                        onChange={(e) => setNiftyOpenTargetPoints(e.target.value)}
-                        aria-label="Your positive GTT target points"
+                        onChange={(e) => setNiftyOpenTargetPercent(e.target.value)}
+                        aria-label="Positive GTT target percent"
                       />
                     </div>
                   </div>
-                  {niftyOpenTrailEnabled ? (
-                    <div className="small text-muted mt-1">
-                      Trail replaces fixed −ve: SL stays {niftyOpenTrailPoints || '5'} pts below the premium peak until
-                      flat or ~15:25 IST.
-                    </div>
-                  ) : null}
-                  {!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled && !niftyOpenTrailEnabled ? (
-                    <div className="small text-danger mt-1">Enable at least one of −ve, trail SL, or +ve GTT.</div>
+                  <div className="small text-muted mt-1">
+                    Default 5% / 5%. When both are on, Kite places one OCO GTT — either leg fills and cancels the other.
+                  </div>
+                  {!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled ? (
+                    <div className="small text-danger mt-1">Enable at least one of −ve or +ve GTT.</div>
                   ) : null}
                 </div>
                 {niftyOpenError ? (
@@ -2364,12 +2327,16 @@ export function ScalperPage() {
                         {niftyOpenPreview.estimatedPremiumInr.toFixed(0)} · cash ₹
                         {(niftyOpenPreview.availableBalanceInr ?? 0).toFixed(0)}
                         {niftyOpenPreview.stopLossPrice != null && niftyOpenPreview.stopLossPrice > 0
-                          ? niftyOpenPreview.trailEnabled
-                            ? ` · trail SL ${niftyOpenPreview.stopLossPrice.toFixed(2)} (−${niftyOpenPreview.trailPoints ?? '?'} pts)`
-                            : ` · −ve ${niftyOpenPreview.stopLossPrice.toFixed(2)}`
+                          ? ` · −ve ${niftyOpenPreview.stopLossPrice.toFixed(2)}`
                           : ''}
                         {niftyOpenPreview.targetPrice != null && niftyOpenPreview.targetPrice > 0
                           ? ` · +ve ${niftyOpenPreview.targetPrice.toFixed(2)}`
+                          : ''}
+                        {niftyOpenPreview.stopLossPrice != null &&
+                        niftyOpenPreview.stopLossPrice > 0 &&
+                        niftyOpenPreview.targetPrice != null &&
+                        niftyOpenPreview.targetPrice > 0
+                          ? ' · OCO'
                           : ''}
                       </span>
                     ) : (

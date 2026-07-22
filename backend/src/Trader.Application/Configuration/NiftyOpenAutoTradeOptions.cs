@@ -21,10 +21,10 @@ public sealed class NiftyOpenAutoTradeOptions
 
     public bool PauseOnWeekends { get; set; } = true;
 
-    /// <summary>Default −ve GTT stop-loss points when the user has not saved a preference.</summary>
+    /// <summary>Default −ve GTT stop-loss percent of entry premium when the user has not saved a preference.</summary>
     public decimal DefaultStopLossPoints { get; set; } = 5m;
 
-    /// <summary>Default +ve GTT target points when the user has not saved a preference.</summary>
+    /// <summary>Default +ve GTT target percent of entry premium when the user has not saved a preference.</summary>
     public decimal DefaultTargetPoints { get; set; } = 5m;
 
     /// <summary>Legacy trail poll end (still used to clear leftover TrailActive rows).</summary>

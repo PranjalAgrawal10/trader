@@ -97,10 +97,10 @@ public class User
     /// </summary>
     public DateOnly? NiftyOpenAutoTradeExpiry { get; set; }
 
-    /// <summary>−ve GTT: stop-loss distance in option premium points below entry.</summary>
+    /// <summary>−ve GTT stop-loss as percent of entry premium (stored column name is historical).</summary>
     public decimal NiftyOpenAutoTradeStopLossPoints { get; set; } = 5m;
 
-    /// <summary>+ve GTT: target distance in option premium points above entry.</summary>
+    /// <summary>+ve GTT target as percent of entry premium (stored column name is historical).</summary>
     public decimal NiftyOpenAutoTradeTargetPoints { get; set; } = 5m;
 
     /// <summary>When true, place the −ve (stop-loss) GTT leg.</summary>

@@ -132,27 +132,21 @@ public sealed class NiftyOpenAutoTradeService
         {
             user.NiftyOpenAutoTradeExpiry = ParsePreferredExpiry(body.Expiry);
         }
-        user.NiftyOpenAutoTradeStopLossPoints = NiftyOpenAutoTradeTrail.ClampGttPoints(
-            body.StopLossPoints > 0 ? body.StopLossPoints : opts.DefaultStopLossPoints);
-        user.NiftyOpenAutoTradeTargetPoints = NiftyOpenAutoTradeTrail.ClampGttPoints(
-            body.TargetPoints > 0 ? body.TargetPoints : opts.DefaultTargetPoints);
+        user.NiftyOpenAutoTradeStopLossPoints = NiftyOpenAutoTradeTrail.ClampGttPercent(
+            body.StopLossPercent > 0 ? body.StopLossPercent : opts.DefaultStopLossPoints);
+        user.NiftyOpenAutoTradeTargetPoints = NiftyOpenAutoTradeTrail.ClampGttPercent(
+            body.TargetPercent > 0 ? body.TargetPercent : opts.DefaultTargetPoints);
         user.NiftyOpenAutoTradeStopLossEnabled = body.StopLossEnabled;
         user.NiftyOpenAutoTradeTargetEnabled = body.TargetEnabled;
-        user.NiftyOpenAutoTradeTrailEnabled = body.TrailEnabled;
+        // Native Kite GTT TSL is not available on Connect API — keep prefs but never arm app-side trail.
+        user.NiftyOpenAutoTradeTrailEnabled = false;
         user.NiftyOpenAutoTradeTrailPoints = NiftyOpenAutoTradeTrail.ClampTrailPoints(
             body.TrailPoints > 0 ? body.TrailPoints : opts.DefaultStopLossPoints);
-        if (user.NiftyOpenAutoTradeTrailEnabled)
-        {
-            // Trail owns the stop-loss leg; keep −ve enabled so previews/settings stay coherent.
-            user.NiftyOpenAutoTradeStopLossEnabled = true;
-        }
 
-        if (!user.NiftyOpenAutoTradeStopLossEnabled
-            && !user.NiftyOpenAutoTradeTargetEnabled
-            && !user.NiftyOpenAutoTradeTrailEnabled)
+        if (!user.NiftyOpenAutoTradeStopLossEnabled && !user.NiftyOpenAutoTradeTargetEnabled)
         {
             throw new InvalidOperationException(
-                "Enable at least one of −ve GTT (stop-loss), trail SL, or +ve GTT (target).");
+                "Enable at least one of −ve GTT (stop-loss) or +ve GTT (target).");
         }
 
         await _users.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -207,23 +201,17 @@ public sealed class NiftyOpenAutoTradeService
             user.NiftyOpenAutoTradeMaxLots > 0 ? user.NiftyOpenAutoTradeMaxLots : opts.DefaultMaxLots,
             1,
             Math.Max(1, opts.AbsoluteMaxLots));
-        var trailPoints = NiftyOpenAutoTradeTrail.ClampGttPoints(
+        var stopLossPercent = NiftyOpenAutoTradeTrail.ClampGttPercent(
             user.NiftyOpenAutoTradeStopLossPoints > 0
                 ? user.NiftyOpenAutoTradeStopLossPoints
                 : opts.DefaultStopLossPoints);
-        var targetPoints = NiftyOpenAutoTradeTrail.ClampGttPoints(
+        var targetPercent = NiftyOpenAutoTradeTrail.ClampGttPercent(
             user.NiftyOpenAutoTradeTargetPoints > 0
                 ? user.NiftyOpenAutoTradeTargetPoints
                 : opts.DefaultTargetPoints);
-        var trailEnabled = user.NiftyOpenAutoTradeTrailEnabled;
-        var userTrailPoints = NiftyOpenAutoTradeTrail.ClampTrailPoints(
-            user.NiftyOpenAutoTradeTrailPoints > 0
-                ? user.NiftyOpenAutoTradeTrailPoints
-                : opts.DefaultStopLossPoints);
-        var stopLossEnabled = user.NiftyOpenAutoTradeStopLossEnabled || trailEnabled;
+        // Kite Connect does not expose native GTT TSL; use fixed −ve/+ve % as one OCO (two-leg) GTT.
+        var stopLossEnabled = user.NiftyOpenAutoTradeStopLossEnabled;
         var targetEnabled = user.NiftyOpenAutoTradeTargetEnabled;
-        // When trailing, SL distance is trail points (not fixed −ve).
-        var stopDistancePoints = trailEnabled ? userTrailPoints : trailPoints;
         if (!stopLossEnabled && !targetEnabled)
         {
             return await FinishAsync(
@@ -231,7 +219,7 @@ public sealed class NiftyOpenAutoTradeService
                 dryRun,
                 claimedSessionDate,
                 false,
-                "Configure at least one of −ve GTT, trail SL, or +ve GTT on Opening ATM.",
+                "Configure at least one of −ve GTT or +ve GTT on Opening ATM.",
                 underlying.Key,
                 side,
                 maxLots,
@@ -362,10 +350,10 @@ public sealed class NiftyOpenAutoTradeService
             var qty = checked(chosenLots * chosen.LotSize);
             var premium = chosenLtp * qty;
             var seedStop = stopLossEnabled
-                ? NiftyOpenAutoTradeTrail.InitialStopPrice(chosenLtp, stopDistancePoints, 0.05m)
+                ? NiftyOpenAutoTradeTrail.InitialStopPriceFromPercent(chosenLtp, stopLossPercent, 0.05m)
                 : (decimal?)null;
             var seedTarget = targetEnabled
-                ? NiftyOpenAutoTradeTrail.InitialTargetPrice(chosenLtp, targetPoints, 0.05m)
+                ? NiftyOpenAutoTradeTrail.InitialTargetPriceFromPercent(chosenLtp, targetPercent, 0.05m)
                 : (decimal?)null;
             var preview = new NiftyOpenAutoTradePreviewDto(
                 CanTrade: true,
@@ -385,8 +373,8 @@ public sealed class NiftyOpenAutoTradeService
                 MaxLots: maxLots,
                 StopLossPrice: seedStop,
                 TargetPrice: seedTarget,
-                TrailEnabled: trailEnabled,
-                TrailPoints: trailEnabled ? userTrailPoints : null);
+                TrailEnabled: false,
+                TrailPoints: null);
 
             if (dryRun)
                 return preview;
@@ -396,7 +384,6 @@ public sealed class NiftyOpenAutoTradeService
             string message;
             var runStatus = "failed";
             var product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant();
-            var armTrail = false;
 
             try
             {
@@ -419,101 +406,48 @@ public sealed class NiftyOpenAutoTradeService
 
                 try
                 {
-                    // Trailing modify uses a single-leg SL GTT. When trail + target, place SL and TP separately.
-                    if (trailEnabled && stopLossEnabled && targetEnabled)
-                    {
-                        var slGtt = await _broker.CreateKiteGttOcoAsync(
-                            userId,
-                            new KiteGttCreateRequestDto
-                            {
-                                Exchange = chosen.Exchange,
-                                Tradingsymbol = chosen.Tradingsymbol,
-                                EntryTransactionType = "BUY",
-                                Quantity = qty,
-                                Product = product,
-                                ReferencePrice = chosenLtp,
-                                LastPrice = chosenLtp,
-                                StopLossPrice = seedStop,
-                                StopLossEnabled = true,
-                                ProfitEnabled = false,
-                                Tag = opts.OrderTag,
-                            },
-                            ct).ConfigureAwait(false);
-                        gttId = slGtt.TriggerId;
-
-                        var tpGtt = await _broker.CreateKiteGttOcoAsync(
-                            userId,
-                            new KiteGttCreateRequestDto
-                            {
-                                Exchange = chosen.Exchange,
-                                Tradingsymbol = chosen.Tradingsymbol,
-                                EntryTransactionType = "BUY",
-                                Quantity = qty,
-                                Product = product,
-                                ReferencePrice = chosenLtp,
-                                LastPrice = chosenLtp,
-                                TriggerPrice = seedTarget,
-                                StopLossEnabled = false,
-                                ProfitEnabled = true,
-                                Tag = opts.OrderTag,
-                            },
-                            ct).ConfigureAwait(false);
-
-                        message =
-                            $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol} (max affordable ≤{maxLots}); " +
-                            $"trail SL {slGtt.StopLossPrice:0.##} (−{userTrailPoints:0.##} pts); " +
-                            $"+ve GTT {tpGtt.TargetPrice:0.##} (+{targetPoints:0.##} pts).";
-                        armTrail = !string.IsNullOrWhiteSpace(gttId) && seedStop is > 0;
-                        runStatus = "success";
-                    }
-                    else
-                    {
-                        var gtt = await _broker.CreateKiteGttOcoAsync(
-                            userId,
-                            new KiteGttCreateRequestDto
-                            {
-                                Exchange = chosen.Exchange,
-                                Tradingsymbol = chosen.Tradingsymbol,
-                                EntryTransactionType = "BUY",
-                                Quantity = qty,
-                                Product = product,
-                                ReferencePrice = chosenLtp,
-                                LastPrice = chosenLtp,
-                                StopLossPrice = seedStop,
-                                TriggerPrice = seedTarget,
-                                StopLossEnabled = stopLossEnabled,
-                                ProfitEnabled = targetEnabled,
-                                Tag = opts.OrderTag,
-                            },
-                            ct).ConfigureAwait(false);
-                        gttId = gtt.TriggerId;
-                        var slPart = stopLossEnabled
-                            ? trailEnabled
-                                ? $"trail SL {gtt.StopLossPrice:0.##} (−{userTrailPoints:0.##} pts)"
-                                : $"−ve GTT {gtt.StopLossPrice:0.##} (−{stopDistancePoints:0.##} pts)"
-                            : "−ve GTT off";
-                        var tpPart = targetEnabled
-                            ? $"+ve GTT {gtt.TargetPrice:0.##} (+{targetPoints:0.##} pts)"
-                            : "+ve GTT off";
-                        message =
-                            $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol} (max affordable ≤{maxLots}); {slPart}; {tpPart}.";
-                        armTrail = trailEnabled && stopLossEnabled && !string.IsNullOrWhiteSpace(gttId) && seedStop is > 0;
-                        runStatus = "success";
-                    }
+                    // One Kite GTT: two-leg OCO when both legs on — prices from % of entry premium.
+                    var gtt = await _broker.CreateKiteGttOcoAsync(
+                        userId,
+                        new KiteGttCreateRequestDto
+                        {
+                            Exchange = chosen.Exchange,
+                            Tradingsymbol = chosen.Tradingsymbol,
+                            EntryTransactionType = "BUY",
+                            Quantity = qty,
+                            Product = product,
+                            ReferencePrice = chosenLtp,
+                            LastPrice = chosenLtp,
+                            StopLossPercent = stopLossPercent,
+                            TriggerPercent = targetPercent,
+                            StopLossEnabled = stopLossEnabled,
+                            ProfitEnabled = targetEnabled,
+                            Tag = opts.OrderTag,
+                        },
+                        ct).ConfigureAwait(false);
+                    gttId = gtt.TriggerId;
+                    var slPart = stopLossEnabled
+                        ? $"−ve {gtt.StopLossPrice:0.##} (−{stopLossPercent:0.##}%)"
+                        : "−ve off";
+                    var tpPart = targetEnabled
+                        ? $"+ve {gtt.TargetPrice:0.##} (+{targetPercent:0.##}%)"
+                        : "+ve off";
+                    var gttKind = stopLossEnabled && targetEnabled ? "Kite OCO GTT" : "Kite GTT";
+                    message =
+                        $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol} (max affordable ≤{maxLots}); {gttKind} {slPart}; {tpPart}.";
+                    runStatus = "success";
                 }
                 catch (Exception gttEx)
                 {
                     _logger.LogWarning(gttEx, "Opening ATM order placed but GTT failed for {UserId}", userId);
                     message = $"Order placed ({orderId}) but GTT failed: {gttEx.Message}";
                     runStatus = "success";
-                    armTrail = false;
                 }
             }
             catch (Exception placeEx)
             {
                 message = placeEx.Message;
                 runStatus = "failed";
-                armTrail = false;
             }
 
             await PersistRunAsync(
@@ -531,10 +465,10 @@ public sealed class NiftyOpenAutoTradeService
                 available,
                 orderId,
                 gttId,
-                trailActive: armTrail,
-                trailPeak: armTrail ? chosenLtp : null,
-                trailStop: armTrail ? seedStop : null,
-                trailPoints: armTrail ? userTrailPoints : null,
+                trailActive: false,
+                trailPeak: null,
+                trailStop: null,
+                trailPoints: null,
                 message,
                 ct).ConfigureAwait(false);
 
@@ -870,7 +804,7 @@ public sealed class NiftyOpenAutoTradeService
             user.NiftyOpenAutoTradeTargetPoints > 0 ? user.NiftyOpenAutoTradeTargetPoints : 5m,
             user.NiftyOpenAutoTradeStopLossEnabled,
             user.NiftyOpenAutoTradeTargetEnabled,
-            user.NiftyOpenAutoTradeTrailEnabled,
+            false,
             user.NiftyOpenAutoTradeTrailPoints > 0 ? user.NiftyOpenAutoTradeTrailPoints : 5m,
             user.NiftyOpenAutoTradeLastSessionDateIst,
             availableExpiries,
