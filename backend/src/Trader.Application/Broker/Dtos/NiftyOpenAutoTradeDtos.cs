@@ -51,10 +51,13 @@ public sealed class NiftyOpenAutoTradeSettingsPutDto
 
     public bool TargetEnabled { get; set; } = true;
 
-    /// <summary>Ignored — Kite Connect has no native GTT TSL; Opening ATM uses fixed OCO −ve/+ve.</summary>
+    /// <summary>
+    /// When true, place a single-leg SL GTT and trail it via PUT /gtt/triggers/:id (Kite Connect has no native TSL).
+    /// Distance is <see cref="TrailPoints"/> percent below the running premium peak.
+    /// </summary>
     public bool TrailEnabled { get; set; }
 
-    /// <summary>Ignored — retained for API compatibility.</summary>
+    /// <summary>Trail distance as percent of premium peak (e.g. 5 = keep SL 5% below peak).</summary>
     public decimal TrailPoints { get; set; } = 5m;
 }
 

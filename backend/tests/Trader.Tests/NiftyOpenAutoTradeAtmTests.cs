@@ -124,6 +124,28 @@ public sealed class NiftyOpenAutoTradeAtmTests
     }
 
     [Fact]
+    public void Gtt_TrailFromPercent_RaisesStopWithPeak()
+    {
+        var (peak1, stop1) = NiftyOpenAutoTradeTrail.ComputeTrailUpdateFromPercent(
+            peakPrice: 100m,
+            currentStop: 95m,
+            ltp: 110m,
+            trailPercent: 5m,
+            tickSize: 0.05m);
+        Assert.Equal(110m, peak1);
+        Assert.Equal(104.5m, stop1);
+
+        var (peak2, stop2) = NiftyOpenAutoTradeTrail.ComputeTrailUpdateFromPercent(
+            peakPrice: 110m,
+            currentStop: 104.5m,
+            ltp: 108m,
+            trailPercent: 5m,
+            tickSize: 0.05m);
+        Assert.Equal(110m, peak2);
+        Assert.Null(stop2);
+    }
+
+    [Fact]
     public void Trail_RaisesStop_WhenPeakAdvances()
     {
         var (peak1, stop1) = NiftyOpenAutoTradeTrail.ComputeTrailUpdate(

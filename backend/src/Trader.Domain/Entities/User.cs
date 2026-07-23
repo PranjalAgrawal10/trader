@@ -110,11 +110,11 @@ public class User
     public bool NiftyOpenAutoTradeTargetEnabled { get; set; } = true;
 
     /// <summary>
-    /// When true, −ve stop uses <see cref="NiftyOpenAutoTradeTrailPoints"/> and the host ratchets the GTT SL as premium peaks rise.
+    /// When true, stop uses <see cref="NiftyOpenAutoTradeTrailPoints"/> % below peak; host modifies the SL GTT via Kite PUT.
     /// </summary>
     public bool NiftyOpenAutoTradeTrailEnabled { get; set; }
 
-    /// <summary>Trailing stop distance in option premium points below the running peak (and initial entry).</summary>
+    /// <summary>Trail distance as percent of option premium peak (and initial entry).</summary>
     public decimal NiftyOpenAutoTradeTrailPoints { get; set; } = 5m;
 
     /// <summary>IST session calendar date of the last open-auto attempt (idempotency; null = never).</summary>

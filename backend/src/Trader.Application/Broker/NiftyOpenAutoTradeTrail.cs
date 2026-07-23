@@ -43,8 +43,24 @@ public static class NiftyOpenAutoTradeTrail
         InitialTargetPriceFromPercent(entryPrice, targetPoints, tickSize);
 
     /// <summary>
-    /// Raises the stop when LTP makes a new peak. Returns the new peak always; <paramref name="newStop"/>
-    /// is set only when the stop should move up.
+    /// Raises the stop when LTP makes a new peak, keeping SL at <paramref name="trailPercent"/> below peak.
+    /// </summary>
+    public static (decimal NewPeak, decimal? NewStop) ComputeTrailUpdateFromPercent(
+        decimal peakPrice,
+        decimal currentStop,
+        decimal ltp,
+        decimal trailPercent,
+        decimal tickSize)
+    {
+        var newPeak = ltp > peakPrice ? ltp : peakPrice;
+        var desired = InitialStopPriceFromPercent(newPeak, trailPercent, tickSize);
+        if (desired > currentStop)
+            return (newPeak, desired);
+        return (newPeak, null);
+    }
+
+    /// <summary>
+    /// Legacy point-gap trail. Prefer <see cref="ComputeTrailUpdateFromPercent"/> for Opening ATM.
     /// </summary>
     public static (decimal NewPeak, decimal? NewStop) ComputeTrailUpdate(
         decimal peakPrice,
