@@ -53,11 +53,15 @@ public sealed class NiftyOpenAutoTradeSettingsPutDto
 
     /// <summary>
     /// When true, place a single-leg SL GTT and trail it via PUT /gtt/triggers/:id (Kite Connect has no native TSL).
-    /// Distance is <see cref="TrailPoints"/> percent below the running premium peak.
+    /// Requires <see cref="StopLossEnabled"/>; trail distance is <see cref="StopLossPercent"/> below the premium peak
+    /// (server syncs <see cref="TrailPoints"/> from that value).
     /// </summary>
     public bool TrailEnabled { get; set; }
 
-    /// <summary>Trail distance as percent of premium peak (e.g. 5 = keep SL 5% below peak).</summary>
+    /// <summary>
+    /// Persisted trail gap (% of premium peak). Prefer sending <see cref="StopLossPercent"/>;
+    /// when trail is on the API overwrites this from SL %.
+    /// </summary>
     public decimal TrailPoints { get; set; } = 5m;
 }
 

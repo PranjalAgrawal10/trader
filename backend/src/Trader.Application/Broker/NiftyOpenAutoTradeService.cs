@@ -138,19 +138,23 @@ public sealed class NiftyOpenAutoTradeService
             body.TargetPercent > 0 ? body.TargetPercent : opts.DefaultTargetPoints);
         user.NiftyOpenAutoTradeStopLossEnabled = body.StopLossEnabled;
         user.NiftyOpenAutoTradeTargetEnabled = body.TargetEnabled;
-        // Kite Connect has no native GTT TSL — trail by modifying a single-leg SL GTT (documented PUT /gtt/triggers/:id).
+        // Trail requires −ve SL %; distance is the same stopLossPercent (synced into TrailPoints for the run).
         user.NiftyOpenAutoTradeTrailEnabled = body.TrailEnabled;
-        user.NiftyOpenAutoTradeTrailPoints = NiftyOpenAutoTradeTrail.ClampGttPercent(
-            body.TrailPoints > 0 ? body.TrailPoints : opts.DefaultStopLossPoints);
         if (user.NiftyOpenAutoTradeTrailEnabled)
+        {
             user.NiftyOpenAutoTradeStopLossEnabled = true;
+            user.NiftyOpenAutoTradeTrailPoints = user.NiftyOpenAutoTradeStopLossPoints;
+        }
+        else
+        {
+            // Keep stored trail gap aligned with last SL % so re-enabling trail stays consistent.
+            user.NiftyOpenAutoTradeTrailPoints = user.NiftyOpenAutoTradeStopLossPoints;
+        }
 
-        if (!user.NiftyOpenAutoTradeStopLossEnabled
-            && !user.NiftyOpenAutoTradeTargetEnabled
-            && !user.NiftyOpenAutoTradeTrailEnabled)
+        if (!user.NiftyOpenAutoTradeStopLossEnabled && !user.NiftyOpenAutoTradeTargetEnabled)
         {
             throw new InvalidOperationException(
-                "Enable at least one of −ve GTT (stop-loss), trail SL, or +ve GTT (target).");
+                "Enable at least one of −ve GTT (stop-loss) or +ve GTT (target).");
         }
 
         await _users.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -214,14 +218,26 @@ public sealed class NiftyOpenAutoTradeService
                 ? user.NiftyOpenAutoTradeTargetPoints
                 : opts.DefaultTargetPoints);
         var trailEnabled = user.NiftyOpenAutoTradeTrailEnabled;
-        var trailPercent = NiftyOpenAutoTradeTrail.ClampGttPercent(
-            user.NiftyOpenAutoTradeTrailPoints > 0
-                ? user.NiftyOpenAutoTradeTrailPoints
-                : opts.DefaultStopLossPoints);
-        // Trail owns the stop leg (single-leg GTT so PUT modify works per Kite Connect docs).
+        // Trail distance is the −ve SL % (same gap from peak as initial stop from entry).
+        var trailPercent = stopLossPercent;
         var stopLossEnabled = user.NiftyOpenAutoTradeStopLossEnabled || trailEnabled;
         var targetEnabled = user.NiftyOpenAutoTradeTargetEnabled;
-        var effectiveStopPercent = trailEnabled ? trailPercent : stopLossPercent;
+        var effectiveStopPercent = stopLossPercent;
+        if (trailEnabled && !stopLossEnabled)
+        {
+            return await FinishAsync(
+                userId,
+                dryRun,
+                claimedSessionDate,
+                false,
+                "Trail SL requires −ve GTT (SL %) to be enabled.",
+                underlying.Key,
+                side,
+                maxLots,
+                null,
+                ct).ConfigureAwait(false);
+        }
+
         if (!stopLossEnabled && !targetEnabled)
         {
             return await FinishAsync(
@@ -229,7 +245,7 @@ public sealed class NiftyOpenAutoTradeService
                 dryRun,
                 claimedSessionDate,
                 false,
-                "Configure at least one of −ve GTT, trail SL, or +ve GTT on Opening ATM.",
+                "Configure at least one of −ve GTT or +ve GTT on Opening ATM.",
                 underlying.Key,
                 side,
                 maxLots,
@@ -431,7 +447,7 @@ public sealed class NiftyOpenAutoTradeService
                                 Product = product,
                                 ReferencePrice = chosenLtp,
                                 LastPrice = chosenLtp,
-                                StopLossPercent = trailPercent,
+                                StopLossPercent = stopLossPercent,
                                 StopLossEnabled = true,
                                 ProfitEnabled = false,
                                 Tag = opts.OrderTag,

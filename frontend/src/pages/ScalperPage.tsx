@@ -456,7 +456,6 @@ export function ScalperPage() {
   const [niftyOpenStopLossEnabled, setNiftyOpenStopLossEnabled] = useState(true)
   const [niftyOpenTargetEnabled, setNiftyOpenTargetEnabled] = useState(true)
   const [niftyOpenTrailEnabled, setNiftyOpenTrailEnabled] = useState(false)
-  const [niftyOpenTrailPercent, setNiftyOpenTrailPercent] = useState('5')
   const [niftyOpenHydrated, setNiftyOpenHydrated] = useState(false)
   const [niftyOpenSaving, setNiftyOpenSaving] = useState(false)
   const [niftyOpenPreview, setNiftyOpenPreview] = useState<NiftyOpenAutoTradePreviewResponse | null>(null)
@@ -600,14 +599,9 @@ export function ScalperPage() {
         )
         const trailOn = Boolean(data.trailEnabled)
         setNiftyOpenTrailEnabled(trailOn)
-        // Fixed −ve and trail are mutually exclusive in the UI (server may keep stopLossEnabled true when trailing).
-        setNiftyOpenStopLossEnabled(trailOn ? false : data.stopLossEnabled !== false)
+        // Trail requires −ve SL %; server may force stopLossEnabled when trail is on.
+        setNiftyOpenStopLossEnabled(trailOn || data.stopLossEnabled !== false)
         setNiftyOpenTargetEnabled(data.targetEnabled !== false)
-        setNiftyOpenTrailPercent(
-          typeof data.trailPoints === 'number' && Number.isFinite(data.trailPoints) && data.trailPoints > 0
-            ? String(data.trailPoints)
-            : '5',
-        )
         setNiftyOpenLastRun(data.lastRun ?? null)
       } catch {
         /* keep defaults */
@@ -622,8 +616,10 @@ export function ScalperPage() {
 
   useEffect(() => {
     if (!niftyOpenHydrated) return
-    if (!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled && !niftyOpenTrailEnabled) {
-      setNiftyOpenError('Enable at least one of −ve GTT, trail SL, or +ve GTT.')
+    if (niftyOpenTrailEnabled) {
+      // −ve is forced on with trail; distance = stopLossPercent.
+    } else if (!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled) {
+      setNiftyOpenError('Enable at least one of −ve GTT or +ve GTT.')
       return
     }
     const tid = window.setTimeout(() => {
@@ -640,7 +636,8 @@ export function ScalperPage() {
           stopLossEnabled: niftyOpenStopLossEnabled || niftyOpenTrailEnabled,
           targetEnabled: niftyOpenTargetEnabled,
           trailEnabled: niftyOpenTrailEnabled,
-          trailPoints: Number(niftyOpenTrailPercent) || 5,
+          // Trail distance is the same −ve SL % (not a separate trail %).
+          trailPoints: Number(niftyOpenStopLossPercent) || 5,
         })
         .then(async () => {
           setNiftyOpenError(null)
@@ -679,7 +676,6 @@ export function ScalperPage() {
     niftyOpenTargetEnabled,
     niftyOpenTargetPercent,
     niftyOpenTrailEnabled,
-    niftyOpenTrailPercent,
     niftyOpenUnderlying,
   ])
 
@@ -2278,12 +2274,13 @@ export function ScalperPage() {
                       <Form.Check
                         type="switch"
                         id="opening-atm-sl"
-                        label="−ve GTT (fixed %)"
-                        checked={niftyOpenStopLossEnabled && !niftyOpenTrailEnabled}
+                        label="−ve GTT (SL %)"
+                        checked={niftyOpenStopLossEnabled || niftyOpenTrailEnabled}
+                        disabled={niftyOpenTrailEnabled}
                         onChange={(e) => {
                           const on = e.target.checked
                           setNiftyOpenStopLossEnabled(on)
-                          if (on) setNiftyOpenTrailEnabled(false)
+                          if (!on) setNiftyOpenTrailEnabled(false)
                         }}
                       />
                       <Form.Control
@@ -2294,37 +2291,26 @@ export function ScalperPage() {
                         step={0.5}
                         style={{ width: '6.5rem' }}
                         value={niftyOpenStopLossPercent}
-                        disabled={niftyOpenTrailEnabled || !niftyOpenStopLossEnabled}
+                        disabled={!niftyOpenStopLossEnabled && !niftyOpenTrailEnabled}
                         onChange={(e) => setNiftyOpenStopLossPercent(e.target.value)}
-                        aria-label="Negative GTT stop-loss percent"
+                        aria-label="Stop-loss percent of premium"
                       />
                     </div>
                     <div>
                       <Form.Check
                         type="switch"
                         id="opening-atm-trail"
-                        label="Trail SL (%)"
+                        label="Trail SL"
                         checked={niftyOpenTrailEnabled}
                         onChange={(e) => {
                           const on = e.target.checked
                           setNiftyOpenTrailEnabled(on)
-                          if (on) setNiftyOpenStopLossEnabled(false)
-                          else setNiftyOpenStopLossEnabled(true)
+                          if (on) setNiftyOpenStopLossEnabled(true)
                         }}
                       />
-                      <Form.Control
-                        size="sm"
-                        type="number"
-                        min={0.5}
-                        max={50}
-                        step={0.5}
-                        style={{ width: '6.5rem' }}
-                        value={niftyOpenTrailPercent}
-                        disabled={!niftyOpenTrailEnabled}
-                        onChange={(e) => setNiftyOpenTrailPercent(e.target.value)}
-                        aria-label="Trailing stop percent below peak"
-                        title="SL starts at entry − %, then rises to stay % below premium peak"
-                      />
+                      <div className="small text-muted" style={{ width: '6.5rem', lineHeight: 1.2 }}>
+                        Uses SL %
+                      </div>
                     </div>
                     <div>
                       <Form.Check
@@ -2350,16 +2336,17 @@ export function ScalperPage() {
                   </div>
                   {niftyOpenTrailEnabled ? (
                     <div className="small text-muted mt-1">
-                      Trail replaces fixed −ve: single-leg SL GTT stays −{niftyOpenTrailPercent || '5'}% below the premium
-                      peak until flat or ~15:25 IST. +ve stays a separate GTT when on.
+                      −ve GTT (SL %) stays on with Trail. Initial stop is entry −{niftyOpenStopLossPercent || '5'}%;
+                      as premium peaks rise, that same % trails below the peak until flat or ~15:25 IST.
                     </div>
                   ) : (
                     <div className="small text-muted mt-1">
-                      Fixed −ve and trail SL are exclusive. When both −ve and +ve are on, Kite places one OCO GTT.
+                      Trail SL turns on −ve and uses its %. With −ve and +ve both on (no trail), Kite places one OCO
+                      GTT.
                     </div>
                   )}
-                  {!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled && !niftyOpenTrailEnabled ? (
-                    <div className="small text-danger mt-1">Enable at least one of −ve, trail SL, or +ve GTT.</div>
+                  {!niftyOpenStopLossEnabled && !niftyOpenTrailEnabled && !niftyOpenTargetEnabled ? (
+                    <div className="small text-danger mt-1">Enable at least one of −ve or +ve GTT.</div>
                   ) : null}
                 </div>
                 {niftyOpenError ? (
