@@ -598,9 +598,11 @@ export function ScalperPage() {
             ? String(data.targetPercent)
             : '5',
         )
-        setNiftyOpenStopLossEnabled(data.stopLossEnabled !== false)
+        const trailOn = Boolean(data.trailEnabled)
+        setNiftyOpenTrailEnabled(trailOn)
+        // Fixed −ve and trail are mutually exclusive in the UI (server may keep stopLossEnabled true when trailing).
+        setNiftyOpenStopLossEnabled(trailOn ? false : data.stopLossEnabled !== false)
         setNiftyOpenTargetEnabled(data.targetEnabled !== false)
-        setNiftyOpenTrailEnabled(Boolean(data.trailEnabled))
         setNiftyOpenTrailPercent(
           typeof data.trailPoints === 'number' && Number.isFinite(data.trailPoints) && data.trailPoints > 0
             ? String(data.trailPoints)
@@ -2278,8 +2280,11 @@ export function ScalperPage() {
                         id="opening-atm-sl"
                         label="−ve GTT (fixed %)"
                         checked={niftyOpenStopLossEnabled && !niftyOpenTrailEnabled}
-                        disabled={niftyOpenTrailEnabled}
-                        onChange={(e) => setNiftyOpenStopLossEnabled(e.target.checked)}
+                        onChange={(e) => {
+                          const on = e.target.checked
+                          setNiftyOpenStopLossEnabled(on)
+                          if (on) setNiftyOpenTrailEnabled(false)
+                        }}
                       />
                       <Form.Control
                         size="sm"
@@ -2303,7 +2308,8 @@ export function ScalperPage() {
                         onChange={(e) => {
                           const on = e.target.checked
                           setNiftyOpenTrailEnabled(on)
-                          if (on) setNiftyOpenStopLossEnabled(true)
+                          if (on) setNiftyOpenStopLossEnabled(false)
+                          else setNiftyOpenStopLossEnabled(true)
                         }}
                       />
                       <Form.Control
@@ -2344,13 +2350,12 @@ export function ScalperPage() {
                   </div>
                   {niftyOpenTrailEnabled ? (
                     <div className="small text-muted mt-1">
-                      Trail uses a single-leg SL GTT and raises it via Kite modify as premium peaks (keeps −
-                      {niftyOpenTrailPercent || '5'}% below peak until flat or ~15:25 IST). +ve stays a separate GTT when
-                      on.
+                      Trail replaces fixed −ve: single-leg SL GTT stays −{niftyOpenTrailPercent || '5'}% below the premium
+                      peak until flat or ~15:25 IST. +ve stays a separate GTT when on.
                     </div>
                   ) : (
                     <div className="small text-muted mt-1">
-                      Default 5% / 5%. When both −ve and +ve are on, Kite places one OCO GTT.
+                      Fixed −ve and trail SL are exclusive. When both −ve and +ve are on, Kite places one OCO GTT.
                     </div>
                   )}
                   {!niftyOpenStopLossEnabled && !niftyOpenTargetEnabled && !niftyOpenTrailEnabled ? (

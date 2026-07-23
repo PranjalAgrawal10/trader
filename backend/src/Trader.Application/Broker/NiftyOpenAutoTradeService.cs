@@ -465,7 +465,8 @@ public sealed class NiftyOpenAutoTradeService
                         message =
                             $"Bought {chosenLots} lot(s) {chosen.Tradingsymbol} (max affordable ≤{maxLots}); " +
                             $"trail SL {slGtt.StopLossPrice:0.##} (−{trailPercent:0.##}% of peak); {tpPart}.";
-                        armTrail = !string.IsNullOrWhiteSpace(gttId) && seedStop is > 0;
+                        armTrail = !string.IsNullOrWhiteSpace(gttId) && slGtt.StopLossPrice > 0;
+                        seedStop = slGtt.StopLossPrice > 0 ? slGtt.StopLossPrice : seedStop;
                         runStatus = "success";
                     }
                     else
