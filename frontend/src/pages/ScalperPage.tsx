@@ -925,13 +925,13 @@ export function ScalperPage() {
           safeTriggerPts != null
 
         const computedStopLoss =
-          autoFromSafe
+          autoFromSafe && executionPrice != null && safeStopPts != null
             ? transactionType === 'BUY'
               ? Number((executionPrice - safeStopPts).toFixed(2))
               : Number((executionPrice + safeStopPts).toFixed(2))
             : null
         const computedTrigger =
-          autoFromSafe
+          autoFromSafe && executionPrice != null && safeTriggerPts != null
             ? transactionType === 'BUY'
               ? Number((executionPrice + safeTriggerPts).toFixed(2))
               : Number((executionPrice - safeTriggerPts).toFixed(2))
