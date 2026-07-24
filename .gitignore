@@ -34,6 +34,10 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Windows Explorer "filename - Copy.ext" duplicates (do not commit)
+**/* - Copy*
+**/ - Copy*
+
 # Repo-root local env (e.g. docker-compose overrides); keep compose files committed
 /.env
 /.env.local

@@ -1,4 +1,7 @@
 using System.Text;
+using Elastic.Ingest.Elasticsearch;
+using Elastic.Ingest.Elasticsearch.DataStreams;
+using Elastic.Serilog.Sinks;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -36,6 +39,29 @@ internal static class TraderWebApplicationBuilderExtensions
                 .Enrich.WithProcessId()
                 .Enrich.WithThreadId()
                 .Enrich.WithExceptionDetails();
+
+            // Optional ES sink when Serilog:Elasticsearch:Enabled=true (Production / Compose).
+            // Development also writes via WriteTo.Elasticsearch in appsettings.Development.json.
+            var esEnabled = context.Configuration.GetValue("Serilog:Elasticsearch:Enabled", false);
+            if (esEnabled && !context.HostingEnvironment.IsEnvironment("IntegrationTesting"))
+            {
+                var nodes = context.Configuration.GetSection("Serilog:Elasticsearch:Nodes").Get<string[]>()
+                    ?? [context.Configuration["Serilog:Elasticsearch:NodeUri"] ?? "http://localhost:9200"];
+                var uris = nodes
+                    .Where(static n => !string.IsNullOrWhiteSpace(n))
+                    .Select(static n => new Uri(n.Trim()))
+                    .ToArray();
+                if (uris.Length > 0)
+                {
+                    var dataset = context.Configuration["Serilog:Elasticsearch:Dataset"] ?? "trader";
+                    var ns = context.Configuration["Serilog:Elasticsearch:Namespace"] ?? "api";
+                    loggerConfiguration.WriteTo.Elasticsearch(uris, opts =>
+                    {
+                        opts.BootstrapMethod = BootstrapMethod.Silent;
+                        opts.DataStream = new DataStreamName("logs", dataset, ns);
+                    });
+                }
+            }
         });
 
         builder.Services.AddTraderApiControllers();

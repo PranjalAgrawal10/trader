@@ -25,6 +25,7 @@ Monorepo overview: REST API with **JWT**, **EF Core** + **MySQL**, and a **React
 | `backend/tests/Trader.Tests` | Integration tests (`WebApplicationFactory`) |
 | `backend/docker/` | API Dockerfile |
 | `docker-compose.yml` | MySQL, Redis (service only), API (repo root; build context `backend/`) |
+| `logging/` | Optional Elasticsearch + Kibana Compose stack (`logging/docker-compose.yml`) |
 
 **Conventions:** root **`.editorconfig`** keeps C# / TS / YAML formatting aligned; **`AGENTS.md`** is a short map for humans and AI tools. **`backend/global.json`** pins the .NET **8** SDK band with **`rollForward`: `latestFeature`** (stay on **8.x** for App Platform — do not use **`latestMajor`**, or the buildpack may install runtime **10** while the app still requires framework **8.0**). Backend layering and SOLID expectations are summarized in **`.cursor/rules/core-principles.mdc`** (see “SOLID in this repo” there).
 
@@ -144,6 +145,22 @@ docker compose up --build
 CORS in Compose still allows **`http://localhost:8080`** (Docker UI) and **`http://localhost:5173`** (optional local `npm run dev`) for direct API debugging, but the browser SPA normally uses same-origin proxy routes. **SignalR** (`/hubs/market`) uses WebSockets; ensure any **reverse proxy** in front of the API allows **upgrade** and long-lived connections for that path.
 
 `redis` is included for future use; the current API code does not require it.
+
+### Optional logging stack (Elasticsearch + Kibana)
+
+Serilog is already used by **`Trader.Api`**. In **Development**, logs are also shipped to Elasticsearch (`logs-trader-api` data stream) for Kibana. Start the stack, then run the API:
+
+```bash
+cd logging
+docker compose up -d
+```
+
+| Service | Host URL |
+|---------|----------|
+| **elasticsearch** | **http://localhost:9200** |
+| **kibana** | **http://localhost:5601** → **Discover** (create a data view on `logs-trader-api*` or `logs-*`) |
+
+Security is off (`xpack.security.enabled=false`) for local use only. Production: leave ES sink off by default, or set **`Serilog__Elasticsearch__Enabled=true`** and **`Serilog__Elasticsearch__Nodes__0`**. Package: **`Elastic.Serilog.Sinks`**.
 
 ## Configuration
 

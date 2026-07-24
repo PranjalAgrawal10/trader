@@ -13,6 +13,7 @@
     <PackageReference Include="Asp.Versioning.Mvc" Version="8.1.0" />
     <PackageReference Include="Asp.Versioning.Mvc.ApiExplorer" Version="8.1.0" />
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
+    <PackageReference Include="Elastic.Serilog.Sinks" Version="8.18.2" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.22" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11">
@@ -44,8 +45,7 @@
   </ItemGroup>
 
   <Target Name="ApplyEfMigrationsAfterBuild" AfterTargets="Build" Condition="'$(RunEfMigrationsOnBuild)' == 'true' AND '$(DesignTimeBuild)' != 'true'">
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\.."
-          Command='dotnet ef database update --project "src/Trader.Infrastructure/Trader.Infrastructure.csproj" --startup-project "src/Trader.Api/Trader.Api.csproj" --configuration "$(Configuration)" --no-build' />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)\..\.." Command="dotnet ef database update --project &quot;src/Trader.Infrastructure/Trader.Infrastructure.csproj&quot; --startup-project &quot;src/Trader.Api/Trader.Api.csproj&quot; --configuration &quot;$(Configuration)&quot; --no-build" />
   </Target>
 
 </Project>
