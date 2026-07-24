@@ -53,8 +53,10 @@ interface OverlaysOnlyResponse {
 }
 
 function mergeHistoricalSlices(ohlc: OhlcOnlyResponse, overlays: OverlaysOnlyResponse): HistoricalChartCandlesResponse {
-  if (ohlc.interval !== overlays.interval || ohlc.from !== overlays.from || ohlc.to !== overlays.to)
-    throw new Error('OHLC vs overlay mismatch (interval/from/to). Retry with the same Range query.')
+  // Interval must match. from/to may differ by a few ms when Range is Auto (each
+  // parallel call used to resolve its own server UtcNow) — join by candle time instead.
+  if (ohlc.interval !== overlays.interval)
+    throw new Error(`OHLC vs overlay interval mismatch (${ohlc.interval} vs ${overlays.interval}).`)
 
   const byOvTime = new Map(
     overlays.points.map((p) => [normalizeChartTimeLabel(p.time), p] as const),

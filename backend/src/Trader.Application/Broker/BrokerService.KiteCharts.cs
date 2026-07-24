@@ -96,7 +96,9 @@ public sealed partial class BrokerService
 
         var token = instrumentToken.Trim();
         var code = NormalizeUiChartInterval(interval);
-        var requestEnd = toUtc ?? DateTimeOffset.UtcNow;
+        // Open-ended "to" must be stable across parallel OHLC + overlay requests (and
+        // near-simultaneous polls); otherwise each call gets a distinct cache key / From-To.
+        var requestEnd = toUtc ?? SnapOpenEndedChartEnd(DateTimeOffset.UtcNow);
         var requestStart = fromUtc ?? requestEnd - DefaultChartLookback(code);
         if (requestStart >= requestEnd)
             throw new InvalidOperationException("Start time must be before end time.");
@@ -240,6 +242,19 @@ public sealed partial class BrokerService
         var withMa = ChartMovingAverages.Attach(ordered);
         var trimmed = withMa.Where(c => c.Time >= requestStart).ToList();
         return new KiteHistoricalCandlesDto(trimmed, intervalCode, requestStart, requestEnd);
+    }
+
+    /// <summary>
+    /// Floor UTC "now" into a short bucket so concurrent chart split endpoints share one window.
+    /// Bucket length matches <see cref="ChartHistoricalCacheTtl"/> so cache keys stay coherent.
+    /// </summary>
+    private static DateTimeOffset SnapOpenEndedChartEnd(DateTimeOffset utcNow)
+    {
+        var bucketTicks = ChartHistoricalCacheTtl.Ticks;
+        if (bucketTicks < TimeSpan.TicksPerSecond)
+            bucketTicks = TimeSpan.TicksPerSecond;
+        var ticks = utcNow.UtcTicks - (utcNow.UtcTicks % bucketTicks);
+        return new DateTimeOffset(ticks, TimeSpan.Zero);
     }
 
     /// <summary>One chart bar length for the UI interval (used to extend Kite fetch for MA warmup).</summary>

@@ -162,6 +162,32 @@ docker compose up -d
 
 Security is off (`xpack.security.enabled=false`) for local use only. Production: leave ES sink off by default, or set **`Serilog__Elasticsearch__Enabled=true`** and **`Serilog__Elasticsearch__Nodes__0`**. Package: **`Elastic.Serilog.Sinks`**.
 
+#### Heroku logging UI (`kibana` app)
+
+Local Elastic Kibana **8.x** cannot talk to the free **Bonsai** Heroku add-on (OpenSearch-compatible). This repo ships **OpenSearch Dashboards** for that app under **`logging/heroku/`**.
+
+```bash
+# one-time
+heroku addons:create bonsai:sandbox -a kibana
+heroku stack:set container -a kibana
+heroku config:set ELASTICSEARCH_HOSTS="$(heroku config:get BONSAI_URL -a kibana)" -a kibana
+
+cd logging/heroku
+heroku container:login
+# Windows: classic builder avoids Heroku "unsupported" OCI push errors
+set DOCKER_BUILDKIT=0
+docker build --platform linux/amd64 -t registry.heroku.com/kibana/web .
+docker push registry.heroku.com/kibana/web
+# if push says unsupported:
+# docker buildx build --platform linux/amd64 --provenance=false --sbom=false --output type=image,name=registry.heroku.com/kibana/web,push=true,oci-mediatypes=false .
+heroku container:release web -a kibana
+heroku ps:type standard-2x -a kibana
+heroku ps:scale web=1 -a kibana
+heroku open -a kibana
+```
+
+Live URL: **https://kibana-7dcb7cda65ae.herokuapp.com/** (Standard-2X). Sign in at **`/__auth/login`** with Heroku config **`DASHBOARDS_BASIC_AUTH_USER`** / **`DASHBOARDS_BASIC_AUTH_PASSWORD`** (not OpenSearch docs `admin`/`admin`). Example vars: **`logging/heroku/.env.example`**. Point the API Serilog sink at **`BONSAI_URL`** via **`Serilog__Elasticsearch__*`** (see **`backend/src/Trader.Api/.env.example`**) if you want production logs in the same cluster.
+
 ## Configuration
 
 ### API (`backend/src/Trader.Api`)

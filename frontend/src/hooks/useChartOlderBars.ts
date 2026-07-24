@@ -14,7 +14,7 @@ function problemDetail(err: unknown): string {
     const body = err.response?.data as { detail?: string; title?: string } | undefined
     return body?.detail ?? body?.title ?? err.message ?? 'Request failed.'
   }
-  return 'Request failed.'
+  return err instanceof Error ? err.message : 'Request failed.'
 }
 
 type CandleWindow = { from: string; to: string }

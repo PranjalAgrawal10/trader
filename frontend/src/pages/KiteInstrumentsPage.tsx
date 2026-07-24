@@ -1460,7 +1460,7 @@ function problemDetail(err: unknown): string {
     const body = err.response?.data as { detail?: string; title?: string } | undefined
     return body?.detail ?? body?.title ?? err.message ?? 'Request failed.'
   }
-  return 'Request failed.'
+  return err instanceof Error ? err.message : 'Request failed.'
 }
 
 const CUSTOM_EMA_PREFS_STORAGE_KEY = 'trader.kiteChart.customEma.v1'
