@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Trader.Application.Abstractions.Streaming;
 using Trader.Application.Broker;
 using Trader.Application.Configuration;
 
@@ -39,7 +40,10 @@ public sealed class NiftyOpenAutoTradeBackgroundService : BackgroundService
                     using var scope = _scopeFactory.CreateScope();
                     var runner = scope.ServiceProvider.GetRequiredService<NiftyOpenAutoTradeService>();
                     await runner.RunCycleAsync(stoppingToken).ConfigureAwait(false);
+                    // Housekeeping: flat positions / trail window end. Hot GTT trail is tick-driven.
                     await runner.RunTrailCycleAsync(stoppingToken).ConfigureAwait(false);
+                    var live = scope.ServiceProvider.GetRequiredService<IOpeningAtmTrailLiveCoordinator>();
+                    await live.SyncFromDatabaseAsync(stoppingToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

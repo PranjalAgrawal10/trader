@@ -13,5 +13,7 @@ public interface INiftyOpenAutoTradeRunRepository
     /// <summary>Tracked rows with an active trailing GTT (any session day).</summary>
     Task<IReadOnlyList<NiftyOpenAutoTradeRun>> ListActiveTrailingAsync(CancellationToken ct = default);
 
+    Task<NiftyOpenAutoTradeRun?> GetTrackedByIdAsync(Guid runId, CancellationToken ct = default);
+
     Task SaveChangesAsync(CancellationToken ct = default);
 }

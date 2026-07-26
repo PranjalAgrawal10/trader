@@ -125,6 +125,13 @@ public interface IBrokerService
         KiteGttCreateRequestDto body,
         CancellationToken ct = default);
 
+    /// <summary>Replace a single-leg GTT profit/target trigger price (used when LTP approaches +ve GTT).</summary>
+    Task<KiteGttActionResultDto> ModifyKiteGttSingleTargetAsync(
+        Guid userId,
+        string triggerId,
+        KiteGttCreateRequestDto body,
+        CancellationToken ct = default);
+
     Task<KiteOrderActionResultDto> PlaceOrderAsync(
         Guid userId,
         KiteOrderPlaceRequestDto body,

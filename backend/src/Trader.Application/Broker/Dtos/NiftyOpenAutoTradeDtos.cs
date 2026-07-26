@@ -54,7 +54,8 @@ public sealed class NiftyOpenAutoTradeSettingsPutDto
     /// <summary>
     /// When true, place a single-leg SL GTT and trail it via PUT /gtt/triggers/:id (Kite Connect has no native TSL).
     /// Requires <see cref="StopLossEnabled"/>; trail distance is <see cref="StopLossPercent"/> below the premium peak
-    /// (server syncs <see cref="TrailPoints"/> from that value).
+    /// (server syncs <see cref="TrailPoints"/> from that value). With <see cref="TargetEnabled"/>, a separate +ve GTT
+    /// is placed; when LTP approaches it (~2%), target becomes LTP+10% and SL becomes LTP−5% (ratchet only).
     /// </summary>
     public bool TrailEnabled { get; set; }
 

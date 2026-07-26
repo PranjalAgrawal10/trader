@@ -288,6 +288,7 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.OptionSide).HasMaxLength(8);
             e.Property(x => x.Exchange).HasMaxLength(16);
             e.Property(x => x.Tradingsymbol).HasMaxLength(64);
+            e.Property(x => x.InstrumentToken).HasMaxLength(32);
             e.Property(x => x.Expiry).HasMaxLength(32);
             e.Property(x => x.Strike).HasPrecision(18, 4);
             e.Property(x => x.OptionLtp).HasPrecision(18, 4);
@@ -295,8 +296,10 @@ public sealed class TraderDbContext : DbContext
             e.Property(x => x.AvailableBalanceInr).HasPrecision(18, 2);
             e.Property(x => x.OrderId).HasMaxLength(64);
             e.Property(x => x.GttTriggerId).HasMaxLength(64);
+            e.Property(x => x.TargetGttTriggerId).HasMaxLength(64);
             e.Property(x => x.TrailPeakPrice).HasPrecision(18, 4);
             e.Property(x => x.TrailStopPrice).HasPrecision(18, 4);
+            e.Property(x => x.TrailTargetPrice).HasPrecision(18, 4);
             e.Property(x => x.TrailPoints).HasPrecision(18, 4);
             e.Property(x => x.Message).HasMaxLength(1000);
             e.Property(x => x.CreatedAtUtc).HasColumnType("datetime(6)");

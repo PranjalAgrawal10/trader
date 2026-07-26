@@ -44,6 +44,9 @@ public sealed class NiftyOpenAutoTradeRunRepository : INiftyOpenAutoTradeRunRepo
             .ConfigureAwait(false);
     }
 
+    public Task<NiftyOpenAutoTradeRun?> GetTrackedByIdAsync(Guid runId, CancellationToken ct = default) =>
+        _db.NiftyOpenAutoTradeRuns.FirstOrDefaultAsync(r => r.Id == runId, ct);
+
     public Task SaveChangesAsync(CancellationToken ct = default) =>
         _db.SaveChangesAsync(ct);
 }

@@ -59,6 +59,31 @@ public sealed class KiteTickerSessionManager : IKiteTickerSessionManager, IDispo
         runtime.SubscribeInstrument(instrumentToken);
     }
 
+    public Task EnsureBackgroundSubscribeAsync(
+        Guid userId,
+        uint instrumentToken,
+        string leaseId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(leaseId))
+            throw new InvalidOperationException("leaseId is required.");
+        return SubscribeAsync(BackgroundConnectionId(userId, leaseId), userId, instrumentToken, ct);
+    }
+
+    public Task ReleaseBackgroundSubscribeAsync(
+        Guid userId,
+        uint instrumentToken,
+        string leaseId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(leaseId))
+            return Task.CompletedTask;
+        return UnsubscribeAsync(BackgroundConnectionId(userId, leaseId), userId, instrumentToken, ct);
+    }
+
+    private static string BackgroundConnectionId(Guid userId, string leaseId) =>
+        $"bg:opening-atm:{userId:N}:{leaseId.Trim()}";
+
     public Task UnsubscribeAsync(string connectionId, Guid userId, uint instrumentToken, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(connectionId);

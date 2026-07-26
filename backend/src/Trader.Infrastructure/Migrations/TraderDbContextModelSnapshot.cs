@@ -677,6 +677,10 @@ namespace Trader.Infrastructure.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
 
+                    b.Property<string>("InstrumentToken")
+                        .HasMaxLength(32)
+                        .HasColumnType("varchar(32)");
+
                     b.Property<int>("Lots")
                         .HasColumnType("int");
 
@@ -716,6 +720,10 @@ namespace Trader.Infrastructure.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<string>("TargetGttTriggerId")
+                        .HasMaxLength(64)
+                        .HasColumnType("varchar(64)");
+
                     b.Property<string>("Tradingsymbol")
                         .HasMaxLength(64)
                         .HasColumnType("varchar(64)");
@@ -732,6 +740,10 @@ namespace Trader.Infrastructure.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<decimal?>("TrailStopPrice")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("TrailTargetPrice")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 

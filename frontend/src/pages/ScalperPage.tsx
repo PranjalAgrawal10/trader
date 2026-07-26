@@ -2182,7 +2182,8 @@ export function ScalperPage() {
                   </strong>{' '}
                   <strong>MIS</strong> ({niftyOpenSide === 'PE' ? 'PUT' : 'CALL'}) for the selected expiry —{' '}
                   <strong>max lots</strong> your cash can fund (up to the lot cap). Exits use one{' '}
-                  <strong>Kite GTT</strong> exits (−ve/+ve %; optional trail SL via GTT modify). API must be running.
+                  <strong>Kite GTT</strong> exits (−ve/+ve %; optional trail SL + +ve approach trail via GTT
+                  modify). API must be running.
                 </p>
                 <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
                   <Form.Check
@@ -2338,6 +2339,10 @@ export function ScalperPage() {
                     <div className="small text-muted mt-1">
                       −ve GTT (SL %) stays on with Trail. Initial stop is entry −{niftyOpenStopLossPercent || '5'}%;
                       as premium peaks rise, that same % trails below the peak until flat or ~15:25 IST.
+                      Trail updates on live Kite ticks (not the poll interval).
+                      {niftyOpenTargetEnabled
+                        ? ' When LTP is within ~2% of +ve GTT, target moves to LTP +10% and SL to LTP −5% (ratchet up only).'
+                        : ''}
                     </div>
                   ) : (
                     <div className="small text-muted mt-1">

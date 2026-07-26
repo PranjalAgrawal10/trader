@@ -59,6 +59,58 @@ public static class NiftyOpenAutoTradeTrail
         return (newPeak, null);
     }
 
+    /// <summary>Default: LTP within 2% below the +ve GTT trigger counts as “about to trigger”.</summary>
+    public const decimal DefaultTargetApproachProximityPercent = 2m;
+
+    /// <summary>When approaching +ve GTT, raise target to LTP × (1 + this % / 100).</summary>
+    public const decimal DefaultTargetApproachBumpPercent = 10m;
+
+    /// <summary>When approaching +ve GTT, move SL to LTP × (1 − this % / 100).</summary>
+    public const decimal DefaultTargetApproachStopPercent = 5m;
+
+    /// <summary>
+    /// True when LTP is within <paramref name="proximityPercent"/> of the +ve trigger from below
+    /// (or already at/through it while the GTT may still be live).
+    /// </summary>
+    public static bool IsApproachingTargetTrigger(
+        decimal ltp,
+        decimal targetTriggerPrice,
+        decimal proximityPercent = DefaultTargetApproachProximityPercent)
+    {
+        if (ltp <= 0 || targetTriggerPrice <= 0)
+            return false;
+        var prox = proximityPercent <= 0 ? DefaultTargetApproachProximityPercent : proximityPercent;
+        var approachFloor = targetTriggerPrice * (1m - prox / 100m);
+        return ltp >= approachFloor;
+    }
+
+    /// <summary>
+    /// When LTP is about to hit +ve GTT: new target = LTP + <paramref name="targetBumpPercent"/>%,
+    /// new SL = LTP − <paramref name="stopPercent"/>% (ratchet only — never lower target or SL).
+    /// </summary>
+    public static (decimal? NewTarget, decimal? NewStop) ComputeTargetApproachBump(
+        decimal ltp,
+        decimal currentTarget,
+        decimal currentStop,
+        decimal tickSize,
+        decimal targetBumpPercent = DefaultTargetApproachBumpPercent,
+        decimal stopPercent = DefaultTargetApproachStopPercent,
+        decimal proximityPercent = DefaultTargetApproachProximityPercent)
+    {
+        if (!IsApproachingTargetTrigger(ltp, currentTarget, proximityPercent))
+            return (null, null);
+
+        var bumpPct = targetBumpPercent <= 0 ? DefaultTargetApproachBumpPercent : targetBumpPercent;
+        var slPct = stopPercent <= 0 ? DefaultTargetApproachStopPercent : stopPercent;
+
+        var desiredTarget = KiteTickPriceRounding.RoundToTickSize(ltp * (1m + bumpPct / 100m), tickSize);
+        var desiredStop = InitialStopPriceFromPercent(ltp, slPct, tickSize);
+
+        decimal? newTarget = desiredTarget > currentTarget ? desiredTarget : null;
+        decimal? newStop = desiredStop > currentStop ? desiredStop : null;
+        return (newTarget, newStop);
+    }
+
     /// <summary>
     /// Legacy point-gap trail. Prefer <see cref="ComputeTrailUpdateFromPercent"/> for Opening ATM.
     /// </summary>

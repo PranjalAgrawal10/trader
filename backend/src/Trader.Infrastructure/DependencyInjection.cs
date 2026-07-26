@@ -12,6 +12,7 @@ using Trader.Application.Abstractions.Messaging;
 using Trader.Application.Abstractions.Persistence;
 using Trader.Application.Abstractions.Security;
 using Trader.Application.Abstractions.Reporting;
+using Trader.Application.Abstractions.Streaming;
 using Trader.Infrastructure.Broker;
 using Trader.Infrastructure.Email;
 using Trader.Infrastructure.Hosting;
@@ -122,6 +123,7 @@ public static class DependencyInjection
         services.AddScoped<IKiteInstrumentsChartSettingsGateway, KiteInstrumentsChartSettingsGateway>();
         services.AddScoped<IHistoricalCandleUpserter, HistoricalCandleUpserter>();
         services.AddSingleton<LiveCandleTickSubscriber>();
+        services.AddSingleton<IOpeningAtmTrailLiveCoordinator, OpeningAtmTrailLiveCoordinator>();
         services.AddSingleton<IKiteTickerSessionManager, KiteTickerSessionManager>();
         services.AddScoped<IEmailOtpRepository, EmailOtpRepository>();
         services.AddSingleton<SmtpPlainTextEmailSender>();

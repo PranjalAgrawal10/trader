@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Trader.Application.Abstractions.Persistence;
+using Trader.Application.Abstractions.Streaming;
 using Trader.Application.Configuration;
 using Trader.Domain.Entities;
 using Trader.Domain.Enums;
@@ -18,6 +19,7 @@ public sealed class NiftyOpenAutoTradeService
     private readonly IBrokerService _broker;
     private readonly IUserRepository _users;
     private readonly INiftyOpenAutoTradeRunRepository _runs;
+    private readonly IOpeningAtmTrailLiveCoordinator _trailLive;
     private readonly ILogger<NiftyOpenAutoTradeService> _logger;
 
     public NiftyOpenAutoTradeService(
@@ -25,12 +27,14 @@ public sealed class NiftyOpenAutoTradeService
         IBrokerService broker,
         IUserRepository users,
         INiftyOpenAutoTradeRunRepository runs,
+        IOpeningAtmTrailLiveCoordinator trailLive,
         ILogger<NiftyOpenAutoTradeService> logger)
     {
         _options = options;
         _broker = broker;
         _users = users;
         _runs = runs;
+        _trailLive = trailLive;
         _logger = logger;
     }
 
@@ -88,16 +92,59 @@ public sealed class NiftyOpenAutoTradeService
                             run.SessionDateIst != sessionDate ? "Trail cleared (prior session)." : "Trail window ended."),
                         1000);
                     await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+                    _trailLive.Unregister(run.Id);
                     continue;
                 }
 
-                await TrailOneRunAsync(run, opts, ct).ConfigureAwait(false);
+                await TrailOneRunAsync(run, opts, liveLtp: null, ct).ConfigureAwait(false);
+                if (!run.TrailActive)
+                    _trailLive.Unregister(run.Id);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "NIFTY open trail failed for run {RunId} user {UserId}", run.Id, run.UserId);
             }
         }
+    }
+
+    /// <summary>
+    /// Hot path from Kite LTP ticks — same trail/approach logic as the poll cycle, without re-quoting.
+    /// </summary>
+    public async Task TrailFromLiveTickAsync(Guid runId, decimal liveLtp, CancellationToken ct = default)
+    {
+        if (liveLtp <= 0)
+            return;
+
+        var opts = _options.CurrentValue;
+        if (!opts.Enabled)
+            return;
+
+        var run = await _runs.GetTrackedByIdAsync(runId, ct).ConfigureAwait(false);
+        if (run is null || !run.TrailActive)
+        {
+            _trailLive.Unregister(runId);
+            return;
+        }
+
+        var utcNow = DateTimeOffset.UtcNow;
+        var tz = NiftyOpenAutoTradeSchedule.ResolveTimeZone(opts.TimeZoneId);
+        var sessionDate = NiftyOpenAutoTradeSchedule.GetSessionDateIst(utcNow, tz);
+        if (!NiftyOpenAutoTradeSchedule.IsInsideTrailWindow(opts, utcNow) || run.SessionDateIst != sessionDate)
+        {
+            run.TrailActive = false;
+            run.Message = Truncate(
+                AppendNote(
+                    run.Message,
+                    run.SessionDateIst != sessionDate ? "Trail cleared (prior session)." : "Trail window ended."),
+                1000);
+            await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+            _trailLive.Unregister(run.Id);
+            return;
+        }
+
+        await TrailOneRunAsync(run, opts, liveLtp, ct).ConfigureAwait(false);
+        if (!run.TrailActive)
+            _trailLive.Unregister(run.Id);
     }
 
     public async Task<NiftyOpenAutoTradeSettingsDto> GetSettingsAsync(Guid userId, CancellationToken ct = default)
@@ -407,6 +454,8 @@ public sealed class NiftyOpenAutoTradeService
 
             string? orderId = null;
             string? gttId = null;
+            string? targetGttId = null;
+            decimal? seedTargetPrice = seedTarget;
             string message;
             var runStatus = "failed";
             var product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant();
@@ -475,7 +524,10 @@ public sealed class NiftyOpenAutoTradeService
                                     Tag = opts.OrderTag,
                                 },
                                 ct).ConfigureAwait(false);
-                            tpPart = $"+ve {tpGtt.TargetPrice:0.##} (+{targetPercent:0.##}%)";
+                            targetGttId = tpGtt.TriggerId;
+                            seedTargetPrice = tpGtt.TargetPrice > 0 ? tpGtt.TargetPrice : seedTarget;
+                            tpPart =
+                                $"+ve {tpGtt.TargetPrice:0.##} (+{targetPercent:0.##}%; approach trail +10% / SL −5%)";
                         }
 
                         message =
@@ -525,6 +577,8 @@ public sealed class NiftyOpenAutoTradeService
                     message = $"Order placed ({orderId}) but GTT failed: {gttEx.Message}";
                     runStatus = "success";
                     armTrail = false;
+                    targetGttId = null;
+                    seedTargetPrice = null;
                 }
             }
             catch (Exception placeEx)
@@ -534,7 +588,7 @@ public sealed class NiftyOpenAutoTradeService
                 armTrail = false;
             }
 
-            await PersistRunAsync(
+            var persisted = await PersistRunAsync(
                 userId,
                 claimedSessionDate ?? NiftyOpenAutoTradeSchedule.GetSessionDateIst(
                     DateTimeOffset.UtcNow,
@@ -554,7 +608,17 @@ public sealed class NiftyOpenAutoTradeService
                 trailStop: armTrail ? seedStop : null,
                 trailPoints: armTrail ? trailPercent : null,
                 message,
-                ct).ConfigureAwait(false);
+                ct,
+                targetGttId: armTrail ? targetGttId : null,
+                trailTarget: armTrail && !string.IsNullOrWhiteSpace(targetGttId) ? seedTargetPrice : null).ConfigureAwait(false);
+
+            if (armTrail
+                && persisted is not null
+                && uint.TryParse(chosen.InstrumentToken.Trim(), out var tok)
+                && tok != 0)
+            {
+                _trailLive.Register(persisted.Id, userId, tok);
+            }
 
             return preview with { CanTrade = runStatus == "success", Reason = runStatus == "success" ? null : message };
         }
@@ -614,6 +678,7 @@ public sealed class NiftyOpenAutoTradeService
     private async Task TrailOneRunAsync(
         NiftyOpenAutoTradeRun run,
         NiftyOpenAutoTradeOptions opts,
+        decimal? liveLtp,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(run.Exchange)
@@ -628,77 +693,167 @@ public sealed class NiftyOpenAutoTradeService
             return;
         }
 
-        var positions = await _broker.GetKiteNetPositionsAsync(run.UserId, ct).ConfigureAwait(false);
-        var openQty = positions
-            .Where(p =>
-                string.Equals(p.Exchange, run.Exchange, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(p.Tradingsymbol, run.Tradingsymbol, StringComparison.OrdinalIgnoreCase)
-                && (string.IsNullOrWhiteSpace(opts.Product)
-                    || string.Equals(p.Product, opts.Product, StringComparison.OrdinalIgnoreCase)))
-            .Sum(p => p.Quantity);
-
-        if (openQty <= 0)
+        // Live ticks skip REST position/quote calls for latency; poll cycle clears flats.
+        if (liveLtp is null or <= 0)
         {
-            run.TrailActive = false;
-            run.Message = Truncate(
-                AppendNote(run.Message, "Trail stopped: position flat."),
-                1000);
-            await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
-            return;
+            var positions = await _broker.GetKiteNetPositionsAsync(run.UserId, ct).ConfigureAwait(false);
+            var openQty = positions
+                .Where(p =>
+                    string.Equals(p.Exchange, run.Exchange, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(p.Tradingsymbol, run.Tradingsymbol, StringComparison.OrdinalIgnoreCase)
+                    && (string.IsNullOrWhiteSpace(opts.Product)
+                        || string.Equals(p.Product, opts.Product, StringComparison.OrdinalIgnoreCase)))
+                .Sum(p => p.Quantity);
+
+            if (openQty <= 0)
+            {
+                run.TrailActive = false;
+                run.Message = Truncate(
+                    AppendNote(run.Message, "Trail stopped: position flat."),
+                    1000);
+                await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+                return;
+            }
         }
 
-        var quote = await _broker
-            .GetKiteInstrumentLiveQuoteAsync(run.UserId, run.Exchange, run.Tradingsymbol, ct)
-            .ConfigureAwait(false);
-        if (quote.LastPrice <= 0)
-            return;
+        decimal ltp;
+        if (liveLtp is > 0)
+        {
+            ltp = liveLtp.Value;
+        }
+        else
+        {
+            var quote = await _broker
+                .GetKiteInstrumentLiveQuoteAsync(run.UserId, run.Exchange, run.Tradingsymbol, ct)
+                .ConfigureAwait(false);
+            if (quote.LastPrice <= 0)
+                return;
+            ltp = quote.LastPrice;
+        }
 
         var trailPercent = NiftyOpenAutoTradeTrail.ClampGttPercent(
             run.TrailPoints ?? opts.DefaultStopLossPoints);
         // Tick resolved inside Modify; seed with 0.05 for local compare then re-round on broker.
         var tickHint = 0.05m;
+        var product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant();
+        var notes = new List<string>();
+
+        // 1) When LTP is about to hit +ve GTT: raise target to LTP+10% and SL to LTP−5%.
+        if (!string.IsNullOrWhiteSpace(run.TargetGttTriggerId)
+            && run.TrailTargetPrice is > 0)
+        {
+            var (bumpTarget, bumpStop) = NiftyOpenAutoTradeTrail.ComputeTargetApproachBump(
+                ltp,
+                run.TrailTargetPrice.Value,
+                run.TrailStopPrice.Value,
+                tickHint);
+
+            if (bumpTarget is > 0)
+            {
+                var modifiedTp = await _broker.ModifyKiteGttSingleTargetAsync(
+                    run.UserId,
+                    run.TargetGttTriggerId!,
+                    new KiteGttCreateRequestDto
+                    {
+                        Exchange = run.Exchange,
+                        Tradingsymbol = run.Tradingsymbol,
+                        EntryTransactionType = "BUY",
+                        Quantity = run.Quantity,
+                        Product = product,
+                        LastPrice = ltp,
+                        TriggerPrice = bumpTarget.Value,
+                        StopLossEnabled = false,
+                        ProfitEnabled = true,
+                        Tag = opts.OrderTag,
+                    },
+                    ct).ConfigureAwait(false);
+
+                run.TrailTargetPrice = modifiedTp.TargetPrice > 0 ? modifiedTp.TargetPrice : bumpTarget.Value;
+                if (!string.IsNullOrWhiteSpace(modifiedTp.TriggerId))
+                    run.TargetGttTriggerId = modifiedTp.TriggerId;
+                notes.Add(
+                    $"+ve approach → target {run.TrailTargetPrice:0.##} (LTP {ltp:0.##} +{NiftyOpenAutoTradeTrail.DefaultTargetApproachBumpPercent:0.##}%)");
+            }
+
+            if (bumpStop is > 0)
+            {
+                var modifiedSl = await _broker.ModifyKiteGttSingleStopAsync(
+                    run.UserId,
+                    run.GttTriggerId,
+                    new KiteGttCreateRequestDto
+                    {
+                        Exchange = run.Exchange,
+                        Tradingsymbol = run.Tradingsymbol,
+                        EntryTransactionType = "BUY",
+                        Quantity = run.Quantity,
+                        Product = product,
+                        LastPrice = ltp,
+                        StopLossPrice = bumpStop.Value,
+                        StopLossEnabled = true,
+                        ProfitEnabled = false,
+                        Tag = opts.OrderTag,
+                    },
+                    ct).ConfigureAwait(false);
+
+                run.TrailStopPrice = modifiedSl.StopLossPrice > 0 ? modifiedSl.StopLossPrice : bumpStop.Value;
+                if (!string.IsNullOrWhiteSpace(modifiedSl.TriggerId))
+                    run.GttTriggerId = modifiedSl.TriggerId;
+                // Keep peak at least at LTP so classic trail does not fight the approach bump.
+                if (ltp > run.TrailPeakPrice.Value)
+                    run.TrailPeakPrice = ltp;
+                notes.Add(
+                    $"SL → {run.TrailStopPrice:0.##} (LTP −{NiftyOpenAutoTradeTrail.DefaultTargetApproachStopPercent:0.##}%)");
+            }
+        }
+
+        var peakBefore = run.TrailPeakPrice.Value;
+        var stopBefore = run.TrailStopPrice.Value;
+
+        // 2) Classic peak trail: keep SL at trail% below peak (ratchet up only).
         var (newPeak, newStop) = NiftyOpenAutoTradeTrail.ComputeTrailUpdateFromPercent(
             run.TrailPeakPrice.Value,
             run.TrailStopPrice.Value,
-            quote.LastPrice,
+            ltp,
             trailPercent,
             tickHint);
 
         run.TrailPeakPrice = newPeak;
-        if (newStop is null)
+        if (newStop is > 0)
         {
-            await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
-            return;
+            var modified = await _broker.ModifyKiteGttSingleStopAsync(
+                run.UserId,
+                run.GttTriggerId,
+                new KiteGttCreateRequestDto
+                {
+                    Exchange = run.Exchange,
+                    Tradingsymbol = run.Tradingsymbol,
+                    EntryTransactionType = "BUY",
+                    Quantity = run.Quantity,
+                    Product = product,
+                    LastPrice = ltp,
+                    StopLossPrice = newStop.Value,
+                    StopLossEnabled = true,
+                    ProfitEnabled = false,
+                    Tag = opts.OrderTag,
+                },
+                ct).ConfigureAwait(false);
+
+            run.TrailStopPrice = modified.StopLossPrice > 0 ? modified.StopLossPrice : newStop.Value;
+            if (!string.IsNullOrWhiteSpace(modified.TriggerId))
+                run.GttTriggerId = modified.TriggerId;
+            notes.Add($"Trail SL → {run.TrailStopPrice:0.##} (peak {newPeak:0.##}, −{trailPercent:0.##}%)");
         }
 
-        var product = string.IsNullOrWhiteSpace(opts.Product) ? "MIS" : opts.Product.Trim().ToUpperInvariant();
-        var modified = await _broker.ModifyKiteGttSingleStopAsync(
-            run.UserId,
-            run.GttTriggerId,
-            new KiteGttCreateRequestDto
-            {
-                Exchange = run.Exchange,
-                Tradingsymbol = run.Tradingsymbol,
-                EntryTransactionType = "BUY",
-                Quantity = run.Quantity,
-                Product = product,
-                LastPrice = quote.LastPrice,
-                StopLossPrice = newStop.Value,
-                StopLossEnabled = true,
-                ProfitEnabled = false,
-                Tag = opts.OrderTag,
-            },
-            ct).ConfigureAwait(false);
+        if (notes.Count > 0)
+            run.Message = Truncate(AppendNote(run.Message, string.Join("; ", notes)), 1000);
 
-        run.TrailStopPrice = modified.StopLossPrice > 0 ? modified.StopLossPrice : newStop.Value;
-        if (!string.IsNullOrWhiteSpace(modified.TriggerId))
-            run.GttTriggerId = modified.TriggerId;
-        run.Message = Truncate(
-            AppendNote(
-                run.Message,
-                $"Trail SL → {run.TrailStopPrice:0.##} (peak {newPeak:0.##}, −{trailPercent:0.##}%)."),
-            1000);
-        await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+        if (notes.Count > 0
+            || run.TrailPeakPrice != peakBefore
+            || run.TrailStopPrice != stopBefore
+            || liveLtp is null)
+        {
+            await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
     }
 
     private async Task<NiftyOpenAutoTradePreviewDto> FinishAsync(
@@ -761,7 +916,7 @@ public sealed class NiftyOpenAutoTradeService
         return dto;
     }
 
-    private async Task PersistRunAsync(
+    private async Task<NiftyOpenAutoTradeRun> PersistRunAsync(
         Guid userId,
         DateOnly sessionDate,
         string status,
@@ -779,7 +934,9 @@ public sealed class NiftyOpenAutoTradeService
         decimal? trailStop,
         decimal? trailPoints,
         string? message,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? targetGttId = null,
+        decimal? trailTarget = null)
     {
         var run = new NiftyOpenAutoTradeRun
         {
@@ -790,6 +947,7 @@ public sealed class NiftyOpenAutoTradeService
             OptionSide = side,
             Exchange = chosen?.Exchange,
             Tradingsymbol = chosen?.Tradingsymbol,
+            InstrumentToken = chosen?.InstrumentToken,
             Strike = chosen?.Strike,
             Expiry = chosen?.Expiry,
             Lots = lots,
@@ -799,15 +957,18 @@ public sealed class NiftyOpenAutoTradeService
             AvailableBalanceInr = available,
             OrderId = orderId,
             GttTriggerId = gttId,
+            TargetGttTriggerId = targetGttId,
             TrailActive = trailActive,
             TrailPeakPrice = trailPeak,
             TrailStopPrice = trailStop,
+            TrailTargetPrice = trailTarget,
             TrailPoints = trailPoints,
             Message = Truncate(message, 1000),
             CreatedAtUtc = DateTimeOffset.UtcNow,
         };
         await _runs.AddAsync(run, ct).ConfigureAwait(false);
         await _runs.SaveChangesAsync(ct).ConfigureAwait(false);
+        return run;
     }
 
     private static decimal ResolveAvailableCash(KiteUserMarginsDto margins)

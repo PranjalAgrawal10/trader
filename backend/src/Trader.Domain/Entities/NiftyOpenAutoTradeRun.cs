@@ -18,6 +18,10 @@ public class NiftyOpenAutoTradeRun
 
     public string? Exchange { get; set; }
     public string? Tradingsymbol { get; set; }
+
+    /// <summary>Kite instrument token for live ticker trail (numeric string).</summary>
+    public string? InstrumentToken { get; set; }
+
     public decimal? Strike { get; set; }
     public string? Expiry { get; set; }
     public int Lots { get; set; }
@@ -26,7 +30,12 @@ public class NiftyOpenAutoTradeRun
     public decimal? SpotLtp { get; set; }
     public decimal? AvailableBalanceInr { get; set; }
     public string? OrderId { get; set; }
+
+    /// <summary>Single-leg SL GTT id (trailed via PUT).</summary>
     public string? GttTriggerId { get; set; }
+
+    /// <summary>Separate single-leg +ve (target) GTT id when trail + target are both on.</summary>
+    public string? TargetGttTriggerId { get; set; }
 
     /// <summary>When true, the host polls LTP and raises the GTT stop (peak − trail points).</summary>
     public bool TrailActive { get; set; }
@@ -36,6 +45,9 @@ public class NiftyOpenAutoTradeRun
 
     /// <summary>Current GTT stop-loss trigger price.</summary>
     public decimal? TrailStopPrice { get; set; }
+
+    /// <summary>Current +ve GTT trigger price (bumped when LTP approaches it).</summary>
+    public decimal? TrailTargetPrice { get; set; }
 
     /// <summary>Configured trail gap in premium points at entry time.</summary>
     public decimal? TrailPoints { get; set; }

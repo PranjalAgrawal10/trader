@@ -146,6 +146,39 @@ public sealed class NiftyOpenAutoTradeAtmTests
     }
 
     [Fact]
+    public void TargetApproach_BumpsTargetPlus10AndStopMinus5OfLtp()
+    {
+        Assert.False(NiftyOpenAutoTradeTrail.IsApproachingTargetTrigger(100m, 110m, proximityPercent: 2m));
+        Assert.True(NiftyOpenAutoTradeTrail.IsApproachingTargetTrigger(108m, 110m, proximityPercent: 2m));
+
+        var (noTarget, noStop) = NiftyOpenAutoTradeTrail.ComputeTargetApproachBump(
+            ltp: 100m,
+            currentTarget: 110m,
+            currentStop: 95m,
+            tickSize: 0.05m);
+        Assert.Null(noTarget);
+        Assert.Null(noStop);
+
+        // LTP 108 approaches target 110 → new target 118.8 (+10%), new SL 102.6 (−5%)
+        var (target, stop) = NiftyOpenAutoTradeTrail.ComputeTargetApproachBump(
+            ltp: 108m,
+            currentTarget: 110m,
+            currentStop: 95m,
+            tickSize: 0.05m);
+        Assert.Equal(118.8m, target);
+        Assert.Equal(102.6m, stop);
+
+        // Ratchet: already higher stop/target → no change
+        var (target2, stop2) = NiftyOpenAutoTradeTrail.ComputeTargetApproachBump(
+            ltp: 108m,
+            currentTarget: 120m,
+            currentStop: 105m,
+            tickSize: 0.05m);
+        Assert.Null(target2);
+        Assert.Null(stop2);
+    }
+
+    [Fact]
     public void Trail_RaisesStop_WhenPeakAdvances()
     {
         var (peak1, stop1) = NiftyOpenAutoTradeTrail.ComputeTrailUpdate(
