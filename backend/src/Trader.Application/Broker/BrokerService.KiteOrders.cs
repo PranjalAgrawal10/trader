@@ -281,7 +281,9 @@ public sealed partial class BrokerService
         var targetPct = body.TriggerPercent > 0 ? body.TriggerPercent : 5m;
 
         var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
-        var tickSize = await ResolveKiteTickSizeAsync(exchange, tradingsymbol, apiKey, accessToken, ct).ConfigureAwait(false);
+        var tickSize = body.TickSize is > 0
+            ? body.TickSize.Value
+            : await ResolveKiteTickSizeAsync(exchange, tradingsymbol, apiKey, accessToken, ct).ConfigureAwait(false);
 
         var reference = NormalizeNullablePrice(body.ReferencePrice);
         var lastPrice = NormalizeNullablePrice(body.LastPrice);
@@ -712,6 +714,10 @@ public sealed partial class BrokerService
         string accessToken,
         CancellationToken ct)
     {
+        var cacheKey = $"Trader.KiteTickSize:v1:{exchange.Trim().ToUpperInvariant()}:{tradingsymbol.Trim().ToUpperInvariant()}";
+        if (_memoryCache.TryGetValue(cacheKey, out decimal cached) && cached > 0)
+            return cached;
+
         var fetched = await _kiteInstruments
             .FetchInstrumentRowByTradingsymbolAsync(exchange, tradingsymbol, apiKey, accessToken, ct)
             .ConfigureAwait(false);
@@ -720,6 +726,10 @@ public sealed partial class BrokerService
             && fetched.Items[0].TickSize is decimal tick
             && tick > 0)
         {
+            _memoryCache.Set(
+                cacheKey,
+                tick,
+                new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(6) });
             return tick;
         }
 

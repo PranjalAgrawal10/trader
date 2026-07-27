@@ -12,7 +12,8 @@ public static class NiftyOpenAutoTradeAtm
         decimal Strike,
         string? Expiry,
         int LotSize,
-        string InstrumentType);
+        string InstrumentType,
+        decimal? TickSize = null);
 
     public static KiteInstrumentListItemDto? ChooseSpotRow(
         IReadOnlyList<KiteInstrumentListItemDto> rows,
@@ -213,7 +214,8 @@ public static class NiftyOpenAutoTradeAtm
                 strike,
                 row.Expiry,
                 row.LotSize.Value,
-                side));
+                side,
+                row.TickSize is > 0 ? row.TickSize : null));
         }
 
         return result;

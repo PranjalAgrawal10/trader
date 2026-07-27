@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
+using Serilog.Debugging;
 using Serilog.Exceptions;
 using System.IdentityModel.Tokens.Jwt;
 using System.Threading.RateLimiting;
@@ -46,12 +47,32 @@ internal static class TraderWebApplicationBuilderExtensions
             if (esEnabled && !context.HostingEnvironment.IsEnvironment("IntegrationTesting"))
             {
                 var nodes = context.Configuration.GetSection("Serilog:Elasticsearch:Nodes").Get<string[]>()
-                    ?? [context.Configuration["Serilog:Elasticsearch:NodeUri"] ?? "http://localhost:9200"];
+                    ?? [];
+                if (nodes.Length == 0)
+                {
+                    var single = context.Configuration["Serilog:Elasticsearch:NodeUri"]
+                        ?? context.Configuration["Serilog:Elasticsearch:Nodes"];
+                    if (!string.IsNullOrWhiteSpace(single))
+                        nodes = [single];
+                    else
+                        nodes = ["http://localhost:9200"];
+                }
+
                 var uris = nodes
+                    .Select(static n => n?.Trim().Trim('"', '\''))
                     .Where(static n => !string.IsNullOrWhiteSpace(n))
-                    .Select(static n => new Uri(n.Trim()))
+                    .Select(TryCreateElasticsearchNodeUri)
+                    .Where(static u => u is not null)
+                    .Cast<Uri>()
                     .ToArray();
-                if (uris.Length > 0)
+
+                if (uris.Length == 0)
+                {
+                    SelfLog.WriteLine(
+                        "Serilog:Elasticsearch is enabled but no valid node URI was configured " +
+                        "(Serilog:Elasticsearch:Nodes / NodeUri). Skipping Elasticsearch sink.");
+                }
+                else
                 {
                     var dataset = context.Configuration["Serilog:Elasticsearch:Dataset"] ?? "trader";
                     var ns = context.Configuration["Serilog:Elasticsearch:Namespace"] ?? "api";
@@ -77,6 +98,83 @@ internal static class TraderWebApplicationBuilderExtensions
         AddRateLimiting(builder.Services);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Parses ES/OpenSearch node URLs without crashing the host. BONSAI-style
+    /// <c>https://user:pass@host</c> passwords with <c>@</c>/<c>:</c> must be URL-encoded.
+    /// </summary>
+    private static Uri? TryCreateElasticsearchNodeUri(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+
+        var s = raw.Trim().Trim('"', '\'');
+        if (Uri.TryCreate(s, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            && !string.IsNullOrWhiteSpace(uri.Host))
+        {
+            return uri;
+        }
+
+        // Retry after encoding userinfo when password contains reserved characters.
+        if (TryEncodeUserInfoInAbsoluteUri(s, out var encoded)
+            && Uri.TryCreate(encoded, UriKind.Absolute, out uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+            && !string.IsNullOrWhiteSpace(uri.Host))
+        {
+            return uri;
+        }
+
+        SelfLog.WriteLine(
+            "Ignoring invalid Serilog Elasticsearch node URI (hostname could not be parsed). " +
+            "Use an absolute http(s) URL; URL-encode user/password if they contain @ : / ? #.");
+        return null;
+    }
+
+    /// <summary>
+    /// Rewrites <c>scheme://user:pass@host</c> so user and password are percent-encoded
+    /// (handles Bonsai passwords that include <c>@</c>).
+    /// </summary>
+    private static bool TryEncodeUserInfoInAbsoluteUri(string raw, out string encoded)
+    {
+        encoded = raw;
+        var schemeSep = raw.IndexOf("://", StringComparison.Ordinal);
+        if (schemeSep < 0)
+            return false;
+
+        var afterScheme = schemeSep + 3;
+        var slash = raw.IndexOf('/', afterScheme);
+        var authorityEnd = slash < 0 ? raw.Length : slash;
+        var authority = raw[afterScheme..authorityEnd];
+        var at = authority.LastIndexOf('@');
+        if (at <= 0)
+            return false;
+
+        var userInfo = authority[..at];
+        var hostPort = authority[(at + 1)..];
+        if (string.IsNullOrWhiteSpace(hostPort))
+            return false;
+
+        var colon = userInfo.IndexOf(':');
+        string user;
+        string pass;
+        if (colon < 0)
+        {
+            user = Uri.EscapeDataString(userInfo);
+            pass = "";
+        }
+        else
+        {
+            user = Uri.EscapeDataString(userInfo[..colon]);
+            pass = Uri.EscapeDataString(userInfo[(colon + 1)..]);
+        }
+
+        var pathAndQuery = slash < 0 ? "" : raw[slash..];
+        encoded = pass.Length == 0
+            ? $"{raw[..afterScheme]}{user}@{hostPort}{pathAndQuery}"
+            : $"{raw[..afterScheme]}{user}:{pass}@{hostPort}{pathAndQuery}";
+        return true;
     }
 
     private static void AddDataProtection(WebApplicationBuilder builder)

@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Caching.Memory;
 using Trader.Application.Broker;
 
 
@@ -17,60 +18,20 @@ public sealed partial class KiteInstrumentsClient
         int? maxRows,
         CancellationToken ct = default)
     {
-        var ex = Uri.EscapeDataString(exchange);
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"instruments/{ex}");
-        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
-        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
-
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for instruments/{exchange}.";
-            return new KiteInstrumentsFetchResult(false, msg, Array.Empty<KiteInstrumentListItemDto>(), false);
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-
-        var header = await reader.ReadLineAsync(ct);
-        if (header is null)
-            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
-
-        var items = new List<KiteInstrumentListItemDto>();
+        var master = await GetOrLoadExchangeMasterAsync(exchange, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!master.Success)
+            return new KiteInstrumentsFetchResult(false, master.ErrorMessage, Array.Empty<KiteInstrumentListItemDto>(), false);
 
         if (maxRows is null)
-        {
-            while (await reader.ReadLineAsync(ct) is { } line)
-            {
-                var row = TryParseRow(line);
-                if (row is not null)
-                    items.Add(row);
-            }
-
-            return new KiteInstrumentsFetchResult(true, null, items, false);
-        }
+            return new KiteInstrumentsFetchResult(true, null, master.Items, false);
 
         if (maxRows is not int cap || cap < 1)
             return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
-        while (items.Count < cap)
-        {
-            var line = await reader.ReadLineAsync(ct);
-            if (line is null)
-                return new KiteInstrumentsFetchResult(true, null, items, false);
+        if (master.Items.Count <= cap)
+            return new KiteInstrumentsFetchResult(true, null, master.Items, false);
 
-            var row = TryParseRow(line);
-            if (row is not null)
-                items.Add(row);
-        }
-
-        var truncated = await reader.ReadLineAsync(ct) is not null;
-        return new KiteInstrumentsFetchResult(true, null, items, truncated);
+        return new KiteInstrumentsFetchResult(true, null, master.Items.Take(cap).ToList(), Truncated: true);
     }
 
     public async Task<KiteInstrumentsFetchResult> SearchExchangeInstrumentsAsync(
@@ -89,53 +50,23 @@ public sealed partial class KiteInstrumentsClient
         if (tokens.Count == 0)
             return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
-        var ex = Uri.EscapeDataString(exchange);
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"instruments/{ex}");
-        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
-        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
-
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for instruments/{exchange}.";
-            return new KiteInstrumentsFetchResult(false, msg, Array.Empty<KiteInstrumentListItemDto>(), false);
-        }
-
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-
-        var header = await reader.ReadLineAsync(ct);
-        if (header is null)
-            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
+        var master = await GetOrLoadExchangeMasterAsync(exchange, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!master.Success)
+            return new KiteInstrumentsFetchResult(false, master.ErrorMessage, Array.Empty<KiteInstrumentListItemDto>(), false);
 
         var items = new List<KiteInstrumentListItemDto>();
-        var scanTruncated = false;
-
-        while (await reader.ReadLineAsync(ct) is { } line)
+        foreach (var row in master.Items)
         {
-            var row = TryParseRow(line);
-            if (row is null)
-                continue;
-            // Kite CSV: cash equities use instrument_type EQ; indices often use EQ + segment INDICES (see Kite forum / instruments docs). Type INDEX may also appear.
             if (equityCashOnly && !IsKiteSpotSearchRow(row))
                 continue;
             if (!RowMatchesNeedle(row, tokens))
                 continue;
-
             items.Add(row);
-            if (items.Count != maxMatches)
-                continue;
-
-            scanTruncated = await reader.ReadLineAsync(ct) is not null;
-            break;
+            if (items.Count >= maxMatches)
+                return new KiteInstrumentsFetchResult(true, null, items, Truncated: true);
         }
 
-        return new KiteInstrumentsFetchResult(true, null, items, scanTruncated);
+        return new KiteInstrumentsFetchResult(true, null, items, false);
     }
 
     /// <inheritdoc />
@@ -153,48 +84,24 @@ public sealed partial class KiteInstrumentsClient
         if (tokenNeedle.Length == 0 || !tokenNeedle.All(char.IsAsciiDigit))
             return new KiteInstrumentsFetchResult(false, "A numeric instrument_token is required.", Array.Empty<KiteInstrumentListItemDto>(), false);
 
-        var exRaw = exchange.Trim();
-        var exUpper = exRaw.ToUpperInvariant();
-        var exEscaped = Uri.EscapeDataString(exRaw);
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"instruments/{exEscaped}");
-        request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
-        request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
+        var exUpper = exchange.Trim().ToUpperInvariant();
+        var master = await GetOrLoadExchangeMasterAsync(exchange, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!master.Success)
+            return new KiteInstrumentsFetchResult(false, master.ErrorMessage, Array.Empty<KiteInstrumentListItemDto>(), false);
 
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-
-        if (response.StatusCode == HttpStatusCode.NotFound)
-            return new KiteInstrumentsFetchResult(false, $"instruments/{exUpper}: not found.", Array.Empty<KiteInstrumentListItemDto>(), false);
-
-        if (!response.IsSuccessStatusCode)
+        var row = master.Items.FirstOrDefault(r =>
+            string.Equals(r.InstrumentToken, tokenNeedle, StringComparison.Ordinal)
+            && string.Equals(r.Exchange.Trim(), exUpper, StringComparison.OrdinalIgnoreCase));
+        if (row is null)
         {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            var msg = TryParseKiteMessage(body) ?? $"Kite returned {(int)response.StatusCode} for instruments/{exUpper}.";
-            return new KiteInstrumentsFetchResult(false, msg, Array.Empty<KiteInstrumentListItemDto>(), false);
+            return new KiteInstrumentsFetchResult(
+                false,
+                $"Instrument token {tokenNeedle} was not found on exchange {exUpper}.",
+                Array.Empty<KiteInstrumentListItemDto>(),
+                false);
         }
 
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-
-        if (await reader.ReadLineAsync(ct) is null)
-            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
-
-        while (await reader.ReadLineAsync(ct) is { } line)
-        {
-            var row = TryParseRow(line);
-            if (row is null || !string.Equals(row.InstrumentToken, tokenNeedle, StringComparison.Ordinal))
-                continue;
-
-            if (!string.Equals(row.Exchange.Trim(), exUpper, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            return new KiteInstrumentsFetchResult(true, null, new[] { row }, false);
-        }
-
-        return new KiteInstrumentsFetchResult(
-            false,
-            $"Instrument token {tokenNeedle} was not found on exchange {exUpper}.",
-            Array.Empty<KiteInstrumentListItemDto>(),
-            false);
+        return new KiteInstrumentsFetchResult(true, null, new[] { row }, false);
     }
 
     /// <inheritdoc />
@@ -212,9 +119,64 @@ public sealed partial class KiteInstrumentsClient
         if (symbolNeedle.Length == 0)
             return new KiteInstrumentsFetchResult(false, "tradingsymbol is required.", Array.Empty<KiteInstrumentListItemDto>(), false);
 
-        var exRaw = exchange.Trim();
-        var exUpper = exRaw.ToUpperInvariant();
-        var exEscaped = Uri.EscapeDataString(exRaw);
+        var exUpper = exchange.Trim().ToUpperInvariant();
+        var master = await GetOrLoadExchangeMasterAsync(exchange, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!master.Success)
+            return new KiteInstrumentsFetchResult(false, master.ErrorMessage, Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        var row = master.Items.FirstOrDefault(r =>
+            string.Equals(r.Tradingsymbol, symbolNeedle, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(r.Exchange.Trim(), exUpper, StringComparison.OrdinalIgnoreCase));
+        if (row is null)
+        {
+            return new KiteInstrumentsFetchResult(
+                false,
+                $"Tradingsymbol {symbolNeedle} was not found on exchange {exUpper}.",
+                Array.Empty<KiteInstrumentListItemDto>(),
+                false);
+        }
+
+        return new KiteInstrumentsFetchResult(true, null, new[] { row }, false);
+    }
+
+    /// <summary>
+    /// Downloads and caches the full Kite instruments CSV for an exchange (shared by search, browse, tick-size).
+    /// </summary>
+    private async Task<KiteInstrumentsFetchResult> GetOrLoadExchangeMasterAsync(
+        string exchange,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct)
+    {
+        var exUpper = (exchange ?? string.Empty).Trim().ToUpperInvariant();
+        if (exUpper.Length == 0)
+            return new KiteInstrumentsFetchResult(false, "exchange is required.", Array.Empty<KiteInstrumentListItemDto>(), false);
+
+        var cacheKey = $"Trader.KiteInstrumentsMaster:v1:{exUpper}";
+        if (_cache.TryGetValue(cacheKey, out object? boxed)
+            && boxed is IReadOnlyList<KiteInstrumentListItemDto> hit)
+        {
+            return new KiteInstrumentsFetchResult(true, null, hit, false);
+        }
+
+        var loaded = await DownloadExchangeMasterAsync(exUpper, apiKey, accessToken, ct).ConfigureAwait(false);
+        if (!loaded.Success)
+            return loaded;
+
+        _cache.Set(
+            cacheKey,
+            loaded.Items,
+            new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = ExchangeMasterCacheTtl });
+        return loaded;
+    }
+
+    private async Task<KiteInstrumentsFetchResult> DownloadExchangeMasterAsync(
+        string exUpper,
+        string apiKey,
+        string accessToken,
+        CancellationToken ct)
+    {
+        var exEscaped = Uri.EscapeDataString(exUpper);
         using var request = new HttpRequestMessage(HttpMethod.Get, $"instruments/{exEscaped}");
         request.Headers.TryAddWithoutValidation("X-Kite-Version", "3");
         request.Headers.TryAddWithoutValidation("Authorization", $"token {apiKey}:{accessToken}");
@@ -222,7 +184,7 @@ public sealed partial class KiteInstrumentsClient
         using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
-            return new KiteInstrumentsFetchResult(false, $"instruments/{exUpper}: not found.", Array.Empty<KiteInstrumentListItemDto>(), false);
+            return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
         if (!response.IsSuccessStatusCode)
         {
@@ -237,23 +199,15 @@ public sealed partial class KiteInstrumentsClient
         if (await reader.ReadLineAsync(ct) is null)
             return new KiteInstrumentsFetchResult(true, null, Array.Empty<KiteInstrumentListItemDto>(), false);
 
+        var items = new List<KiteInstrumentListItemDto>(capacity: 4096);
         while (await reader.ReadLineAsync(ct) is { } line)
         {
             var row = TryParseRow(line);
-            if (row is null || !string.Equals(row.Tradingsymbol, symbolNeedle, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            if (!string.Equals(row.Exchange.Trim(), exUpper, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            return new KiteInstrumentsFetchResult(true, null, new[] { row }, false);
+            if (row is not null)
+                items.Add(row);
         }
 
-        return new KiteInstrumentsFetchResult(
-            false,
-            $"Tradingsymbol {symbolNeedle} was not found on exchange {exUpper}.",
-            Array.Empty<KiteInstrumentListItemDto>(),
-            false);
+        return new KiteInstrumentsFetchResult(true, null, items, false);
     }
 
     /// <summary>

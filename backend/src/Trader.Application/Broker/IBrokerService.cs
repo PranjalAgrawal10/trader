@@ -76,6 +76,12 @@ public interface IBrokerService
         string tradingsymbol,
         CancellationToken ct = default);
 
+    /// <summary>Batch LTP lookup for <c>EXCHANGE:SYMBOL</c> keys (one Kite quote call per ~140 keys).</summary>
+    Task<IReadOnlyDictionary<string, decimal>> GetKiteLastPricesAsync(
+        Guid userId,
+        IReadOnlyList<string> exchangeTradingsymbolKeys,
+        CancellationToken ct = default);
+
     /// <summary>Kite orderbook for the day (<c>GET /orders</c>), including all interim/final statuses.</summary>
     Task<KiteOrderBookDto> GetKiteOrdersAsync(Guid userId, CancellationToken ct = default);
 

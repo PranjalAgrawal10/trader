@@ -83,6 +83,9 @@ public sealed class KiteGttCreateRequestDto
     /// <summary>Place the profit-target GTT leg (default <c>true</c>).</summary>
     public bool ProfitEnabled { get; set; } = true;
 
+    /// <summary>Optional tick size from a prior instruments lookup — skips a Kite CSV fetch when set.</summary>
+    public decimal? TickSize { get; set; }
+
     public string? Tag { get; set; }
 }
 

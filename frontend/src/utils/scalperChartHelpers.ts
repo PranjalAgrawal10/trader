@@ -164,9 +164,12 @@ export async function resolveKiteOrderExecutionPrice(
   orderId: string,
   fallbackPrice: number,
   listOrders: () => Promise<readonly ScalperKiteOrderFillRow[]>,
+  options?: { maxAttempts?: number; delayMs?: number },
 ): Promise<number> {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, 350))
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? 8)
+  const delayMs = Math.max(0, options?.delayMs ?? 350)
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => window.setTimeout(resolve, delayMs))
     try {
       const items = await listOrders()
       const row = items.find((o) => o.orderId === orderId)

@@ -167,24 +167,32 @@ public sealed partial class BrokerService
 
         if (segment == KiteInstrumentSearchSegment.Fno)
         {
-            var nfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync(
-                "NFO", apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, ct: ct);
-            var bfoTask = _kiteInstruments.SearchExchangeInstrumentsAsync(
-                "BFO", apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, ct: ct);
-            await Task.WhenAll(nfoTask, bfoTask).ConfigureAwait(false);
+            // Prefer one F&O exchange: BFO for SENSEX/BANKEX, else NFO (skips a second CSV on cold start).
+            var preferBfo = needle.Contains("SENSEX", StringComparison.OrdinalIgnoreCase)
+                || needle.Contains("BANKEX", StringComparison.OrdinalIgnoreCase);
+            var primaryEx = preferBfo ? "BFO" : "NFO";
+            var secondaryEx = preferBfo ? "NFO" : "BFO";
 
-            var nfo = await nfoTask.ConfigureAwait(false);
-            if (!nfo.Success)
-                throw new InvalidOperationException(nfo.ErrorMessage ?? "Could not search NFO instruments on Kite.");
+            var primary = await _kiteInstruments
+                .SearchExchangeInstrumentsAsync(primaryEx, apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, ct: ct)
+                .ConfigureAwait(false);
+            if (!primary.Success)
+                throw new InvalidOperationException(primary.ErrorMessage ?? $"Could not search {primaryEx} instruments on Kite.");
 
-            var combined = new List<KiteInstrumentListItemDto>(nfo.Items);
-            var scanTruncated = nfo.Truncated;
+            var combined = new List<KiteInstrumentListItemDto>(primary.Items);
+            var scanTruncated = primary.Truncated;
 
-            var bfo = await bfoTask.ConfigureAwait(false);
-            if (bfo.Success)
+            // Secondary only when primary had no hits (unusual cross-list symbols).
+            if (combined.Count == 0)
             {
-                combined.AddRange(bfo.Items);
-                scanTruncated |= bfo.Truncated;
+                var secondary = await _kiteInstruments
+                    .SearchExchangeInstrumentsAsync(secondaryEx, apiKey, accessToken, needle, KiteInstrumentSearchUnlimited, ct: ct)
+                    .ConfigureAwait(false);
+                if (secondary.Success)
+                {
+                    combined.AddRange(secondary.Items);
+                    scanTruncated |= secondary.Truncated;
+                }
             }
 
             return new KiteInstrumentSearchDto(combined, scanTruncated);

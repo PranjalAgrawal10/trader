@@ -83,6 +83,42 @@ public sealed partial class BrokerService
             new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = LiveQuoteCacheTtl });
         return dto;
     }
+
+    public async Task<IReadOnlyDictionary<string, decimal>> GetKiteLastPricesAsync(
+        Guid userId,
+        IReadOnlyList<string> exchangeTradingsymbolKeys,
+        CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        if (exchangeTradingsymbolKeys is null || exchangeTradingsymbolKeys.Count == 0)
+            return result;
+
+        var keys = exchangeTradingsymbolKeys
+            .Select(static k => (k ?? string.Empty).Trim().ToUpperInvariant())
+            .Where(static k => k.Contains(':', StringComparison.Ordinal))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (keys.Length == 0)
+            return result;
+
+        var (apiKey, accessToken) = await RequireKiteInstrumentSessionAsync(userId, ct).ConfigureAwait(false);
+        for (var off = 0; off < keys.Length; off += KiteQuoteOhlcBatchSizeBroker)
+        {
+            var batchCount = Math.Min(KiteQuoteOhlcBatchSizeBroker, keys.Length - off);
+            var slice = keys.Skip(off).Take(batchCount).ToArray();
+            var fetch = await _kiteInstruments.FetchQuoteOhlcAsync(slice, apiKey, accessToken, ct).ConfigureAwait(false);
+            if (!fetch.Success || fetch.ByKey is null)
+                continue;
+            foreach (var kv in fetch.ByKey)
+            {
+                if (kv.Value.LastPrice > 0)
+                    result[kv.Key] = kv.Value.LastPrice;
+            }
+        }
+
+        return result;
+    }
+
     private async Task<KiteHistoricalCandlesDto> GetOrComposeChartHistoricalCandlesCachedAsync(
         Guid userId,
         string instrumentToken,

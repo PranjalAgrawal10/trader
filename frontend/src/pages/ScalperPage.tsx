@@ -893,18 +893,28 @@ export function ScalperPage() {
         ]
 
         let executionPrice = submitReferencePrice
+        // Place GTT immediately off submit LTP/limit — do not wait on fill polling (can add ~2–3s).
+        const gttAnyEnabled = isGttLossEnabled || isGttProfitEnabled
+        const gttReferencePrice =
+          intent !== 'EXIT' && gttAnyEnabled && executionPrice != null && Number.isFinite(executionPrice)
+            ? executionPrice
+            : null
+
         if (intent !== 'EXIT' && executionPrice != null && Number.isFinite(executionPrice)) {
-          executionPrice = await resolveKiteOrderExecutionPrice(
+          // Best-effort fill refine for UI only (short poll); never blocks GTT.
+          void resolveKiteOrderExecutionPrice(
             placeRes.data.orderId,
             executionPrice,
             async () => {
               const { data } = await api.get<KiteOrderBookResponse>('/broker/kite/orders')
               return data.items ?? []
             },
-          )
-          if (effectiveOrderType === 'MARKET') {
-            setTradePrice(executionPrice.toFixed(2))
-          }
+            { maxAttempts: 3, delayMs: 200 },
+          ).then((filled) => {
+            if (effectiveOrderType === 'MARKET' && filled != null && Number.isFinite(filled)) {
+              setTradePrice(filled.toFixed(2))
+            }
+          })
         }
 
         if (isSafeMode && intent !== 'EXIT' && (executionPrice == null || !Number.isFinite(executionPrice))) {
@@ -939,9 +949,8 @@ export function ScalperPage() {
 
         const stopLoss = computedStopLoss ?? parsePositiveNumber(tradeStopLossPrice)
         const targetTrigger = computedTrigger ?? parsePositiveNumber(tradeTriggerPrice)
-        const gttAnyEnabled = isGttLossEnabled || isGttProfitEnabled
         if (intent !== 'EXIT' && gttAnyEnabled) {
-          if (executionPrice == null || !Number.isFinite(executionPrice)) {
+          if (gttReferencePrice == null || !Number.isFinite(gttReferencePrice)) {
             notes.push('GTT skipped: need entry/LTP for reference price.')
           } else {
             const gttRes = await api.post<KiteGttActionResultResponse>('/broker/kite/gtt', {
@@ -950,8 +959,8 @@ export function ScalperPage() {
               entryTransactionType: transactionType,
               quantity,
               product: resolvedProduct,
-              referencePrice: executionPrice,
-              lastPrice: liveQuoteRef.current.lastPrice ?? executionPrice,
+              referencePrice: gttReferencePrice,
+              lastPrice: liveQuoteRef.current.lastPrice ?? gttReferencePrice,
               stopLossPrice: stopLoss,
               triggerPrice: targetTrigger,
               stopLossPercent: DEFAULT_GTT_STOP_LOSS_PCT,

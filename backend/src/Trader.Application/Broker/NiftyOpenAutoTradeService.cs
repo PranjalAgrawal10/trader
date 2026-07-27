@@ -340,9 +340,13 @@ public sealed class NiftyOpenAutoTradeService
                     underlying.Key, side, maxLots, null, ct).ConfigureAwait(false);
             }
 
-            var optionSearch = await _broker
-                .SearchKiteInstrumentsAsync(userId, underlying.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct)
-                .ConfigureAwait(false);
+            // Overlap F&O master search with margins while spot LTP is known.
+            var optionSearchTask = _broker.SearchKiteInstrumentsAsync(
+                userId, underlying.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct);
+            var marginsTask = _broker.GetKiteUserMarginsAsync(userId, ct);
+            await Task.WhenAll(optionSearchTask, marginsTask).ConfigureAwait(false);
+
+            var optionSearch = await optionSearchTask.ConfigureAwait(false);
             var optionRows = NiftyOpenAutoTradeAtm.FilterOptionsForUnderlying(optionSearch.Items, underlying);
             var expiry = NiftyOpenAutoTradeAtm.ResolveExpiryUtc(
                 optionRows,
@@ -368,7 +372,7 @@ public sealed class NiftyOpenAutoTradeService
                     underlying.Key, side, maxLots, spotQuote.LastPrice, ct).ConfigureAwait(false);
             }
 
-            var margins = await _broker.GetKiteUserMarginsAsync(userId, ct).ConfigureAwait(false);
+            var margins = await marginsTask.ConfigureAwait(false);
             var available = ResolveAvailableCash(margins);
             if (available <= 0)
             {
@@ -381,17 +385,22 @@ public sealed class NiftyOpenAutoTradeService
             decimal chosenLtp = 0;
             var chosenLots = 0;
 
+            // Batch LTP for near-ATM candidates (one quote call instead of up to 7 sequential).
+            var quoteKeys = candidates
+                .Select(c => $"{c.Exchange.Trim().ToUpperInvariant()}:{c.Tradingsymbol.Trim()}")
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var ltpByKey = await _broker.GetKiteLastPricesAsync(userId, quoteKeys, ct).ConfigureAwait(false);
+
             foreach (var candidate in candidates)
             {
-                var quote = await _broker
-                    .GetKiteInstrumentLiveQuoteAsync(userId, candidate.Exchange, candidate.Tradingsymbol, ct)
-                    .ConfigureAwait(false);
-                if (quote.LastPrice <= 0)
+                var key = $"{candidate.Exchange.Trim().ToUpperInvariant()}:{candidate.Tradingsymbol.Trim()}";
+                if (!ltpByKey.TryGetValue(key, out var ltp) || ltp <= 0)
                     continue;
 
                 var lots = NiftyOpenAutoTradeAtm.ComputeAffordableLots(
                     available,
-                    quote.LastPrice,
+                    ltp,
                     candidate.LotSize,
                     maxLots,
                     opts.BalanceUtilizationFraction);
@@ -399,7 +408,7 @@ public sealed class NiftyOpenAutoTradeService
                     continue;
 
                 chosen = candidate;
-                chosenLtp = quote.LastPrice;
+                chosenLtp = ltp;
                 chosenLots = lots;
                 break;
             }
@@ -499,6 +508,7 @@ public sealed class NiftyOpenAutoTradeService
                                 StopLossPercent = stopLossPercent,
                                 StopLossEnabled = true,
                                 ProfitEnabled = false,
+                                TickSize = chosen.TickSize,
                                 Tag = opts.OrderTag,
                             },
                             ct).ConfigureAwait(false);
@@ -521,6 +531,7 @@ public sealed class NiftyOpenAutoTradeService
                                     TriggerPercent = targetPercent,
                                     StopLossEnabled = false,
                                     ProfitEnabled = true,
+                                    TickSize = chosen.TickSize,
                                     Tag = opts.OrderTag,
                                 },
                                 ct).ConfigureAwait(false);
@@ -555,6 +566,7 @@ public sealed class NiftyOpenAutoTradeService
                                 TriggerPercent = targetPercent,
                                 StopLossEnabled = stopLossEnabled,
                                 ProfitEnabled = targetEnabled,
+                                TickSize = chosen.TickSize,
                                 Tag = opts.OrderTag,
                             },
                             ct).ConfigureAwait(false);
