@@ -16,7 +16,7 @@ public sealed class NiftyOpenAutoTradeAtmTests
     }
 
     [Fact]
-    public void BuildStrikeCandidates_PrefersAtmThenDistance()
+    public void BuildStrikeCandidates_CePicksAboveAtm()
     {
         var expiry = new DateTimeOffset(2026, 7, 16, 0, 0, 0, TimeSpan.Zero).ToString("O");
         var rows = new List<KiteInstrumentListItemDto>
@@ -24,7 +24,8 @@ public sealed class NiftyOpenAutoTradeAtmTests
             Row("1", "NIFTY25JUL24500CE", 24500m, expiry, "CE"),
             Row("2", "NIFTY25JUL24600CE", 24600m, expiry, "CE"),
             Row("3", "NIFTY25JUL24700CE", 24700m, expiry, "CE"),
-            Row("4", "NIFTY25JUL24600PE", 24600m, expiry, "PE"),
+            Row("4", "NIFTY25JUL24800CE", 24800m, expiry, "CE"),
+            Row("5", "NIFTY25JUL24600PE", 24600m, expiry, "PE"),
         };
 
         var ce = NiftyOpenAutoTradeAtm.BuildStrikeCandidates(
@@ -34,9 +35,38 @@ public sealed class NiftyOpenAutoTradeAtmTests
             optionSide: "CE",
             maxStepsAwayFromAtm: 2);
 
-        Assert.Equal(3, ce.Count);
-        Assert.Equal(24600m, ce[0].Strike);
+        Assert.Equal(2, ce.Count);
+        Assert.Equal(24700m, ce[0].Strike);
+        Assert.Equal(24800m, ce[1].Strike);
         Assert.All(ce, c => Assert.Equal("CE", c.InstrumentType));
+    }
+
+    [Fact]
+    public void BuildStrikeCandidates_PePicksThreeBelowAtm()
+    {
+        var expiry = new DateTimeOffset(2026, 7, 16, 0, 0, 0, TimeSpan.Zero).ToString("O");
+        var rows = new List<KiteInstrumentListItemDto>
+        {
+            Row("1", "NIFTY25JUL24200PE", 24200m, expiry, "PE"),
+            Row("2", "NIFTY25JUL24300PE", 24300m, expiry, "PE"),
+            Row("3", "NIFTY25JUL24400PE", 24400m, expiry, "PE"),
+            Row("4", "NIFTY25JUL24500PE", 24500m, expiry, "PE"),
+            Row("5", "NIFTY25JUL24600PE", 24600m, expiry, "PE"),
+            Row("6", "NIFTY25JUL24700PE", 24700m, expiry, "PE"),
+        };
+
+        // ATM = 24600 → 3 below = 24300, then further OTM fallback 24200
+        var pe = NiftyOpenAutoTradeAtm.BuildStrikeCandidates(
+            rows,
+            DateTimeOffset.Parse(expiry),
+            spotLtp: 24610m,
+            optionSide: "PE",
+            maxStepsAwayFromAtm: 2);
+
+        Assert.Equal(2, pe.Count);
+        Assert.Equal(24300m, pe[0].Strike);
+        Assert.Equal(24200m, pe[1].Strike);
+        Assert.All(pe, c => Assert.Equal("PE", c.InstrumentType));
     }
 
     [Fact]

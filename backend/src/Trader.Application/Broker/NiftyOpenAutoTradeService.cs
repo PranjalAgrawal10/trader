@@ -368,7 +368,10 @@ public sealed class NiftyOpenAutoTradeService
             if (candidates.Count == 0)
             {
                 return await FinishAsync(
-                    userId, dryRun, claimedSessionDate, false, $"No {side} contracts near ATM.",
+                    userId, dryRun, claimedSessionDate, false,
+                    side == "PE"
+                        ? $"No {side} contracts 3 strikes below ATM."
+                        : $"No {side} contracts above ATM.",
                     underlying.Key, side, maxLots, spotQuote.LastPrice, ct).ConfigureAwait(false);
             }
 

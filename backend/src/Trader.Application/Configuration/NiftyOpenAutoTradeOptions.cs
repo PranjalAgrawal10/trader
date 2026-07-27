@@ -40,6 +40,9 @@ public sealed class NiftyOpenAutoTradeOptions
     public decimal BalanceUtilizationFraction { get; set; } = 1m;
 
     /// <summary>How many listed strikes above/below ATM to try when 1 ATM lot is unaffordable.</summary>
+    /// <summary>
+    /// Max OTM candidates after the preferred strike (CE = ATM+1, PE = ATM−3).
+    /// </summary>
     public int MaxStrikeStepsAwayFromAtm { get; set; } = 3;
 
     public string Product { get; set; } = "MIS";

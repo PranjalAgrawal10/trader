@@ -150,6 +150,10 @@ public static class NiftyOpenAutoTradeAtm
             .ToList();
     }
 
+    /// <summary>
+    /// CE: first strike above ATM, then further OTM up.
+    /// PE: strike 3 steps below ATM, then further OTM down.
+    /// </summary>
     public static IReadOnlyList<OptionCandidate> BuildStrikeCandidates(
         IReadOnlyList<KiteInstrumentListItemDto> options,
         DateTimeOffset expiryUtc,
@@ -180,16 +184,14 @@ public static class NiftyOpenAutoTradeAtm
 
         var atm = strikes.Aggregate((best, s) => Math.Abs(s - spotLtp) < Math.Abs(best - spotLtp) ? s : best);
         var atmIdx = strikes.FindIndex(s => s == atm);
-        var steps = Math.Max(0, maxStepsAwayFromAtm);
-        var from = Math.Max(0, atmIdx - steps);
-        var to = Math.Min(strikes.Count - 1, atmIdx + steps);
+        if (atmIdx < 0)
+            return Array.Empty<OptionCandidate>();
 
-        var orderedStrikes = strikes
-            .Skip(from)
-            .Take(to - from + 1)
-            .OrderBy(s => Math.Abs(s - atm))
-            .ThenBy(s => s)
-            .ToList();
+        // CE = 1 above ATM; PE = 3 below ATM. Extra steps are OTM-only affordability fallbacks.
+        var fallbackSteps = Math.Max(1, maxStepsAwayFromAtm);
+        var orderedStrikes = side == "CE"
+            ? BuildCeStrikesAboveAtm(strikes, atmIdx, fallbackSteps)
+            : BuildPeStrikesBelowAtm(strikes, atmIdx, peStepsBelowAtm: 3, fallbackSteps);
 
         var result = new List<OptionCandidate>();
         foreach (var strike in orderedStrikes)
@@ -219,6 +221,44 @@ public static class NiftyOpenAutoTradeAtm
         }
 
         return result;
+    }
+
+    /// <summary>OTM calls: ATM+1 first, then ATM+2…</summary>
+    private static List<decimal> BuildCeStrikesAboveAtm(
+        IReadOnlyList<decimal> strikes,
+        int atmIdx,
+        int maxCandidates)
+    {
+        var ordered = new List<decimal>();
+        for (var i = 1; i <= maxCandidates; i++)
+        {
+            var idx = atmIdx + i;
+            if (idx >= strikes.Count)
+                break;
+            ordered.Add(strikes[idx]);
+        }
+
+        return ordered;
+    }
+
+    /// <summary>OTM puts: ATM−N first, then further down.</summary>
+    private static List<decimal> BuildPeStrikesBelowAtm(
+        IReadOnlyList<decimal> strikes,
+        int atmIdx,
+        int peStepsBelowAtm,
+        int maxCandidates)
+    {
+        var preferredIdx = atmIdx - Math.Max(1, peStepsBelowAtm);
+        if (preferredIdx < 0)
+            preferredIdx = 0;
+        if (preferredIdx >= atmIdx)
+            return new List<decimal>();
+
+        var ordered = new List<decimal>();
+        for (var idx = preferredIdx; idx >= 0 && ordered.Count < maxCandidates; idx--)
+            ordered.Add(strikes[idx]);
+
+        return ordered;
     }
 
     /// <summary>Whole lots affordable from cash; capped by <paramref name="maxLots"/>.</summary>
