@@ -340,13 +340,11 @@ public sealed class NiftyOpenAutoTradeService
                     underlying.Key, side, maxLots, null, ct).ConfigureAwait(false);
             }
 
-            // Overlap F&O master search with margins while spot LTP is known.
-            var optionSearchTask = _broker.SearchKiteInstrumentsAsync(
-                userId, underlying.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct);
-            var marginsTask = _broker.GetKiteUserMarginsAsync(userId, ct);
-            await Task.WhenAll(optionSearchTask, marginsTask).ConfigureAwait(false);
-
-            var optionSearch = await optionSearchTask.ConfigureAwait(false);
+            // Sequential: SearchKiteInstruments + GetKiteUserMargins both touch the scoped DbContext
+            // (RequireKiteInstrumentSessionAsync). Parallel WhenAll caused concurrent DbContext use
+            // and failed Opening ATM at market open.
+            var optionSearch = await _broker.SearchKiteInstrumentsAsync(
+                userId, underlying.OptionSearchQuery, KiteInstrumentSearchSegment.Fno, ct).ConfigureAwait(false);
             var optionRows = NiftyOpenAutoTradeAtm.FilterOptionsForUnderlying(optionSearch.Items, underlying);
             var expiry = NiftyOpenAutoTradeAtm.ResolveExpiryUtc(
                 optionRows,
@@ -375,7 +373,7 @@ public sealed class NiftyOpenAutoTradeService
                     underlying.Key, side, maxLots, spotQuote.LastPrice, ct).ConfigureAwait(false);
             }
 
-            var margins = await marginsTask.ConfigureAwait(false);
+            var margins = await _broker.GetKiteUserMarginsAsync(userId, ct).ConfigureAwait(false);
             var available = ResolveAvailableCash(margins);
             if (available <= 0)
             {

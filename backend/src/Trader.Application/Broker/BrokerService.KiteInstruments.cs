@@ -139,13 +139,10 @@ public sealed partial class BrokerService
 
         if (segment == KiteInstrumentSearchSegment.All)
         {
-            var fTask = SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Fno, ct);
-            var mTask = SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Mcx, ct);
-            var sTask = SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Spot, ct);
-            await Task.WhenAll(fTask, mTask, sTask).ConfigureAwait(false);
-            var f = await fTask.ConfigureAwait(false);
-            var m = await mTask.ConfigureAwait(false);
-            var s = await sTask.ConfigureAwait(false);
+            // Sequential: each segment path calls RequireKiteInstrumentSessionAsync on the same scoped DbContext.
+            var f = await SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Fno, ct).ConfigureAwait(false);
+            var m = await SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Mcx, ct).ConfigureAwait(false);
+            var s = await SearchKiteInstrumentsAsync(userId, query, KiteInstrumentSearchSegment.Spot, ct).ConfigureAwait(false);
 
             var scanTruncated = f.ScanTruncated || m.ScanTruncated || s.ScanTruncated;
             var byKey = new Dictionary<string, KiteInstrumentListItemDto>(StringComparer.Ordinal);
